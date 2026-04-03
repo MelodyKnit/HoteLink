@@ -1,0 +1,42 @@
+{
+  "name": "hotelink-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:user\" \"npm run dev:admin\"",
+    "dev:user": "npm run dev --workspace @hotelink/user-web",
+    "dev:admin": "npm run dev --workspace @hotelink/admin-web",
+    "build": "npm run build:user && npm run build:admin",
+    "build:user": "npm run build --workspace @hotelink/user-web",
+    "build:admin": "npm run build --workspace @hotelink/admin-web",
+    "type-check": "npm run type-check:user && npm run type-check:admin",
+    "type-check:user": "npm run type-check --workspace @hotelink/user-web",
+    "type-check:admin": "npm run type-check --workspace @hotelink/admin-web"
+  },
+  "dependencies": {
+    "@vueuse/core": "^13.1.0",
+    "axios": "^1.8.4",
+    "echarts": "^5.6.0",
+    "pinia": "^3.0.2",
+    "vue": "^3.5.13",
+    "vue-echarts": "^7.0.3",
+    "vue-router": "^4.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "autoprefixer": "^10.4.20",
+    "concurrently": "^9.1.2",
+    "less": "^4.2.2",
+    "postcss": "^8.5.3",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.8.2",
+    "vite": "^6.2.2",
+    "vitest": "^3.0.9",
+    "vue-tsc": "^2.2.8"
+  }
+}

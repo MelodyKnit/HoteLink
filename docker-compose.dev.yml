@@ -1,0 +1,112 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: hotelink-dev-mysql
+    restart: unless-stopped
+    command:
+      - --default-authentication-plugin=mysql_native_password
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_dev_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - hotelink-dev-net
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: hotelink-dev-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_dev_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - hotelink-dev-net
+
+  backend-dev:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.dev
+    container_name: hotelink-backend-dev
+    restart: unless-stopped
+    env_file:
+      - .env.docker.dev
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    working_dir: /app
+    volumes:
+      - ./backend:/app
+      - poetry_cache:/root/.cache/pypoetry
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    command: ["/bin/sh", "/entrypoint.dev.sh"]
+    networks:
+      - hotelink-dev-net
+
+  user-web-dev:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile.dev
+    container_name: hotelink-user-web-dev
+    restart: unless-stopped
+    working_dir: /workspace
+    volumes:
+      - ./frontend:/workspace
+      - frontend_node_modules:/workspace/node_modules
+    ports:
+      - "${USER_WEB_PORT:-5173}:5173"
+    command: >
+      sh -c "npm install &&
+      npm run dev:user -- --host 0.0.0.0 --port 5173"
+    networks:
+      - hotelink-dev-net
+
+  admin-web-dev:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile.dev
+    container_name: hotelink-admin-web-dev
+    restart: unless-stopped
+    working_dir: /workspace
+    volumes:
+      - ./frontend:/workspace
+      - frontend_node_modules:/workspace/node_modules
+    ports:
+      - "${ADMIN_WEB_PORT:-5174}:5174"
+    command: >
+      sh -c "npm install &&
+      npm run dev:admin -- --host 0.0.0.0 --port 5174"
+    networks:
+      - hotelink-dev-net
+
+volumes:
+  mysql_dev_data:
+  redis_dev_data:
+  poetry_cache:
+  frontend_node_modules:
+
+networks:
+  hotelink-dev-net:
+    driver: bridge

@@ -1,0 +1,126 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: hotelink-mysql
+    restart: unless-stopped
+    command:
+      - --default-authentication-plugin=mysql_native_password
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - hotelink-net
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: hotelink-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - hotelink-net
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: hotelink-backend
+    restart: unless-stopped
+    env_file:
+      - .env.docker
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - static_data:/app/staticfiles
+      - media_data:/app/media
+    networks:
+      - hotelink-net
+
+  celery-worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: hotelink-celery-worker
+    restart: unless-stopped
+    env_file:
+      - .env.docker
+    environment:
+      CONTAINER_ROLE: worker
+      RUN_MIGRATIONS: 0
+      RUN_COLLECTSTATIC: 0
+    command: celery -A ${CELERY_APP_MODULE} worker --loglevel=info
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - hotelink-net
+
+  celery-beat:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: hotelink-celery-beat
+    restart: unless-stopped
+    env_file:
+      - .env.docker
+    environment:
+      CONTAINER_ROLE: beat
+      RUN_MIGRATIONS: 0
+      RUN_COLLECTSTATIC: 0
+    command: celery -A ${CELERY_APP_MODULE} beat --loglevel=info
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - hotelink-net
+
+  web:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: hotelink-web
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+    volumes:
+      - static_data:/var/www/static:ro
+      - media_data:/var/www/media:ro
+    networks:
+      - hotelink-net
+
+volumes:
+  mysql_data:
+  redis_data:
+  static_data:
+  media_data:
+
+networks:
+  hotelink-net:
+    driver: bridge

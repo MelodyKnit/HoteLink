@@ -1,0 +1,34 @@
+[project]
+name = "hotelink"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "Your Name",email = "you@example.com"}
+]
+license = "ITM"
+readme = "README.md"
+requires-python = ">=3.12,<4.0"
+dependencies = [
+    "django (>=6.0.3,<7.0.0)",
+    "djangorestframework (>=3.17.1,<4.0.0)",
+    "djangorestframework-simplejwt (>=5.5.1,<6.0.0)",
+    "django-cors-headers (>=4.9.0,<5.0.0)",
+    "django-filter (>=25.2,<26.0)",
+    "redis (>=7.4.0,<8.0.0)",
+    "celery (>=5.6.3,<6.0.0)",
+    "django-celery-beat (>=2.9.0,<3.0.0)",
+    "drf-spectacular (>=0.29.0,<0.30.0)",
+    "pymysql (>=1.1.2,<2.0.0)",
+    "gunicorn (>=25.3.0,<26.0.0)",
+    "python-dotenv (>=1.2.2,<2.0.0)",
+    "pillow (>=12.2.0,<13.0.0)"
+]
+
+[[tool.poetry.source]]
+name = "aliyun"
+url = "https://mirrors.aliyun.com/pypi/simple/"
+priority = "primary"
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
