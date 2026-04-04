@@ -1,15 +1,86 @@
-import { createRouter, createWebHistory } from "vue-router";
-import DashboardView from "../views/DashboardView.vue";
+import { createRouter, createWebHistory } from 'vue-router'
+import { getToken, systemApi } from '@hotelink/api'
+import AdminLayout from '../layouts/AdminLayout.vue'
+
+let systemInitialized: boolean | null = null
+
+async function checkInitialized(): Promise<boolean> {
+  if (systemInitialized !== null) return systemInitialized
+  try {
+    const res = await systemApi.initCheck()
+    systemInitialized = res.code === 0 && res.data?.initialized === true
+  } catch {
+    systemInitialized = true
+  }
+  return systemInitialized
+}
+
+export function resetInitCache() {
+  systemInitialized = null
+}
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
     {
-      path: "/",
-      name: "dashboard",
-      component: DashboardView
-    }
-  ]
-});
+      path: '/admin/setup',
+      name: 'setup',
+      component: () => import('../views/InitSetupView.vue'),
+      meta: { setup: true },
+    },
+    {
+      path: '/admin/login',
+      name: 'login',
+      component: () => import('../views/LoginView.vue'),
+      meta: { guest: true },
+    },
+    {
+      path: '/admin',
+      component: AdminLayout,
+      children: [
+        { path: '', name: 'dashboard', component: () => import('../views/DashboardView.vue') },
+        { path: 'hotels', name: 'hotels', component: () => import('../views/HotelListView.vue') },
+        { path: 'room-types', name: 'room-types', component: () => import('../views/RoomTypeListView.vue') },
+        { path: 'inventory', name: 'inventory', component: () => import('../views/InventoryView.vue') },
+        { path: 'orders', name: 'orders', component: () => import('../views/OrderListView.vue') },
+        { path: 'orders/:id', name: 'order-detail', component: () => import('../views/OrderDetailView.vue') },
+        { path: 'users', name: 'users', component: () => import('../views/UserListView.vue') },
+        { path: 'reviews', name: 'reviews', component: () => import('../views/ReviewListView.vue') },
+        { path: 'reports', name: 'reports', component: () => import('../views/ReportView.vue') },
+        { path: 'employees', name: 'employees', component: () => import('../views/EmployeeListView.vue') },
+        { path: 'settings', name: 'settings', component: () => import('../views/SettingsView.vue') },
+        { path: 'ai', name: 'ai', component: () => import('../views/AIAssistantView.vue') },
+        { path: 'ai-settings', name: 'ai-settings', component: () => import('../views/AISettingsView.vue') },
+      ],
+    },
+    {
+      path: '/:pathMatch(.*)*',
+      redirect: '/admin',
+    },
+  ],
+})
 
-export default router;
+router.beforeEach(async (to) => {
+  const initialized = await checkInitialized()
+
+  // 系统未初始化：只允许访问 setup 页面
+  if (!initialized) {
+    if (!to.meta.setup) return { name: 'setup' }
+    return
+  }
+
+  // 系统已初始化：不允许再访问 setup 页面
+  if (to.meta.setup) {
+    return { name: 'login' }
+  }
+
+  const token = getToken()
+  if (!to.meta.guest && !token) {
+    return { name: 'login', query: { redirect: to.fullPath } }
+  }
+  if (to.meta.guest && token) {
+    return { name: 'dashboard' }
+  }
+})
+
+export default router

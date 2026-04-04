@@ -101,6 +101,9 @@ services:
     environment:
       CHOKIDAR_USEPOLLING: "true"
       CHOKIDAR_INTERVAL: "300"
+      VITE_API_TARGET: "http://host.docker.internal:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./frontend:/workspace
       - frontend_node_modules:/workspace/node_modules
@@ -122,6 +125,9 @@ services:
     environment:
       CHOKIDAR_USEPOLLING: "true"
       CHOKIDAR_INTERVAL: "300"
+      VITE_API_TARGET: "http://host.docker.internal:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./frontend:/workspace
       - frontend_node_modules:/workspace/node_modules

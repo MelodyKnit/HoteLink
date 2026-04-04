@@ -2,12 +2,20 @@ import { createApp } from "vue";
 import { createPinia } from "pinia";
 import App from "./App.vue";
 import router from "./router";
+import { useAuthStore } from "@hotelink/store";
 import "../../../packages/styles/tailwind.css";
 import "../../../packages/styles/theme.less";
 import "./styles/index.less";
 
 const app = createApp(App);
+const pinia = createPinia();
 
-app.use(createPinia());
+app.use(pinia);
 app.use(router);
-app.mount("#app");
+
+const auth = useAuthStore();
+if (auth.isLoggedIn) {
+  auth.fetchMe().finally(() => app.mount("#app"));
+} else {
+  app.mount("#app");
+}

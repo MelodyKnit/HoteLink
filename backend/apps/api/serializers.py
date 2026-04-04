@@ -199,6 +199,17 @@ class RegisterSerializer(serializers.Serializer):
         return attrs
 
 
+class InitSetupSerializer(serializers.Serializer):
+    username = serializers.CharField(max_length=150, min_length=3)
+    password = serializers.CharField(write_only=True, min_length=6)
+    confirm_password = serializers.CharField(write_only=True)
+
+    def validate(self, attrs):
+        if attrs["password"] != attrs["confirm_password"]:
+            raise serializers.ValidationError({"confirm_password": "两次输入的密码不一致"})
+        return attrs
+
+
 class LoginSerializer(serializers.Serializer):
     username = serializers.CharField(max_length=150)
     password = serializers.CharField(write_only=True)

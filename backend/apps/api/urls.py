@@ -5,6 +5,8 @@ from apps.api.views import (
     AdminAISettingsView,
     AdminAIReplySuggestionView,
     AdminAIReviewSummaryView,
+    SystemInitCheckView,
+    SystemInitSetupView,
     AdminDashboardChartsView,
     AdminDashboardOverviewView,
     AdminEmployeesView,
@@ -60,6 +62,8 @@ from apps.api.views import (
 
 urlpatterns = [
     path("", ApiRootView.as_view(), name="api-root"),
+    path("system/init-check", SystemInitCheckView.as_view(), name="system-init-check"),
+    path("system/init-setup", SystemInitSetupView.as_view(), name="system-init-setup"),
     path("common/upload", CommonUploadView.as_view(), name="common-upload"),
     path("common/cities", CommonCitiesView.as_view(), name="common-cities"),
     path("common/dicts", CommonDictsView.as_view(), name="common-dicts"),

@@ -24,6 +24,7 @@ from apps.api.serializers import (
     AIReviewSummarySerializer,
     AISettingsUpdateSerializer,
     BookingOrderSerializer,
+    InitSetupSerializer,
     ChangeUserStatusSerializer,
     CheckInSerializer,
     CheckOutSerializer,
@@ -191,6 +192,58 @@ class UserRegisterView(APIView):
             mobile=data["mobile"],
         )
         return api_response(data={"user_id": user.id, "username": user.username})
+
+
+class SystemInitCheckView(APIView):
+    """检查系统是否已完成初始化（是否存在管理员账号）"""
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        has_admin = UserProfile.objects.filter(
+            role__in=[UserProfile.ROLE_SYSTEM_ADMIN, UserProfile.ROLE_HOTEL_ADMIN]
+        ).exists()
+        return api_response(data={"initialized": has_admin})
+
+
+class SystemInitSetupView(APIView):
+    """首次初始化：创建管理员账号（仅当系统中无管理员时可用）"""
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        has_admin = UserProfile.objects.filter(
+            role__in=[UserProfile.ROLE_SYSTEM_ADMIN, UserProfile.ROLE_HOTEL_ADMIN]
+        ).exists()
+        if has_admin:
+            return api_response(code=4030, message="系统已初始化，无法重复创建", data=None, status_code=403)
+
+        serializer = InitSetupSerializer(data=request.data)
+        if not serializer.is_valid():
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
+
+        data = serializer.validated_data
+        if User.objects.filter(username=data["username"]).exists():
+            return api_response(code=4090, message="用户名已存在", data=None, status_code=409)
+
+        user = User.objects.create_user(username=data["username"], password=data["password"])
+        user.is_staff = True
+        user.save(update_fields=["is_staff"])
+        UserProfile.objects.create(
+            user=user,
+            nickname=data["username"],
+            mobile="",
+            role=UserProfile.ROLE_SYSTEM_ADMIN,
+            status=UserProfile.STATUS_ACTIVE,
+        )
+
+        tokens = build_tokens_for_user(user)
+        return api_response(data={
+            **tokens,
+            "user": {
+                "id": user.id,
+                "username": user.username,
+                "role": UserProfile.ROLE_SYSTEM_ADMIN,
+            },
+        })
 
 
 class BaseLoginView(APIView):
