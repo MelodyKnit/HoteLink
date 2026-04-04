@@ -10,5 +10,6 @@ if [ ! -f "/app/manage.py" ]; then
   tail -f /dev/null
 fi
 
+python manage.py check
 python manage.py migrate --noinput || true
 exec python manage.py runserver 0.0.0.0:8000

@@ -255,6 +255,36 @@ npm run dev
 
 ## Docker 生产部署
 
+### 一键 Docker 启动
+
+项目根目录已经提供统一脚本：
+
+- [`scripts/docker.ps1`](D:\Nakamoto\Documents\Codes\Python\HoteLink\scripts\docker.ps1)
+- [`scripts/docker.sh`](D:\Nakamoto\Documents\Codes\Python\HoteLink\scripts\docker.sh)
+
+推荐直接使用一条命令启动：
+
+PowerShell：
+
+```powershell
+.\scripts\docker.ps1 dev up
+.\scripts\docker.ps1 prod up
+```
+
+macOS / Linux / Git Bash：
+
+```bash
+sh ./scripts/docker.sh dev up
+sh ./scripts/docker.sh prod up
+```
+
+说明：
+
+- `dev up` 一键启动开发环境
+- `prod up` 一键启动生产环境
+- 如果 `.env.docker.dev` 或 `.env.docker` 不存在，脚本会自动根据示例文件创建
+- 开发环境后端检查可直接运行 `.\scripts\docker.ps1 dev check` 或 `sh ./scripts/docker.sh dev check`
+
 项目已经补充了生产部署所需的 Docker 文件：
 
 - [`docker-compose.prod.yml`](D:\Nakamoto\Documents\Codes\Python\HoteLink\docker-compose.prod.yml)
@@ -282,18 +312,18 @@ npm run dev
 
 ### 使用方式
 
-1. 复制环境变量模板：
+1. 按你的生产环境修改 `.env.docker`
 
-```bash
-cp .env.docker.example .env.docker
+2. 一键启动生产环境：
+
+```powershell
+.\scripts\docker.ps1 prod up
 ```
 
-2. 按你的生产环境修改 `.env.docker`
-
-3. 启动生产编排：
+或：
 
 ```bash
-docker compose --env-file .env.docker -f docker-compose.prod.yml up -d --build
+sh ./scripts/docker.sh prod up
 ```
 
 ### 当前注意事项
@@ -301,7 +331,7 @@ docker compose --env-file .env.docker -f docker-compose.prod.yml up -d --build
 - 前端镜像已经可以正常构建，并已适配管理端部署到 `/admin/`
 - 后端 Django 项目骨架已经初始化完成，包含 `manage.py`、`config/settings`、`config/wsgi.py`、`config/asgi.py`、`config/celery.py`
 - Django 自带后台为避免与管理端前端路由冲突，使用 `/superadmin/`
-- 当前后端仍然是基础工程骨架和占位模型，后续还需要继续补业务模型、序列化器、服务层和接口实现
+- 后端第一批真实接口已经接入，覆盖认证、公共酒店查询、用户中心、订单、后台概览、酒店管理、房型管理、库存管理、评价与 AI 辅助接口
 
 ## Docker 开发环境
 
@@ -330,22 +360,24 @@ docker compose --env-file .env.docker -f docker-compose.prod.yml up -d --build
 
 ### 使用方式
 
-1. 复制开发环境变量模板：
+1. 按需修改 `.env.docker.dev`
 
-```bash
-cp .env.docker.dev.example .env.docker.dev
+2. 一键启动开发环境：
+
+```powershell
+.\scripts\docker.ps1 dev up
 ```
 
-2. 启动开发环境：
+或：
 
 ```bash
-docker compose --env-file .env.docker.dev -f docker-compose.dev.yml up -d --build
+sh ./scripts/docker.sh dev up
 ```
 
 3. 访问地址：
 
 - 用户端：[http://localhost:5173](http://localhost:5173)
-- 管理端：[http://localhost:5174](http://localhost:5174)
+- 管理端：[http://localhost:5174/admin/](http://localhost:5174/admin/)
 - 后端开发服务：[http://localhost:8000](http://localhost:8000)
 
 ### 当前注意事项
@@ -353,7 +385,84 @@ docker compose --env-file .env.docker.dev -f docker-compose.dev.yml up -d --buil
 - 前端开发容器已经可以直接跑起来
 - 后端开发容器会先安装 Poetry 依赖
 - 后端 Django 项目骨架已经初始化完成，`backend-dev` 后续可以直接跑 Django 开发服务
-- 当前阶段已经具备继续开发业务模块的基础，但接口和业务逻辑仍需要逐步补充
+- 当前阶段已经具备继续开发和联调第一批真实业务接口的基础
+
+## 后端当前实现进度
+
+当前后端已完成的核心能力包括：
+
+- JWT 注册、登录、管理员登录、刷新令牌、当前用户信息
+- 公共首页、酒店列表、搜索建议、酒店详情、评价列表、房型价格日历
+- 通用基础接口：上传、城市、字典
+- 用户中心资料维护、头像上传、密码修改、收藏、订单创建、订单支付、订单取消、评价提交、优惠券、发票申请、消息通知
+- 管理端经营概览、趋势图表、酒店管理、房型管理、库存管理、订单处理、评价回复、用户状态管理、员工账号、系统配置
+- AI 辅助接口：用户智能问答、管理端经营摘要、评价摘要、回复建议
+
+当前仍属于第一阶段接口实现，后续还可以继续补：
+
+- WebSocket 实时通知
+- 更完整的权限和酒店维度隔离
+- 更细的发票、优惠券、系统配置持久化
+
+## 后端演示数据
+
+为了方便本地联调，后端已经提供演示数据初始化命令：
+
+```bash
+cd backend
+python manage.py seed_demo_data
+```
+
+如果你使用 Anaconda 的 `Website` 环境，可以运行：
+
+```bash
+conda run -n Website python manage.py seed_demo_data
+```
+
+初始化后可直接使用：
+
+- 管理员账号：`admin / Password123`
+- 普通用户账号：`zhangsan / Password123`
+
+## 后端测试与检查
+
+本地开发可运行：
+
+```bash
+cd backend
+python manage.py check
+python manage.py test apps.api
+```
+
+如果你使用 Anaconda 的 `Website` 环境，可以运行：
+
+```bash
+conda run -n Website python manage.py check
+conda run -n Website python manage.py test apps.api
+```
+
+Docker 开发环境也已经支持后端检查：
+
+```powershell
+.\scripts\docker.ps1 dev check
+```
+
+或：
+
+```bash
+sh ./scripts/docker.sh dev check
+```
+
+说明：
+- `backend-dev` 启动时会自动执行 `python manage.py check`
+- `backend-check` 仅在开发环境检查时临时使用 MySQL `root` 账号创建 `test_*` 测试库
+- 日常业务容器仍使用普通业务账号，避免为了测试放大业务账号权限
+- 后续新增前端单元测试时，也需要把测试命令同步补进文档，保证整个项目测试入口完整
+
+说明：
+
+- `backend-dev` 启动前会先执行 `python manage.py check`
+- `backend-check` 会在开发容器内执行 `check + test`
 
 ## 部署文档
 

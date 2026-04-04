@@ -22,7 +22,8 @@ dependencies = [
     "gunicorn (>=25.3.0,<26.0.0)",
     "python-dotenv (>=1.2.2,<2.0.0)",
     "pillow (>=12.2.0,<13.0.0)",
-    "openai (>=2.30.0,<3.0.0)"
+    "openai (>=2.30.0,<3.0.0)",
+    "cryptography (>=46.0.6,<47.0.0)"
 ]
 
 [[tool.poetry.source]]

@@ -8,8 +8,8 @@
   ],
   "scripts": {
     "dev": "concurrently \"npm run dev:user\" \"npm run dev:admin\"",
-    "dev:user": "npm run dev --workspace @hotelink/user-web",
-    "dev:admin": "npm run dev --workspace @hotelink/admin-web",
+    "dev:user": "npm --workspace @hotelink/user-web run dev -- --host 0.0.0.0 --port 5173",
+    "dev:admin": "npm --workspace @hotelink/admin-web run dev -- --host 0.0.0.0 --port 5174",
     "build": "npm run build:user && npm run build:admin",
     "build:user": "npm run build --workspace @hotelink/user-web",
     "build:admin": "npm run build --workspace @hotelink/admin-web",

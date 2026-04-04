@@ -17,6 +17,39 @@
 - 开发环境：方便本地开发，支持挂载源码、热更新，不需要本机单独安装 MySQL 和 Redis
 - 生产环境：面向正式部署，使用构建后的前端静态资源、Gunicorn、Nginx、Celery、MySQL、Redis
 
+## 1.1 一键部署入口
+
+项目根目录已经补充统一 Docker 启动脚本：
+
+- [`scripts/docker.ps1`](D:\Nakamoto\Documents\Codes\Python\HoteLink\scripts\docker.ps1)
+- [`scripts/docker.sh`](D:\Nakamoto\Documents\Codes\Python\HoteLink\scripts\docker.sh)
+
+建议以后统一通过脚本管理 Docker 环境，而不是每次手写完整的 `docker compose` 命令。
+
+PowerShell：
+
+```powershell
+.\scripts\docker.ps1 dev up
+.\scripts\docker.ps1 prod up
+```
+
+macOS / Linux / Git Bash：
+
+```bash
+sh ./scripts/docker.sh dev up
+sh ./scripts/docker.sh prod up
+```
+
+脚本支持的动作：
+
+- `up`
+- `down`
+- `ps`
+- `logs`
+- `build`
+- `restart`
+- `check`，仅开发环境可用
+
 ## 2. 前置要求
 
 无论开发环境还是生产环境，都建议先准备：
@@ -102,19 +135,7 @@
 
 ### 4.5 开发环境启动步骤
 
-1. 复制环境变量模板：
-
-```bash
-cp .env.docker.dev.example .env.docker.dev
-```
-
-Windows PowerShell 可使用：
-
-```powershell
-Copy-Item .env.docker.dev.example .env.docker.dev
-```
-
-2. 根据你的本地需求修改 `.env.docker.dev`
+1. 根据你的本地需求修改 `.env.docker.dev`
 
 重点可调整：
 
@@ -125,28 +146,48 @@ Copy-Item .env.docker.dev.example .env.docker.dev
 - `AI_API_KEY`
 - `AI_MODEL`
 
-3. 启动开发环境：
+如果 `.env.docker.dev` 不存在，首次执行脚本时会自动根据 `.env.docker.dev.example` 创建。
 
-```bash
-docker compose --env-file .env.docker.dev -f docker-compose.dev.yml up -d --build
+2. 一键启动开发环境：
+
+```powershell
+.\scripts\docker.ps1 dev up
 ```
 
-4. 查看容器状态：
+或：
 
 ```bash
-docker compose --env-file .env.docker.dev -f docker-compose.dev.yml ps
+sh ./scripts/docker.sh dev up
 ```
 
-5. 查看日志：
+3. 查看容器状态：
+
+```powershell
+.\scripts\docker.ps1 dev ps
+```
+
+或：
 
 ```bash
-docker compose --env-file .env.docker.dev -f docker-compose.dev.yml logs -f
+sh ./scripts/docker.sh dev ps
+```
+
+4. 查看日志：
+
+```powershell
+.\scripts\docker.ps1 dev logs
+```
+
+或：
+
+```bash
+sh ./scripts/docker.sh dev logs
 ```
 
 ### 4.6 开发环境访问地址
 
 - 用户端：[http://localhost:5173](http://localhost:5173)
-- 管理端：[http://localhost:5174](http://localhost:5174)
+- 管理端：[http://localhost:5174/admin/](http://localhost:5174/admin/)
 - 后端：[http://localhost:8000](http://localhost:8000)
 
 ### 4.7 开发环境如何工作
@@ -178,8 +219,14 @@ docker compose --env-file .env.docker.dev -f docker-compose.dev.yml logs -f
 
 停止容器：
 
+```powershell
+.\scripts\docker.ps1 dev down
+```
+
+或：
+
 ```bash
-docker compose --env-file .env.docker.dev -f docker-compose.dev.yml down
+sh ./scripts/docker.sh dev down
 ```
 
 停止并删除数据卷：
@@ -198,10 +245,50 @@ docker compose --env-file .env.docker.dev -f docker-compose.dev.yml down -v
 当前开发环境中，`backend-dev` 会：
 
 - 安装 Poetry 依赖
+- 执行 Django `check`
 - 执行 Django 迁移
 - 启动 Django 开发服务
 
 后续你继续补代码时，不需要重新部署整套生产环境。
+
+### 4.10 开发环境中的后端检查与测试
+
+如果你希望直接在 Docker 开发环境中检查后端，可使用：
+
+```powershell
+.\scripts\docker.ps1 dev check
+```
+
+或：
+
+```bash
+sh ./scripts/docker.sh dev check
+```
+
+该命令会在开发环境容器中执行：
+
+- `python manage.py check`
+- `python manage.py test apps.api`
+
+补充说明：
+
+- `backend-check` 服务会临时使用 MySQL `root` 账号创建 Django 测试库
+- `backend-dev` 业务容器仍然连接普通业务开发库
+- 这样既能保留 Django 标准测试流程，也避免把创建数据库权限开放给普通业务账号
+
+如果只想进入开发后端容器手动执行命令，可使用：
+
+```bash
+docker compose --env-file .env.docker.dev -f docker-compose.dev.yml exec backend-dev sh
+```
+
+进入后可继续运行：
+
+```bash
+python manage.py check
+python manage.py test apps.api
+python manage.py seed_demo_data
+```
 
 ## 5. 生产环境部署
 
@@ -246,19 +333,7 @@ docker compose --env-file .env.docker.dev -f docker-compose.dev.yml down -v
 
 ### 5.5 生产环境启动步骤
 
-1. 复制环境变量模板：
-
-```bash
-cp .env.docker.example .env.docker
-```
-
-Windows PowerShell 可使用：
-
-```powershell
-Copy-Item .env.docker.example .env.docker
-```
-
-2. 修改 `.env.docker`
+1. 修改 `.env.docker`
 
 至少应检查：
 
@@ -272,22 +347,42 @@ Copy-Item .env.docker.example .env.docker
 - `AI_MODEL`
 - `AI_REASONING_MODEL`
 
-3. 启动生产环境：
+如果 `.env.docker` 不存在，首次执行脚本时会自动根据 `.env.docker.example` 创建。
 
-```bash
-docker compose --env-file .env.docker -f docker-compose.prod.yml up -d --build
+2. 一键启动生产环境：
+
+```powershell
+.\scripts\docker.ps1 prod up
 ```
 
-4. 查看运行状态：
+或：
 
 ```bash
-docker compose --env-file .env.docker -f docker-compose.prod.yml ps
+sh ./scripts/docker.sh prod up
 ```
 
-5. 查看日志：
+3. 查看运行状态：
+
+```powershell
+.\scripts\docker.ps1 prod ps
+```
+
+或：
 
 ```bash
-docker compose --env-file .env.docker -f docker-compose.prod.yml logs -f
+sh ./scripts/docker.sh prod ps
+```
+
+4. 查看日志：
+
+```powershell
+.\scripts\docker.ps1 prod logs
+```
+
+或：
+
+```bash
+sh ./scripts/docker.sh prod logs
 ```
 
 ### 5.6 生产环境如何工作
@@ -336,14 +431,26 @@ docker compose --env-file .env.docker -f docker-compose.prod.yml logs -f
 
 停止服务：
 
+```powershell
+.\scripts\docker.ps1 prod down
+```
+
+或：
+
 ```bash
-docker compose --env-file .env.docker -f docker-compose.prod.yml down
+sh ./scripts/docker.sh prod down
 ```
 
 重新构建并启动：
 
+```powershell
+.\scripts\docker.ps1 prod restart
+```
+
+或：
+
 ```bash
-docker compose --env-file .env.docker -f docker-compose.prod.yml up -d --build
+sh ./scripts/docker.sh prod restart
 ```
 
 拉起单个服务：
@@ -387,52 +494,52 @@ docker compose --env-file .env.docker -f docker-compose.prod.yml up -d backend
 
 启动：
 
-```bash
-docker compose --env-file .env.docker.dev -f docker-compose.dev.yml up -d --build
+```powershell
+.\scripts\docker.ps1 dev up
 ```
 
 查看状态：
 
-```bash
-docker compose --env-file .env.docker.dev -f docker-compose.dev.yml ps
+```powershell
+.\scripts\docker.ps1 dev ps
 ```
 
 查看日志：
 
-```bash
-docker compose --env-file .env.docker.dev -f docker-compose.dev.yml logs -f
+```powershell
+.\scripts\docker.ps1 dev logs
 ```
 
 停止：
 
-```bash
-docker compose --env-file .env.docker.dev -f docker-compose.dev.yml down
+```powershell
+.\scripts\docker.ps1 dev down
 ```
 
 ### 生产环境
 
 启动：
 
-```bash
-docker compose --env-file .env.docker -f docker-compose.prod.yml up -d --build
+```powershell
+.\scripts\docker.ps1 prod up
 ```
 
 查看状态：
 
-```bash
-docker compose --env-file .env.docker -f docker-compose.prod.yml ps
+```powershell
+.\scripts\docker.ps1 prod ps
 ```
 
 查看日志：
 
-```bash
-docker compose --env-file .env.docker -f docker-compose.prod.yml logs -f
+```powershell
+.\scripts\docker.ps1 prod logs
 ```
 
 停止：
 
-```bash
-docker compose --env-file .env.docker -f docker-compose.prod.yml down
+```powershell
+.\scripts\docker.ps1 prod down
 ```
 
 ## 8. 推荐后续动作
