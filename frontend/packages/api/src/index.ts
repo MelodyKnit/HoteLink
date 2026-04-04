@@ -20,6 +20,12 @@ export interface PaginatedData<T = unknown> {
 const TOKEN_KEY = 'hotelink_access_token'
 const REFRESH_KEY = 'hotelink_refresh_token'
 
+let _loginRedirect = '/admin/login'
+
+export function configureApi(options: { loginRedirect?: string }) {
+  if (options.loginRedirect) _loginRedirect = options.loginRedirect
+}
+
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY)
 }
@@ -54,14 +60,14 @@ function createHttp(baseURL: string): AxiosInstance {
       const body = resp.data
       if (body.code === 4011 || body.code === 4012) {
         clearTokens()
-        window.location.href = '/admin/login'
+        window.location.href = _loginRedirect
       }
       return resp
     },
     (error) => {
       if (error.response?.status === 401) {
         clearTokens()
-        window.location.href = '/admin/login'
+        window.location.href = _loginRedirect
       }
       return Promise.reject(error)
     }
@@ -186,4 +192,94 @@ export const aiApi = {
 export const commonApi = {
   cities: () => get<{ items: { label: string; value: string }[] }>('/common/cities'),
   dicts: (types: string) => get('/common/dicts', { types }),
+}
+
+// ========== Public (User-Web) ==========
+export const publicApi = {
+  home: () => get<{
+    banners: { id: number; image_url: string; link: string }[]
+    hot_cities: string[]
+    recommended_hotels: { id: number; name: string; city: string; star: number; image_url: string; min_price: number; rating: number; review_count: number; address: string; tags: string[] }[]
+    promotions: { id: number; title: string; image_url: string; link: string }[]
+  }>('/public/home'),
+  hotels: (params?: Record<string, unknown>) => get<PaginatedData>('/public/hotels', params),
+  searchSuggest: (keyword: string) => get<{ items: { label: string; type: string }[] }>('/public/hotels/search-suggest', { keyword }),
+  hotelDetail: (hotel_id: number) => get('/public/hotels/detail', { hotel_id }),
+  hotelReviews: (params: Record<string, unknown>) => get<PaginatedData>('/public/hotels/reviews', params),
+  roomTypeCalendar: (params: { room_type_id: number; start_date: string; end_date: string }) =>
+    get<{ room_type_id: number; calendar: { date: string; price: number; stock: number; status: string }[] }>('/public/room-types/calendar', params as Record<string, unknown>),
+}
+
+// ========== User Auth ==========
+export const userAuthApi = {
+  login: (data: { username: string; password: string }) =>
+    post<{ access_token: string; refresh_token: string; token_type: string; expires_in: number; user: { id: number; username: string; role: string; nickname?: string; member_level?: string } }>('/public/auth/login', data),
+  register: (data: { username: string; password: string; confirm_password: string; mobile: string; email?: string }) =>
+    post<{ user_id: number; username: string }>('/public/auth/register', data),
+  me: () => get<{ id: number; username: string; nickname: string; mobile: string; email: string; role: string; status: string; member_level: string; avatar?: string; gender?: string; birthday?: string }>('/user/auth/me'),
+  logout: (refresh_token: string) => post('/user/auth/logout', { refresh_token }),
+}
+
+// ========== User Profile ==========
+export const userProfileApi = {
+  get: () => get<{ id: number; username: string; nickname: string; mobile: string; email: string; gender: string; birthday: string; avatar: string; member_level: string; points: number }>('/user/profile'),
+  update: (data: Record<string, unknown>) => post('/user/profile/update', data),
+  uploadAvatar: (file: File) => {
+    const fd = new FormData()
+    fd.append('avatar', file)
+    return http.post<ApiResult>('/user/profile/avatar', fd, { headers: { 'Content-Type': 'multipart/form-data' } }).then(r => r.data)
+  },
+  changePassword: (data: { old_password: string; new_password: string; confirm_password: string }) =>
+    post('/user/profile/change-password', data),
+}
+
+// ========== User Orders ==========
+export const userOrderApi = {
+  list: (params?: Record<string, unknown>) => get<PaginatedData>('/user/orders', params),
+  detail: (order_id: number) => get('/user/orders/detail', { order_id }),
+  create: (data: Record<string, unknown>) => post('/user/orders/create', data),
+  update: (data: Record<string, unknown>) => post('/user/orders/update', data),
+  pay: (data: { order_id: number; payment_method: string }) => post('/user/orders/pay', data),
+  cancel: (data: { order_id: number; reason: string }) => post('/user/orders/cancel', data),
+}
+
+// ========== User Reviews ==========
+export const userReviewApi = {
+  create: (data: { order_id: number; score: number; content: string }) => post('/user/reviews/create', data),
+}
+
+// ========== User Favorites ==========
+export const userFavoriteApi = {
+  list: (params?: Record<string, unknown>) => get<PaginatedData>('/user/favorites', params),
+  add: (hotel_id: number) => post('/user/favorites/add', { hotel_id }),
+  remove: (hotel_id: number) => post('/user/favorites/remove', { hotel_id }),
+}
+
+// ========== User Coupons ==========
+export const userCouponApi = {
+  list: (params?: Record<string, unknown>) => get<PaginatedData>('/user/coupons', params),
+}
+
+// ========== User Invoices ==========
+export const userInvoiceApi = {
+  list: () => get<PaginatedData>('/user/invoices'),
+  createTitle: (data: { invoice_type: string; title: string; tax_no?: string; email: string }) =>
+    post('/user/invoices/create', data),
+  apply: (data: { order_id: number; invoice_title_id: number }) => post('/user/invoices/apply', data),
+}
+
+// ========== User Points ==========
+export const userPointsApi = {
+  logs: (params?: Record<string, unknown>) => get<PaginatedData>('/user/points/logs', params),
+}
+
+// ========== User Notices ==========
+export const userNoticeApi = {
+  list: (params?: Record<string, unknown>) => get<PaginatedData>('/user/notices', params),
+}
+
+// ========== User AI Chat ==========
+export const userAiApi = {
+  chat: (data: { scene: string; question: string; hotel_id?: number; order_id?: number }) =>
+    post<{ answer: string; scene: string }>('/user/ai/chat', data),
 }
