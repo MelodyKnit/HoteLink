@@ -197,6 +197,7 @@ sh ./scripts/docker.sh dev logs
 - `frontend` 目录通过 volume 挂载进容器
 - Vite 开发服务在容器中运行
 - 本地修改前端源码后，容器内开发服务会进行热更新
+- 开发环境默认启用 `CHOKIDAR_USEPOLLING=true`，用于兼容 Windows + Docker Desktop 的文件变更监听
 
 #### 后端
 

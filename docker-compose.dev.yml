@@ -98,6 +98,9 @@ services:
     container_name: hotelink-user-web-dev
     restart: unless-stopped
     working_dir: /workspace
+    environment:
+      CHOKIDAR_USEPOLLING: "true"
+      CHOKIDAR_INTERVAL: "300"
     volumes:
       - ./frontend:/workspace
       - frontend_node_modules:/workspace/node_modules
@@ -116,6 +119,9 @@ services:
     container_name: hotelink-admin-web-dev
     restart: unless-stopped
     working_dir: /workspace
+    environment:
+      CHOKIDAR_USEPOLLING: "true"
+      CHOKIDAR_INTERVAL: "300"
     volumes:
       - ./frontend:/workspace
       - frontend_node_modules:/workspace/node_modules
