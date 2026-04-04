@@ -23,7 +23,7 @@
 
 相关对齐说明见：
 
-- [`docs/thesis-alignment.md`](D:\Nakamoto\Documents\Codes\Python\HoteLink\docs\thesis-alignment.md)
+- [`thesis-alignment.md`](./thesis-alignment.md)
 
 ## 2. 技术选型
 
@@ -493,10 +493,10 @@ Celery 任务建议覆盖：
 
 当前仓库已经提供生产部署骨架：
 
-- 根编排文件：[`docker-compose.prod.yml`](D:\Nakamoto\Documents\Codes\Python\HoteLink\docker-compose.prod.yml)
-- 后端镜像：[`backend/Dockerfile`](D:\Nakamoto\Documents\Codes\Python\HoteLink\backend\Dockerfile)
-- 前端镜像：[`frontend/Dockerfile`](D:\Nakamoto\Documents\Codes\Python\HoteLink\frontend\Dockerfile)
-- 网关配置：[`frontend/docker/nginx.conf`](D:\Nakamoto\Documents\Codes\Python\HoteLink\frontend\docker\nginx.conf)
+- 根编排文件：[`../docker-compose.prod.yml`](../docker-compose.prod.yml)
+- 后端镜像：[`../backend/Dockerfile`](../backend/Dockerfile)
+- 前端镜像：[`../frontend/Dockerfile`](../frontend/Dockerfile)
+- 网关配置：[`../frontend/docker/nginx.conf`](../frontend/docker/nginx.conf)
 
 ### 13.2 容器职责
 
@@ -541,9 +541,9 @@ Celery 任务建议覆盖：
 
 当前也已经补充开发环境编排：
 
-- [`docker-compose.dev.yml`](D:\Nakamoto\Documents\Codes\Python\HoteLink\docker-compose.dev.yml)
-- [`backend/Dockerfile.dev`](D:\Nakamoto\Documents\Codes\Python\HoteLink\backend\Dockerfile.dev)
-- [`frontend/Dockerfile.dev`](D:\Nakamoto\Documents\Codes\Python\HoteLink\frontend\Dockerfile.dev)
+- [`../docker-compose.dev.yml`](../docker-compose.dev.yml)
+- [`../backend/Dockerfile.dev`](../backend/Dockerfile.dev)
+- [`../frontend/Dockerfile.dev`](../frontend/Dockerfile.dev)
 
 开发环境的目标是：
 

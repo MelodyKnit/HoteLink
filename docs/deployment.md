@@ -9,8 +9,8 @@
 
 当前项目已经提供了两套 Docker 编排文件：
 
-- [`docker-compose.dev.yml`](D:\Nakamoto\Documents\Codes\Python\HoteLink\docker-compose.dev.yml)
-- [`docker-compose.prod.yml`](D:\Nakamoto\Documents\Codes\Python\HoteLink\docker-compose.prod.yml)
+- [`../docker-compose.dev.yml`](../docker-compose.dev.yml)
+- [`../docker-compose.prod.yml`](../docker-compose.prod.yml)
 
 它们的目标不同：
 
@@ -21,8 +21,8 @@
 
 项目根目录已经补充统一 Docker 启动脚本：
 
-- [`scripts/docker.ps1`](D:\Nakamoto\Documents\Codes\Python\HoteLink\scripts\docker.ps1)
-- [`scripts/docker.sh`](D:\Nakamoto\Documents\Codes\Python\HoteLink\scripts\docker.sh)
+- [`../scripts/docker.ps1`](../scripts/docker.ps1)
+- [`../scripts/docker.sh`](../scripts/docker.sh)
 
 建议以后统一通过脚本管理 Docker 环境，而不是每次手写完整的 `docker compose` 命令。
 
@@ -94,8 +94,8 @@ sh ./scripts/docker.sh prod up
 
 - 新增部署相关配置时，必须同步更新本文件
 - 新增环境变量时，必须同步更新 `.env` 示例文件和本文件
-- 新增 AI 配置时，必须同步更新 [`docs/ai-integration.md`](D:\Nakamoto\Documents\Codes\Python\HoteLink\docs\ai-integration.md)
-- 若部署方案与论文基线实现产生差异，必须同步更新 [`docs/thesis-alignment.md`](D:\Nakamoto\Documents\Codes\Python\HoteLink\docs\thesis-alignment.md)
+- 新增 AI 配置时，必须同步更新 [`ai-integration.md`](./ai-integration.md)
+- 若部署方案与论文基线实现产生差异，必须同步更新 [`thesis-alignment.md`](./thesis-alignment.md)
 
 ## 4. 开发环境部署
 
@@ -111,11 +111,11 @@ sh ./scripts/docker.sh prod up
 
 ### 4.2 相关文件
 
-- [`docker-compose.dev.yml`](D:\Nakamoto\Documents\Codes\Python\HoteLink\docker-compose.dev.yml)
-- [`.env.docker.dev.example`](D:\Nakamoto\Documents\Codes\Python\HoteLink\.env.docker.dev.example)
-- [`backend/Dockerfile.dev`](D:\Nakamoto\Documents\Codes\Python\HoteLink\backend\Dockerfile.dev)
-- [`backend/docker/entrypoint.dev.sh`](D:\Nakamoto\Documents\Codes\Python\HoteLink\backend\docker\entrypoint.dev.sh)
-- [`frontend/Dockerfile.dev`](D:\Nakamoto\Documents\Codes\Python\HoteLink\frontend\Dockerfile.dev)
+- [`../docker-compose.dev.yml`](../docker-compose.dev.yml)
+- [`../.env.docker.dev.example`](../.env.docker.dev.example)
+- [`../backend/Dockerfile.dev`](../backend/Dockerfile.dev)
+- [`../backend/docker/entrypoint.dev.sh`](../backend/docker/entrypoint.dev.sh)
+- [`../frontend/Dockerfile.dev`](../frontend/Dockerfile.dev)
 
 ### 4.3 开发环境服务组成
 
@@ -304,12 +304,12 @@ python manage.py seed_demo_data
 
 ### 5.2 相关文件
 
-- [`docker-compose.prod.yml`](D:\Nakamoto\Documents\Codes\Python\HoteLink\docker-compose.prod.yml)
-- [`.env.docker.example`](D:\Nakamoto\Documents\Codes\Python\HoteLink\.env.docker.example)
-- [`backend/Dockerfile`](D:\Nakamoto\Documents\Codes\Python\HoteLink\backend\Dockerfile)
-- [`backend/docker/entrypoint.sh`](D:\Nakamoto\Documents\Codes\Python\HoteLink\backend\docker\entrypoint.sh)
-- [`frontend/Dockerfile`](D:\Nakamoto\Documents\Codes\Python\HoteLink\frontend\Dockerfile)
-- [`frontend/docker/nginx.conf`](D:\Nakamoto\Documents\Codes\Python\HoteLink\frontend\docker\nginx.conf)
+- [`../docker-compose.prod.yml`](../docker-compose.prod.yml)
+- [`../.env.docker.example`](../.env.docker.example)
+- [`../backend/Dockerfile`](../backend/Dockerfile)
+- [`../backend/docker/entrypoint.sh`](../backend/docker/entrypoint.sh)
+- [`../frontend/Dockerfile`](../frontend/Dockerfile)
+- [`../frontend/docker/nginx.conf`](../frontend/docker/nginx.conf)
 
 ### 5.3 生产环境服务组成
 
@@ -403,7 +403,7 @@ sh ./scripts/docker.sh prod logs
 #### 后端
 
 - 使用 `backend/Dockerfile`
-- 启动脚本为 [`backend/docker/entrypoint.sh`](D:\Nakamoto\Documents\Codes\Python\HoteLink\backend\docker\entrypoint.sh)
+- 启动脚本为 [`../backend/docker/entrypoint.sh`](../backend/docker/entrypoint.sh)
 - 默认可在启动时执行迁移和 `collectstatic`
 - 正式 Web 服务通过 Gunicorn 运行
 

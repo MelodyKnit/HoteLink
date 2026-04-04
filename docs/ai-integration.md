@@ -13,9 +13,9 @@
 
 当前代码位置：
 
-- [`backend/config/ai.py`](D:\Nakamoto\Documents\Codes\Python\HoteLink\backend\config\ai.py)
-- [`backend/apps/operations/services/ai_service.py`](D:\Nakamoto\Documents\Codes\Python\HoteLink\backend\apps\operations\services\ai_service.py)
-- [`backend/.env.example`](D:\Nakamoto\Documents\Codes\Python\HoteLink\backend\.env.example)
+- [`../backend/config/ai.py`](../backend/config/ai.py)
+- [`../backend/apps/operations/services/ai_service.py`](../backend/apps/operations/services/ai_service.py)
+- [`../backend/.env.example`](../backend/.env.example)
 
 当前默认配置：
 
@@ -190,9 +190,9 @@
 
 这些变量当前已写入：
 
-- [`backend/.env.example`](D:\Nakamoto\Documents\Codes\Python\HoteLink\backend\.env.example)
-- [`.env.docker.example`](D:\Nakamoto\Documents\Codes\Python\HoteLink\.env.docker.example)
-- [`.env.docker.dev.example`](D:\Nakamoto\Documents\Codes\Python\HoteLink\.env.docker.dev.example)
+- [`../backend/.env.example`](../backend/.env.example)
+- [`../.env.docker.example`](../.env.docker.example)
+- [`../.env.docker.dev.example`](../.env.docker.dev.example)
 
 ## 7. 安全要求
 
@@ -214,7 +214,7 @@
 
 ### 7.3 当前项目的保护措施
 
-- [`.gitignore`](D:\Nakamoto\Documents\Codes\Python\HoteLink\.gitignore) 已忽略 `.env` 和 `.env.*`
+- [`../.gitignore`](../.gitignore) 已忽略 `.env` 和 `.env.*`
 - `.gitignore` 允许提交示例配置文件
 - AI 只在后端调用，不在前端暴露密钥
 

@@ -259,8 +259,8 @@ npm run dev
 
 项目根目录已经提供统一脚本：
 
-- [`scripts/docker.ps1`](D:\Nakamoto\Documents\Codes\Python\HoteLink\scripts\docker.ps1)
-- [`scripts/docker.sh`](D:\Nakamoto\Documents\Codes\Python\HoteLink\scripts\docker.sh)
+- [`scripts/docker.ps1`](scripts/docker.ps1)
+- [`scripts/docker.sh`](scripts/docker.sh)
 
 推荐直接使用一条命令启动：
 
@@ -287,12 +287,12 @@ sh ./scripts/docker.sh prod up
 
 项目已经补充了生产部署所需的 Docker 文件：
 
-- [`docker-compose.prod.yml`](D:\Nakamoto\Documents\Codes\Python\HoteLink\docker-compose.prod.yml)
-- [`backend/Dockerfile`](D:\Nakamoto\Documents\Codes\Python\HoteLink\backend\Dockerfile)
-- [`backend/docker/entrypoint.sh`](D:\Nakamoto\Documents\Codes\Python\HoteLink\backend\docker\entrypoint.sh)
-- [`frontend/Dockerfile`](D:\Nakamoto\Documents\Codes\Python\HoteLink\frontend\Dockerfile)
-- [`frontend/docker/nginx.conf`](D:\Nakamoto\Documents\Codes\Python\HoteLink\frontend\docker\nginx.conf)
-- [`.env.docker.example`](D:\Nakamoto\Documents\Codes\Python\HoteLink\.env.docker.example)
+- [`docker-compose.prod.yml`](docker-compose.prod.yml)
+- [`backend/Dockerfile`](backend/Dockerfile)
+- [`backend/docker/entrypoint.sh`](backend/docker/entrypoint.sh)
+- [`frontend/Dockerfile`](frontend/Dockerfile)
+- [`frontend/docker/nginx.conf`](frontend/docker/nginx.conf)
+- [`.env.docker.example`](.env.docker.example)
 
 ### 部署结构
 
@@ -344,11 +344,11 @@ sh ./scripts/docker.sh prod up
 
 相关文件：
 
-- [`docker-compose.dev.yml`](D:\Nakamoto\Documents\Codes\Python\HoteLink\docker-compose.dev.yml)
-- [`.env.docker.dev.example`](D:\Nakamoto\Documents\Codes\Python\HoteLink\.env.docker.dev.example)
-- [`backend/Dockerfile.dev`](D:\Nakamoto\Documents\Codes\Python\HoteLink\backend\Dockerfile.dev)
-- [`backend/docker/entrypoint.dev.sh`](D:\Nakamoto\Documents\Codes\Python\HoteLink\backend\docker\entrypoint.dev.sh)
-- [`frontend/Dockerfile.dev`](D:\Nakamoto\Documents\Codes\Python\HoteLink\frontend\Dockerfile.dev)
+- [`docker-compose.dev.yml`](docker-compose.dev.yml)
+- [`.env.docker.dev.example`](.env.docker.dev.example)
+- [`backend/Dockerfile.dev`](backend/Dockerfile.dev)
+- [`backend/docker/entrypoint.dev.sh`](backend/docker/entrypoint.dev.sh)
+- [`frontend/Dockerfile.dev`](frontend/Dockerfile.dev)
 
 ### 开发环境服务
 
@@ -468,21 +468,21 @@ sh ./scripts/docker.sh dev check
 
 单独的开发环境与生产环境部署说明见：
 
-- [`docs/deployment.md`](D:\Nakamoto\Documents\Codes\Python\HoteLink\docs\deployment.md)
+- [`docs/deployment.md`](docs/deployment.md)
 
 ## API 文档
 
 接口设计文档见：
 
-- [`docs/api-spec.md`](D:\Nakamoto\Documents\Codes\Python\HoteLink\docs\api-spec.md)
+- [`docs/api-spec.md`](docs/api-spec.md)
 
 ## AI 集成与密钥安全
 
 项目已经补充了基于 `OpenAI Python SDK` 的 AI 接入骨架，用于对接 DeepSeek 的 OpenAI 兼容接口：
 
-- [`backend/config/ai.py`](D:\Nakamoto\Documents\Codes\Python\HoteLink\backend\config\ai.py)
-- [`backend/apps/operations/services/ai_service.py`](D:\Nakamoto\Documents\Codes\Python\HoteLink\backend\apps\operations\services\ai_service.py)
-- [`backend/.env.example`](D:\Nakamoto\Documents\Codes\Python\HoteLink\backend\.env.example)
+- [`backend/config/ai.py`](backend/config/ai.py)
+- [`backend/apps/operations/services/ai_service.py`](backend/apps/operations/services/ai_service.py)
+- [`backend/.env.example`](backend/.env.example)
 
 当前默认配置：
 
@@ -522,13 +522,13 @@ sh ./scripts/docker.sh dev check
 
 系统架构图、前端信息架构、用户端与管理端完整页面清单见：
 
-- [`docs/frontend-system-design.md`](D:\Nakamoto\Documents\Codes\Python\HoteLink\docs\frontend-system-design.md)
+- [`docs/frontend-system-design.md`](docs/frontend-system-design.md)
 
 ## 论文对齐文档
 
 项目与毕业论文内容对齐说明见：
 
-- [`docs/thesis-alignment.md`](D:\Nakamoto\Documents\Codes\Python\HoteLink\docs\thesis-alignment.md)
+- [`docs/thesis-alignment.md`](docs/thesis-alignment.md)
 
 ## 毕设私密文件管理
 
@@ -553,12 +553,12 @@ sh ./scripts/docker.sh dev check
 ## 文档维护约定
 
 - 新增模块、配置、部署方式、页面、AI 能力时，需要同步更新 `README.md` 与 `docs/` 下相关文档
-- 技术架构变更时，优先更新 [`docs/architecture.md`](D:\Nakamoto\Documents\Codes\Python\HoteLink\docs\architecture.md)
-- 部署方式变更时，优先更新 [`docs/deployment.md`](D:\Nakamoto\Documents\Codes\Python\HoteLink\docs\deployment.md)
-- 页面与功能结构变更时，优先更新 [`docs/frontend-system-design.md`](D:\Nakamoto\Documents\Codes\Python\HoteLink\docs\frontend-system-design.md)
-- 接口范围、字段和枚举变更时，优先更新 [`docs/api-spec.md`](D:\Nakamoto\Documents\Codes\Python\HoteLink\docs\api-spec.md)
-- AI 相关配置、能力边界和安全规则变更时，优先更新 [`docs/ai-integration.md`](D:\Nakamoto\Documents\Codes\Python\HoteLink\docs\ai-integration.md)
-- 与毕业论文主线范围或口径有关的变更时，优先更新 [`docs/thesis-alignment.md`](D:\Nakamoto\Documents\Codes\Python\HoteLink\docs\thesis-alignment.md)
+- 技术架构变更时，优先更新 [`docs/architecture.md`](docs/architecture.md)
+- 部署方式变更时，优先更新 [`docs/deployment.md`](docs/deployment.md)
+- 页面与功能结构变更时，优先更新 [`docs/frontend-system-design.md`](docs/frontend-system-design.md)
+- 接口范围、字段和枚举变更时，优先更新 [`docs/api-spec.md`](docs/api-spec.md)
+- AI 相关配置、能力边界和安全规则变更时，优先更新 [`docs/ai-integration.md`](docs/ai-integration.md)
+- 与毕业论文主线范围或口径有关的变更时，优先更新 [`docs/thesis-alignment.md`](docs/thesis-alignment.md)
 
 ## 当前建议的下一步
 
