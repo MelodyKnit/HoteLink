@@ -57,6 +57,13 @@
 
 当前真正缺少的不是部署基础，而是更完整的业务实现。
 
+## 3.1 文档同步约定
+
+- 新增部署相关配置时，必须同步更新本文件
+- 新增环境变量时，必须同步更新 `.env` 示例文件和本文件
+- 新增 AI 配置时，必须同步更新 [`docs/ai-integration.md`](D:\Nakamoto\Documents\Codes\Python\HoteLink\docs\ai-integration.md)
+- 若部署方案与论文基线实现产生差异，必须同步更新 [`docs/thesis-alignment.md`](D:\Nakamoto\Documents\Codes\Python\HoteLink\docs\thesis-alignment.md)
+
 ## 4. 开发环境部署
 
 ### 4.1 目的
@@ -115,6 +122,8 @@ Copy-Item .env.docker.dev.example .env.docker.dev
 - Redis 连接地址
 - Django 调试配置
 - 前后端暴露端口
+- `AI_API_KEY`
+- `AI_MODEL`
 
 3. 启动开发环境：
 
@@ -152,7 +161,13 @@ docker compose --env-file .env.docker.dev -f docker-compose.dev.yml logs -f
 
 - `backend` 目录通过 volume 挂载进容器
 - 容器内使用 Poetry 安装依赖
-- 将来 Django 项目初始化完成后，容器可直接运行 `python manage.py runserver 0.0.0.0:8000`
+- 容器可直接运行 `python manage.py runserver 0.0.0.0:8000`
+
+#### AI
+
+- DeepSeek 相关配置通过 `.env.docker.dev` 注入
+- 后端统一通过 `openai` SDK 调用 AI
+- 不要在前端容器中放置真实 AI 密钥
 
 #### 数据
 
@@ -253,6 +268,9 @@ Copy-Item .env.docker.example .env.docker
 - `DJANGO_CSRF_TRUSTED_ORIGINS`
 - Gunicorn worker 数量
 - Celery app 配置
+- `AI_API_KEY`
+- `AI_MODEL`
+- `AI_REASONING_MODEL`
 
 3. 启动生产环境：
 
@@ -293,6 +311,12 @@ docker compose --env-file .env.docker -f docker-compose.prod.yml logs -f
 - 启动脚本为 [`backend/docker/entrypoint.sh`](D:\Nakamoto\Documents\Codes\Python\HoteLink\backend\docker\entrypoint.sh)
 - 默认可在启动时执行迁移和 `collectstatic`
 - 正式 Web 服务通过 Gunicorn 运行
+
+#### AI
+
+- 生产环境中的 `AI_API_KEY` 必须通过 `.env.docker` 或部署平台环境变量注入
+- 禁止把真实密钥写进镜像、源码和示例文件
+- 建议为 AI 调用添加监控与审计日志
 
 #### 异步任务
 

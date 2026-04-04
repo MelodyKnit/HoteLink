@@ -7,6 +7,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 import pymysql
 
+from config.ai import load_ai_settings
+
 pymysql.install_as_MySQLdb()
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -173,3 +175,5 @@ LOGGING = {
         "level": os.getenv("LOG_LEVEL", "INFO"),
     },
 }
+
+AI_SETTINGS = load_ai_settings()
