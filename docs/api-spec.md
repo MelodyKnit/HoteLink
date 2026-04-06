@@ -259,7 +259,7 @@ X-App-Version: 1.0.0
 
 ### 7.1 用户角色 `role`
 
-## 8. 管理端新增接口（2026-04）
+## 8. 管理端扩展接口
 
 ### 8.1 AI 多供应商管理
 
@@ -289,7 +289,7 @@ X-App-Version: 1.0.0
 }
 ```
 
-3. 新增或编辑供应商
+3. 添加或编辑供应商
 
 - `POST /api/v1/admin/ai/provider/add`
 - 权限：`hotel_admin` / `system_admin`
@@ -520,11 +520,12 @@ X-App-Version: 1.0.0
 | 值 | 含义 |
 |---|---|
 | `customer_service` | 客服问答 |
-| `booking_help` | 预订帮助 |
-| `order_help` | 订单说明 |
-| `report_summary` | 报表总结 |
-| `review_summary` | 评价总结 |
-| `reply_suggestion` | 回复建议 |
+| `general` | 客服问答别名（后端会规范化为 `customer_service`） |
+
+说明：
+
+- 当前 `ai_scene` 仅用于用户端客服问答接口
+- 管理端报表总结、评价总结、回复建议使用独立接口，不通过 `ai_scene` 传值
 
 ## 8. 认证与登录规则
 
@@ -1484,6 +1485,12 @@ Authorization: Bearer <access_token>
 | `hotel_id` | int | 否 | 酒店相关问题时传入 |
 | `order_id` | int | 否 | 订单相关问题时传入 |
 
+场景约束：
+
+- 当前仅支持：`customer_service`
+- 兼容别名：`general`（服务端会自动规范化为 `customer_service`）
+- 其他场景将返回参数错误（`4002`）
+
 **成功返回**
 
 ```json
@@ -1497,7 +1504,29 @@ Authorization: Bearer <access_token>
 }
 ```
 
-### 14.2 管理端 AI 经营摘要
+### 14.2 用户端 AI 客服（流式）
+
+`POST /api/v1/user/ai/chat/stream`
+
+请求体与 `14.1` 相同。
+
+响应类型：
+
+- `text/event-stream`
+- 每条事件格式：`data: {"content": "...", "done": false}`
+- 结束事件：`data: {"content": "", "done": true}`
+
+示例：
+
+```text
+data: {"content":"您好","done":false}
+
+data: {"content":"，我来帮您查询订单信息。","done":false}
+
+data: {"content":"","done":true}
+```
+
+### 14.3 管理端 AI 经营摘要
 
 `POST /api/v1/admin/ai/report-summary`
 
@@ -1511,7 +1540,7 @@ Authorization: Bearer <access_token>
 }
 ```
 
-### 14.3 管理端 AI 评价摘要
+### 14.4 管理端 AI 评价摘要
 
 `POST /api/v1/admin/ai/review-summary`
 
@@ -1525,7 +1554,7 @@ Authorization: Bearer <access_token>
 }
 ```
 
-### 14.4 管理端 AI 回复建议
+### 14.5 管理端 AI 回复建议
 
 `POST /api/v1/admin/ai/reply-suggestion`
 
@@ -1537,11 +1566,11 @@ Authorization: Bearer <access_token>
 }
 ```
 
-### 14.5 管理端 AI 配置查询
+### 14.6 管理端 AI 配置查询
 
 `GET /api/v1/admin/ai/settings`
 
-### 14.6 管理端 AI 配置更新
+### 14.7 管理端 AI 配置更新
 
 `POST /api/v1/admin/ai/settings/update`
 

@@ -905,6 +905,22 @@ flowchart LR
 - 管理端差评摘要
 - 管理端营销文案辅助
 
+### 11.4 用户端 AI 客服实现现状
+
+- 路由入口：`/ai-chat`
+- 前端页面：`AIChatView.vue`
+- 调用方式：
+- 标准接口：`POST /api/v1/user/ai/chat`
+- 流式接口：`POST /api/v1/user/ai/chat/stream`
+- 流式协议：SSE，前端按 `data: { content, done }` 逐 token 拼接
+- 展示能力：AI 回复支持 Markdown 渲染（加粗、列表、代码块、引用等）
+
+交互原则：
+
+- 优先显示流式回答，降低等待感
+- 渲染前进行基础 HTML 转义，避免将原始 HTML 直接注入页面
+- 对异常场景保留兜底提示文案，避免界面停留在“加载中”
+
 ### 11.2 不建议一开始直接交给 AI 的内容
 
 - 最终支付判定
@@ -986,6 +1002,7 @@ const { toastVisible, toastMessage, toastType, showToast, closeToast } = useToas
 - 新增 AI 入口时同步更新本文件与 `ai-integration.md`
 - 新增导航结构时同步更新信息架构图
 - 若页面范围与论文主线发生变化，同步更新 `thesis-alignment.md`
+- 新增前端流式协议或渲染策略（如 SSE / Markdown）时，同步更新本文件与 `api-spec.md`
 
 ## 15. 推荐下一步可继续产出
 

@@ -38,6 +38,7 @@
 - 定时任务：Celery Beat
 - 接口文档：drf-spectacular
 - AI 接入层：OpenAI Python SDK
+- Prompt 引擎：Jinja2（服务端模板渲染）
 - AI 模型：DeepSeek OpenAI 兼容模型
 
 ### 2.2 前端
@@ -253,14 +254,25 @@ HoteLink/
 - Prompt 模板管理
 - AI 审计与调用日志
 - 业务侧 AI 能力服务化输出
+- AI 场景白名单与问答边界控制（防幻觉）
+- 流式输出能力（SSE）
 
 建议：
 
 - AI 能力归属于 `operations` 或独立 `ai` 域都可以
-- 当前项目已先在 `config.ai` 和 `apps.operations.services.ai_service` 放置基础接入骨架
+- 当前项目已在 `config.ai`、`apps.operations.services.ai_service`、`apps.operations.services.prompt_service` 落地
+
+当前实现要点：
+
+- Prompt 模板目录：`backend/prompts/customer_service/`
+- 模板渲染：`PromptTemplateService`（Jinja2 + `StrictUndefined`）
+- 场景规范化：`general -> customer_service`
+- 未支持场景直接拒绝（`PromptSceneError`），避免无约束生成
+- 客服上下文绑定：用户订单、关联酒店/房型、系统通知、系统字典
+- 接口层能力：`/api/v1/user/ai/chat`（普通）与 `/api/v1/user/ai/chat/stream`（流式）
 - 等后续 AI 相关功能增多时，可再独立拆分 `apps.ai`
 
-### 6.9 system-ops（新增）
+### 6.9 system-ops
 
 负责：
 

@@ -10,11 +10,15 @@
 
 - OpenAI Python SDK
 - DeepSeek OpenAI 兼容接口
+- Jinja2 Prompt 模板渲染（后端）
 
 当前代码位置：
 
 - [`../backend/config/ai.py`](../backend/config/ai.py)
 - [`../backend/apps/operations/services/ai_service.py`](../backend/apps/operations/services/ai_service.py)
+- [`../backend/apps/operations/services/prompt_service.py`](../backend/apps/operations/services/prompt_service.py)
+- [`../backend/prompts/customer_service/system.j2`](../backend/prompts/customer_service/system.j2)
+- [`../backend/prompts/customer_service/user.j2`](../backend/prompts/customer_service/user.j2)
 - [`../backend/.env.example`](../backend/.env.example)
 
 当前默认配置：
@@ -64,6 +68,15 @@
 - 最终价格计算
 
 这些必须由业务规则决定。
+
+## 4.3 当前已落地的防幻觉机制（客服场景）
+
+- 场景白名单：仅支持 `customer_service`，兼容 `general -> customer_service`。
+- 非白名单场景：服务端直接拒绝（`PromptSceneError` + `4002`）。
+- Prompt 强约束：通过 Jinja 模板明确禁止编造库存、价格、退款规则、会员权益等。
+- 上下文绑定：仅注入系统已知数据（用户订单、关联酒店/房型、系统通知、字典枚举）。
+- 上下文不足：要求模型明确说明“无法从系统数据确认”，而不是猜测。
+- 流式输出：接口层支持 SSE，不改变上述约束链路。
 
 ### 4.2 管理端推荐优先级
 
@@ -188,9 +201,9 @@
 - `AI_REASONING_MODEL`
 - `AI_TIMEOUT`
 
-### 6.1 多供应商支持（新增）
+### 6.1 多供应商支持
 
-系统现已支持多供应商并行配置，支持运行时切换：
+系统支持多供应商并行配置，支持运行时切换：
 
 - 可在管理端添加多个供应商（如 DeepSeek / OpenAI / 智谱 / Moonshot / Qwen）
 - 可设置当前活跃供应商
@@ -202,17 +215,27 @@
 - `backend/apps/operations/services/ai_service.py`
 - `backend/apps/api/views.py`（`AdminAISettingsView` 及 provider 管理接口）
 
-### 6.2 管理端接口（新增）
+### 6.2 管理端接口
 
 - `GET /api/v1/admin/ai/settings`：读取 AI 开关、活跃供应商、供应商列表
 - `POST /api/v1/admin/ai/settings/update`：更新 AI 开关/活跃供应商/供应商配置
-- `POST /api/v1/admin/ai/provider/add`：新增或编辑供应商
+- `POST /api/v1/admin/ai/provider/add`：添加或编辑供应商
 - `POST /api/v1/admin/ai/provider/switch`：切换活跃供应商
 - `POST /api/v1/admin/ai/provider/delete`：删除非活跃供应商
 
-### 6.3 前端页面（新增）
+### 6.3 用户端 AI 客服接口
 
-管理端 AI 设置页已升级：
+- `POST /api/v1/user/ai/chat`：标准问答
+- `POST /api/v1/user/ai/chat/stream`：流式问答（SSE）
+
+说明：
+
+- 两个接口共享同一套 Prompt 渲染与上下文绑定逻辑
+- 前端调用流式接口时，应按 `data: {content, done}` 逐事件消费
+
+### 6.4 前端页面
+
+管理端 AI 设置页支持：
 
 - 查看所有供应商状态
 - 快捷添加内置供应商
@@ -235,6 +258,7 @@
 - 真实 Redis 密码
 - 私钥、证书
 - 本地 `.env`
+- 本地运行时 AI 供应商配置文件（如 `.ai_providers.json`）
 
 ### 7.2 可以提交到 GitHub 的内容
 
@@ -247,6 +271,7 @@
 ### 7.3 当前项目的保护措施
 
 - [`../.gitignore`](../.gitignore) 已忽略 `.env` 和 `.env.*`
+- [`../.gitignore`](../.gitignore) 已忽略 `backend/.ai_providers.json` 与同类文件
 - `.gitignore` 允许提交示例配置文件
 - AI 只在后端调用，不在前端暴露密钥
 
@@ -260,7 +285,7 @@
 ## 9. 后续扩展建议
 
 1. 增加 AI 调用日志表
-2. 增加 Prompt 模板管理
+2. 增加 Prompt 模板版本化与回滚能力
 3. 增加 AI 开关和模型配置后台页面
 4. 增加 AI 使用额度与频控
 5. 增加 AI 输出审计机制
@@ -270,3 +295,4 @@
 - 每次新增 AI 场景，都要同步更新本文件
 - 每次 AI 配置项发生变化，都要同步更新本文件和 `README.md`
 - 每次 AI 页面入口发生变化，都要同步更新 `frontend-system-design.md`
+- 每次新增或修改 Prompt 模板，都要同步更新本文件的“防幻觉机制”和“接口说明”
