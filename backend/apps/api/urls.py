@@ -1,3 +1,5 @@
+"""apps/api/urls.py —— API v1 路由表，按公共/用户/管理端进行分组。"""
+
 from django.urls import path
 
 from apps.api.views import (
@@ -61,12 +63,14 @@ from apps.api.views import (
 )
 
 urlpatterns = [
+    # 系统初始化与公共能力接口
     path("", ApiRootView.as_view(), name="api-root"),
     path("system/init-check", SystemInitCheckView.as_view(), name="system-init-check"),
     path("system/init-setup", SystemInitSetupView.as_view(), name="system-init-setup"),
     path("common/upload", CommonUploadView.as_view(), name="common-upload"),
     path("common/cities", CommonCitiesView.as_view(), name="common-cities"),
     path("common/dicts", CommonDictsView.as_view(), name="common-dicts"),
+    # 公共查询接口
     path("public/home", PublicHomeView.as_view(), name="public-home"),
     path("public/hotels", PublicHotelsView.as_view(), name="public-hotels"),
     path("public/hotels/search-suggest", PublicHotelSearchSuggestView.as_view(), name="public-hotels-search-suggest"),
@@ -77,6 +81,7 @@ urlpatterns = [
     path("public/auth/login", UserLoginView.as_view(), name="public-login"),
     path("public/auth/admin-login", AdminLoginView.as_view(), name="public-admin-login"),
     path("public/auth/refresh", RefreshTokenApiView.as_view(), name="public-refresh"),
+    # 用户端接口
     path("user/auth/logout", LogoutApiView.as_view(), name="user-logout"),
     path("user/auth/me", UserAuthMeView.as_view(), name="user-auth-me"),
     path("user/profile", UserProfileView.as_view(), name="user-profile"),
@@ -100,6 +105,7 @@ urlpatterns = [
     path("user/invoices/create", UserInvoiceTitleCreateView.as_view(), name="user-invoices-create"),
     path("user/invoices/apply", UserInvoiceApplyView.as_view(), name="user-invoices-apply"),
     path("user/ai/chat", UserAIChatView.as_view(), name="user-ai-chat"),
+    # 管理端接口
     path("admin/dashboard/overview", AdminDashboardOverviewView.as_view(), name="admin-dashboard-overview"),
     path("admin/dashboard/charts", AdminDashboardChartsView.as_view(), name="admin-dashboard-charts"),
     path("admin/hotels", AdminHotelsView.as_view(), name="admin-hotels"),

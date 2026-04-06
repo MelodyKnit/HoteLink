@@ -1,8 +1,11 @@
+"""apps/crm/models.py —— CRM 相关数据模型。"""
+
 from django.conf import settings
 from django.db import models
 
 
 class CustomerProfile(models.Model):
+    """客户档案模型。"""
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="customer_profile")
     full_name = models.CharField(max_length=120)
     mobile = models.CharField(max_length=20, blank=True)
@@ -19,6 +22,7 @@ class CustomerProfile(models.Model):
 
 
 class FavoriteHotel(models.Model):
+    """用户收藏酒店关系模型。"""
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="favorite_hotels")
     hotel = models.ForeignKey("hotels.Hotel", on_delete=models.CASCADE, related_name="favorited_by")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -34,6 +38,7 @@ class FavoriteHotel(models.Model):
 
 
 class Review(models.Model):
+    """订单评价模型。"""
     order = models.OneToOneField("bookings.BookingOrder", on_delete=models.CASCADE, related_name="review")
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="reviews")
     hotel = models.ForeignKey("hotels.Hotel", on_delete=models.CASCADE, related_name="reviews")
@@ -53,6 +58,7 @@ class Review(models.Model):
 
 
 class UserCoupon(models.Model):
+    """用户优惠券模型。"""
     STATUS_UNUSED = "unused"
     STATUS_USED = "used"
     STATUS_EXPIRED = "expired"
@@ -80,6 +86,7 @@ class UserCoupon(models.Model):
 
 
 class InvoiceTitle(models.Model):
+    """发票抬头模型。"""
     TYPE_PERSONAL = "personal"
     TYPE_COMPANY = "company"
     TYPE_CHOICES = [
@@ -104,6 +111,7 @@ class InvoiceTitle(models.Model):
 
 
 class InvoiceRequest(models.Model):
+    """发票申请模型。"""
     STATUS_PENDING = "pending"
     STATUS_ISSUED = "issued"
     STATUS_CANCELLED = "cancelled"

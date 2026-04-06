@@ -1,7 +1,10 @@
+"""apps/reports/models.py —— 报表任务模型。"""
+
 from django.db import models
 
 
 class ReportTask(models.Model):
+    """报表任务模型，记录统计范围与执行状态。"""
     TYPE_REVENUE_SUMMARY = "revenue_summary"
     TYPE_ORDER_SUMMARY = "order_summary"
     TYPE_REVIEW_SUMMARY = "review_summary"

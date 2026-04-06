@@ -1,3 +1,5 @@
+"""apps/api/serializers.py —— API 请求与响应序列化定义。"""
+
 from django.contrib.auth.models import User
 from rest_framework import serializers
 
@@ -11,6 +13,7 @@ from apps.users.models import UserProfile
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
+    """UserProfile 序列化器：用于接口参数校验或响应数据转换。"""
     username = serializers.CharField(source="user.username", read_only=True)
     email = serializers.EmailField(source="user.email", read_only=True)
 
@@ -33,6 +36,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
 
 
 class HotelSimpleSerializer(serializers.ModelSerializer):
+    """HotelSimple 序列化器：用于接口参数校验或响应数据转换。"""
     class Meta:
         model = Hotel
         fields = [
@@ -51,6 +55,7 @@ class HotelSimpleSerializer(serializers.ModelSerializer):
 
 
 class RoomTypeSerializer(serializers.ModelSerializer):
+    """RoomType 序列化器：用于接口参数校验或响应数据转换。"""
     hotel_name = serializers.CharField(source="hotel.name", read_only=True)
 
     class Meta:
@@ -72,6 +77,7 @@ class RoomTypeSerializer(serializers.ModelSerializer):
 
 
 class HotelDetailSerializer(serializers.ModelSerializer):
+    """HotelDetail 序列化器：用于接口参数校验或响应数据转换。"""
     room_types = RoomTypeSerializer(many=True, read_only=True)
 
     class Meta:
@@ -94,6 +100,7 @@ class HotelDetailSerializer(serializers.ModelSerializer):
 
 
 class ReviewSerializer(serializers.ModelSerializer):
+    """Review 序列化器：用于接口参数校验或响应数据转换。"""
     username = serializers.CharField(source="user.username", read_only=True)
 
     class Meta:
@@ -111,6 +118,7 @@ class ReviewSerializer(serializers.ModelSerializer):
 
 
 class FavoriteHotelSerializer(serializers.ModelSerializer):
+    """FavoriteHotel 序列化器：用于接口参数校验或响应数据转换。"""
     hotel = HotelSimpleSerializer(read_only=True)
 
     class Meta:
@@ -119,12 +127,14 @@ class FavoriteHotelSerializer(serializers.ModelSerializer):
 
 
 class RoomInventorySerializer(serializers.ModelSerializer):
+    """RoomInventory 序列化器：用于接口参数校验或响应数据转换。"""
     class Meta:
         model = RoomInventory
         fields = ["id", "room_type", "date", "price", "stock", "status"]
 
 
 class BookingOrderSerializer(serializers.ModelSerializer):
+    """BookingOrder 序列化器：用于接口参数校验或响应数据转换。"""
     hotel_name = serializers.CharField(source="hotel.name", read_only=True)
     room_type_name = serializers.CharField(source="room_type.name", read_only=True)
 
@@ -155,12 +165,14 @@ class BookingOrderSerializer(serializers.ModelSerializer):
 
 
 class PaymentRecordSerializer(serializers.ModelSerializer):
+    """PaymentRecord 序列化器：用于接口参数校验或响应数据转换。"""
     class Meta:
         model = PaymentRecord
         fields = ["id", "order_id", "payment_no", "method", "status", "amount", "paid_at", "created_at"]
 
 
 class ReportTaskSerializer(serializers.ModelSerializer):
+    """ReportTask 序列化器：用于接口参数校验或响应数据转换。"""
     hotel_name = serializers.CharField(source="hotel.name", read_only=True)
 
     class Meta:
@@ -179,12 +191,14 @@ class ReportTaskSerializer(serializers.ModelSerializer):
 
 
 class SystemNoticeSerializer(serializers.ModelSerializer):
+    """SystemNotice 序列化器：用于接口参数校验或响应数据转换。"""
     class Meta:
         model = SystemNotice
         fields = ["id", "notice_type", "title", "content", "is_read", "created_at"]
 
 
 class RegisterSerializer(serializers.Serializer):
+    """Register 序列化器：用于接口参数校验或响应数据转换。"""
     username = serializers.CharField(max_length=150)
     password = serializers.CharField(write_only=True, min_length=8)
     confirm_password = serializers.CharField(write_only=True, min_length=8)
@@ -200,6 +214,7 @@ class RegisterSerializer(serializers.Serializer):
 
 
 class InitSetupSerializer(serializers.Serializer):
+    """InitSetup 序列化器：用于接口参数校验或响应数据转换。"""
     username = serializers.CharField(max_length=150, min_length=3)
     password = serializers.CharField(write_only=True, min_length=6)
     confirm_password = serializers.CharField(write_only=True)
@@ -211,11 +226,13 @@ class InitSetupSerializer(serializers.Serializer):
 
 
 class LoginSerializer(serializers.Serializer):
+    """Login 序列化器：用于接口参数校验或响应数据转换。"""
     username = serializers.CharField(max_length=150)
     password = serializers.CharField(write_only=True)
 
 
 class ProfileUpdateSerializer(serializers.Serializer):
+    """ProfileUpdate 序列化器：用于接口参数校验或响应数据转换。"""
     nickname = serializers.CharField(max_length=100, required=False, allow_blank=True)
     mobile = serializers.CharField(max_length=20, required=False, allow_blank=True)
     email = serializers.EmailField(required=False, allow_blank=True)
@@ -224,10 +241,12 @@ class ProfileUpdateSerializer(serializers.Serializer):
 
 
 class FavoriteActionSerializer(serializers.Serializer):
+    """FavoriteAction 序列化器：用于接口参数校验或响应数据转换。"""
     hotel_id = serializers.IntegerField(min_value=1)
 
 
 class OrderCreateSerializer(serializers.Serializer):
+    """OrderCreate 序列化器：用于接口参数校验或响应数据转换。"""
     hotel_id = serializers.IntegerField(min_value=1)
     room_type_id = serializers.IntegerField(min_value=1)
     check_in_date = serializers.DateField()
@@ -240,6 +259,7 @@ class OrderCreateSerializer(serializers.Serializer):
 
 
 class OrderUpdateSerializer(serializers.Serializer):
+    """OrderUpdate 序列化器：用于接口参数校验或响应数据转换。"""
     order_id = serializers.IntegerField(min_value=1)
     guest_name = serializers.CharField(max_length=100, required=False)
     guest_mobile = serializers.CharField(max_length=20, required=False)
@@ -247,22 +267,26 @@ class OrderUpdateSerializer(serializers.Serializer):
 
 
 class OrderPaySerializer(serializers.Serializer):
+    """OrderPay 序列化器：用于接口参数校验或响应数据转换。"""
     order_id = serializers.IntegerField(min_value=1)
     payment_method = serializers.ChoiceField(choices=PaymentRecord.METHOD_CHOICES)
 
 
 class OrderCancelSerializer(serializers.Serializer):
+    """OrderCancel 序列化器：用于接口参数校验或响应数据转换。"""
     order_id = serializers.IntegerField(min_value=1)
     reason = serializers.CharField(max_length=255, required=False, allow_blank=True)
 
 
 class ReviewCreateSerializer(serializers.Serializer):
+    """ReviewCreate 序列化器：用于接口参数校验或响应数据转换。"""
     order_id = serializers.IntegerField(min_value=1)
     score = serializers.IntegerField(min_value=1, max_value=5)
     content = serializers.CharField()
 
 
 class HotelCreateSerializer(serializers.ModelSerializer):
+    """HotelCreate 序列化器：用于接口参数校验或响应数据转换。"""
     class Meta:
         model = Hotel
         fields = [
@@ -281,10 +305,12 @@ class HotelCreateSerializer(serializers.ModelSerializer):
 
 
 class HotelUpdateSerializer(HotelCreateSerializer):
+    """HotelUpdate 序列化器：用于接口参数校验或响应数据转换。"""
     hotel_id = serializers.IntegerField(min_value=1)
 
 
 class RoomTypeCreateSerializer(serializers.ModelSerializer):
+    """RoomTypeCreate 序列化器：用于接口参数校验或响应数据转换。"""
     class Meta:
         model = RoomType
         fields = [
@@ -302,10 +328,12 @@ class RoomTypeCreateSerializer(serializers.ModelSerializer):
 
 
 class RoomTypeUpdateSerializer(RoomTypeCreateSerializer):
+    """RoomTypeUpdate 序列化器：用于接口参数校验或响应数据转换。"""
     room_type_id = serializers.IntegerField(min_value=1)
 
 
 class InventoryUpdateSerializer(serializers.Serializer):
+    """InventoryUpdate 序列化器：用于接口参数校验或响应数据转换。"""
     room_type_id = serializers.IntegerField(min_value=1)
     date = serializers.DateField()
     price = serializers.DecimalField(max_digits=10, decimal_places=2)
@@ -314,33 +342,39 @@ class InventoryUpdateSerializer(serializers.Serializer):
 
 
 class OrderStatusSerializer(serializers.Serializer):
+    """OrderStatus 序列化器：用于接口参数校验或响应数据转换。"""
     order_id = serializers.IntegerField(min_value=1)
     target_status = serializers.ChoiceField(choices=BookingOrder.STATUS_CHOICES)
 
 
 class CheckInSerializer(serializers.Serializer):
+    """CheckIn 序列化器：用于接口参数校验或响应数据转换。"""
     order_id = serializers.IntegerField(min_value=1)
     room_no = serializers.CharField(max_length=20)
     operator_remark = serializers.CharField(max_length=255, required=False, allow_blank=True)
 
 
 class CheckOutSerializer(serializers.Serializer):
+    """CheckOut 序列化器：用于接口参数校验或响应数据转换。"""
     order_id = serializers.IntegerField(min_value=1)
     consume_amount = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, default=0)
     operator_remark = serializers.CharField(max_length=255, required=False, allow_blank=True)
 
 
 class ReplyReviewSerializer(serializers.Serializer):
+    """ReplyReview 序列化器：用于接口参数校验或响应数据转换。"""
     review_id = serializers.IntegerField(min_value=1)
     content = serializers.CharField()
 
 
 class ChangeUserStatusSerializer(serializers.Serializer):
+    """ChangeUserStatus 序列化器：用于接口参数校验或响应数据转换。"""
     user_id = serializers.IntegerField(min_value=1)
     status = serializers.ChoiceField(choices=UserProfile.STATUS_CHOICES)
 
 
 class ReportTaskCreateSerializer(serializers.Serializer):
+    """ReportTaskCreate 序列化器：用于接口参数校验或响应数据转换。"""
     report_type = serializers.ChoiceField(choices=ReportTask.TYPE_CHOICES)
     start_date = serializers.DateField()
     end_date = serializers.DateField()
@@ -348,6 +382,7 @@ class ReportTaskCreateSerializer(serializers.Serializer):
 
 
 class AIChatSerializer(serializers.Serializer):
+    """AIChat 序列化器：用于接口参数校验或响应数据转换。"""
     scene = serializers.CharField(max_length=50)
     question = serializers.CharField()
     hotel_id = serializers.IntegerField(required=False, allow_null=True)
@@ -355,22 +390,26 @@ class AIChatSerializer(serializers.Serializer):
 
 
 class AIReportSummarySerializer(serializers.Serializer):
+    """AIReportSummary 序列化器：用于接口参数校验或响应数据转换。"""
     start_date = serializers.DateField()
     end_date = serializers.DateField()
     hotel_id = serializers.IntegerField(required=False, allow_null=True)
 
 
 class AIReviewSummarySerializer(serializers.Serializer):
+    """AIReviewSummary 序列化器：用于接口参数校验或响应数据转换。"""
     start_date = serializers.DateField()
     end_date = serializers.DateField()
     hotel_id = serializers.IntegerField(required=False, allow_null=True)
 
 
 class AIReplySuggestionSerializer(serializers.Serializer):
+    """AIReplySuggestion 序列化器：用于接口参数校验或响应数据转换。"""
     review_id = serializers.IntegerField(min_value=1)
 
 
 class ReportTaskCreateSimpleSerializer(serializers.Serializer):
+    """ReportTaskCreateSimple 序列化器：用于接口参数校验或响应数据转换。"""
     report_type = serializers.ChoiceField(choices=ReportTask.TYPE_CHOICES)
     start_date = serializers.DateField()
     end_date = serializers.DateField()
@@ -378,6 +417,7 @@ class ReportTaskCreateSimpleSerializer(serializers.Serializer):
 
 
 class PasswordChangeSerializer(serializers.Serializer):
+    """PasswordChange 序列化器：用于接口参数校验或响应数据转换。"""
     old_password = serializers.CharField(write_only=True)
     new_password = serializers.CharField(write_only=True, min_length=8)
     confirm_password = serializers.CharField(write_only=True, min_length=8)
@@ -389,28 +429,33 @@ class PasswordChangeSerializer(serializers.Serializer):
 
 
 class UploadSerializer(serializers.Serializer):
+    """Upload 序列化器：用于接口参数校验或响应数据转换。"""
     file = serializers.FileField()
     scene = serializers.CharField(max_length=50)
 
 
 class InvoiceTitleSerializer(serializers.ModelSerializer):
+    """InvoiceTitle 序列化器：用于接口参数校验或响应数据转换。"""
     class Meta:
         model = InvoiceTitle
         fields = ["id", "invoice_type", "title", "tax_no", "email", "created_at"]
 
 
 class InvoiceTitleCreateSerializer(serializers.ModelSerializer):
+    """InvoiceTitleCreate 序列化器：用于接口参数校验或响应数据转换。"""
     class Meta:
         model = InvoiceTitle
         fields = ["invoice_type", "title", "tax_no", "email"]
 
 
 class InvoiceApplySerializer(serializers.Serializer):
+    """InvoiceApply 序列化器：用于接口参数校验或响应数据转换。"""
     order_id = serializers.IntegerField(min_value=1)
     invoice_title_id = serializers.IntegerField(min_value=1)
 
 
 class InvoiceRequestSerializer(serializers.ModelSerializer):
+    """InvoiceRequest 序列化器：用于接口参数校验或响应数据转换。"""
     invoice_title = InvoiceTitleSerializer(read_only=True)
 
     class Meta:
@@ -419,12 +464,14 @@ class InvoiceRequestSerializer(serializers.ModelSerializer):
 
 
 class UserCouponSerializer(serializers.ModelSerializer):
+    """UserCoupon 序列化器：用于接口参数校验或响应数据转换。"""
     class Meta:
         model = UserCoupon
         fields = ["id", "name", "amount", "status", "valid_start", "valid_end", "created_at"]
 
 
 class EmployeeCreateSerializer(serializers.Serializer):
+    """EmployeeCreate 序列化器：用于接口参数校验或响应数据转换。"""
     username = serializers.CharField(max_length=150)
     password = serializers.CharField(write_only=True, min_length=8)
     name = serializers.CharField(max_length=100)
@@ -433,11 +480,13 @@ class EmployeeCreateSerializer(serializers.Serializer):
 
 
 class SettingsUpdateSerializer(serializers.Serializer):
+    """SettingsUpdate 序列化器：用于接口参数校验或响应数据转换。"""
     platform_name = serializers.CharField(max_length=100, required=False)
     support_phone = serializers.CharField(max_length=30, required=False)
     order_auto_cancel_minutes = serializers.IntegerField(min_value=1, required=False)
 
 
 class AISettingsUpdateSerializer(serializers.Serializer):
+    """AISettingsUpdate 序列化器：用于接口参数校验或响应数据转换。"""
     ai_enabled = serializers.BooleanField(required=False)
     default_scene = serializers.CharField(max_length=50, required=False)

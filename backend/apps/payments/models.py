@@ -1,7 +1,10 @@
+"""apps/payments/models.py —— 支付记录模型。"""
+
 from django.db import models
 
 
 class PaymentRecord(models.Model):
+    """订单支付流水模型。"""
     METHOD_MOCK = "mock"
     METHOD_WECHAT = "wechat"
     METHOD_ALIPAY = "alipay"

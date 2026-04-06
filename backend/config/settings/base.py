@@ -1,3 +1,10 @@
+"""
+config/settings/base.py —— Django 工程基础配置。
+
+包含所有环境共享的设置项：Installed Apps、中间件、数据库、
+REST Framework、JWT、CORS、Celery、日志、AI 等。
+开发和生产配置分别由 dev.py / prod.py 导入并覆盖必要的字段。
+"""
 from __future__ import annotations
 
 import os
@@ -9,15 +16,19 @@ import pymysql
 
 from config.ai import load_ai_settings
 
+# 将 pymysql 注册为 MySQLdb 兼容驱动（Django 默认使用 MySQLdb 接口）
 pymysql.install_as_MySQLdb()
 pymysql.version_info = (2, 2, 1, "final", 0)
 pymysql.__version__ = "2.2.1"
 
+# 项目根目录（backend/）
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
+# 从 .env 文件载入环境变量，开发模式下使用
 load_dotenv(BASE_DIR / ".env")
 
 
 def get_bool(name: str, default: bool = False) -> bool:
+    """从环境变量读取布尔值，支持 '1'/'true'/'yes'/'on' 形式。"""
     value = os.getenv(name)
     if value is None:
         return default
@@ -25,17 +36,23 @@ def get_bool(name: str, default: bool = False) -> bool:
 
 
 def get_list(name: str, default: list[str] | None = None) -> list[str]:
+    """从环境变量读取逗号分隔的字符串列表，自动去除空白项。"""
     value = os.getenv(name)
     if not value:
         return default or []
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+# 密钥，生产环境必须通过环境变量进行覆盖
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "django-insecure-change-me-please-replace-with-a-long-random-secret")
+# 调试模式，生产环境应为 False
 DEBUG = get_bool("DJANGO_DEBUG", False)
+# 允许访问的主机名列表
 ALLOWED_HOSTS = get_list("DJANGO_ALLOWED_HOSTS", ["127.0.0.1", "localhost"])
+# 信任的 CSRF 请求来源（包含前端域名）
 CSRF_TRUSTED_ORIGINS = get_list("DJANGO_CSRF_TRUSTED_ORIGINS", [])
 
+# 已安装的 App 列表：Django 内置应用 + 第三方和项目自定义 App
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -59,6 +76,7 @@ INSTALLED_APPS = [
     "apps.operations",
 ]
 
+# HTTP 请求处理链：按顺序依次执行
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "corsheaders.middleware.CorsMiddleware",
@@ -90,6 +108,7 @@ TEMPLATES = [
 WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
 
+# 数据库配置：有 DB_HOST 环境变量时使用 MySQL，否则回退到 SQLite（本地加密开发）
 db_host = os.getenv("DB_HOST")
 if db_host:
     DATABASES = {
@@ -113,7 +132,9 @@ else:
         }
     }
 
+# 展示语言和时区
 LANGUAGE_CODE = "zh-hans"
+# 默认上海时区，可通过环境变量配置
 TIME_ZONE = os.getenv("TIME_ZONE", "Asia/Shanghai")
 USE_I18N = True
 USE_TZ = True
@@ -125,6 +146,7 @@ MEDIA_ROOT = BASE_DIR / "media"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+# REST Framework 全局默认配置：使用 JWT 认证、登录用户才能访问、支持过滤和开放 API 文档
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
@@ -138,6 +160,7 @@ REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 }
 
+# JWT token 生命周期配置：Access Token 2小时，Refresh Token 7天（可通过环境变量调整）
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=int(os.getenv("JWT_ACCESS_MINUTES", "120"))),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=int(os.getenv("JWT_REFRESH_DAYS", "7"))),
@@ -150,14 +173,19 @@ SPECTACULAR_SETTINGS = {
     "VERSION": "1.0.0",
 }
 
+# CORS 跨域请求允许配置：开发模式下允许所有来源，生产应配置具体域名
 CORS_ALLOW_ALL_ORIGINS = get_bool("CORS_ALLOW_ALL_ORIGINS", DEBUG)
 CORS_ALLOWED_ORIGINS = get_list("CORS_ALLOWED_ORIGINS", [])
 
+# Redis 缓存地址
 REDIS_URL = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0")
+# Celery 消息代理（任务分发）使用 Redis DB1
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://127.0.0.1:6379/1")
+# Celery 任务结果存储使用 Redis DB2
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://127.0.0.1:6379/2")
 CELERY_TIMEZONE = TIME_ZONE
 
+# 日志配置：统一使用控制台输出，格式包含时间戳/级别/模块名；日志级别由 LOG_LEVEL 环境变量控制
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -178,4 +206,5 @@ LOGGING = {
     },
 }
 
+# 在模块加载时立即读取 AI 配置，挂载到 settings.AI_SETTINGS 供全局使用
 AI_SETTINGS = load_ai_settings()

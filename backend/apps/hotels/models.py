@@ -1,7 +1,10 @@
+"""apps/hotels/models.py —— 酒店与库存数据模型。"""
+
 from django.db import models
 
 
 class Hotel(models.Model):
+    """酒店基础信息模型。"""
     STATUS_DRAFT = "draft"
     STATUS_ONLINE = "online"
     STATUS_OFFLINE = "offline"
@@ -35,6 +38,7 @@ class Hotel(models.Model):
 
 
 class RoomType(models.Model):
+    """酒店房型定义模型。"""
     BED_SINGLE = "single"
     BED_DOUBLE = "double"
     BED_QUEEN = "queen"
@@ -78,6 +82,7 @@ class RoomType(models.Model):
 
 
 class RoomInventory(models.Model):
+    """房型按日期的价格与库存快照模型。"""
     STATUS_AVAILABLE = "available"
     STATUS_RESERVED = "reserved"
     STATUS_OCCUPIED = "occupied"

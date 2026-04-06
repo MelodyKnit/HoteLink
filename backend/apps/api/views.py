@@ -1,3 +1,28 @@
+"""
+apps/api/views.py —— 项目所有 REST API 视图类。
+
+按功能分为五组：
+  《系统》  ApiRootView / SystemInitCheckView / SystemInitSetupView
+  《认证》  UserRegisterView / BaseLoginView / UserLoginView / AdminLoginView /
+            RefreshTokenApiView / LogoutApiView / UserAuthMeView
+  《公共》  PublicHomeView / PublicHotelsView / PublicHotelSearchSuggestView /
+            PublicHotelDetailView / PublicHotelReviewsView / PublicRoomTypeCalendarView /
+            CommonCitiesView / CommonDictsView / CommonUploadView
+  《用户》  UserProfileView / UserProfileAvatarView / UserPasswordChangeView /
+            UserFavoritesView / UserOrdersView / UserOrdersDetailView /
+            UserOrdersCreateView / UserOrdersUpdateView / UserOrdersPayView /
+            UserOrdersCancelView / UserReviewsCreateView / UserPointsLogsView /
+            UserNoticesView / UserCouponsView / UserInvoicesView /
+            UserInvoiceTitleCreateView / UserInvoiceApplyView / UserAIChatView
+  《管理员》  AdminDashboardOverviewView / AdminDashboardChartsView / AdminHotelsView /
+            AdminRoomTypesView / AdminInventoryView / AdminOrdersView /
+            AdminOrdersDetailView / AdminOrdersChangeStatusView /
+            AdminOrdersCheckInView / AdminOrdersCheckOutView / AdminReviewsView /
+            AdminReviewsReplyView / AdminUsersView / AdminUsersChangeStatusView /
+            AdminEmployeesView / AdminSettingsView / AdminAISettingsView /
+            AdminAIReportSummaryView / AdminAIReviewSummaryView /
+            AdminAIReplySuggestionView / AdminReportTasksView
+"""
 from __future__ import annotations
 
 from datetime import timedelta
@@ -76,6 +101,10 @@ User = get_user_model()
 
 
 def ensure_profile(user: User) -> UserProfile:
+    """
+    确保用户存在对应的 UserProfile。
+    若不存在则自动创建，超级用户默认为 system_admin。
+    """
     defaults = {
         "nickname": user.username,
         "mobile": "",
@@ -87,6 +116,10 @@ def ensure_profile(user: User) -> UserProfile:
 
 
 def get_page_params(request) -> tuple[int, int]:
+    """
+    从查询参数中解析 page 和 page_size。
+    page 最小为 1，page_size 限制在 [1, 100] 之间。
+    """
     try:
         page = max(int(request.query_params.get("page", 1)), 1)
     except (TypeError, ValueError):
@@ -100,6 +133,12 @@ def get_page_params(request) -> tuple[int, int]:
 
 
 def paginate_queryset(queryset, page: int, page_size: int):
+    """
+    对 queryset 进行内存分页切片。
+
+    Returns:
+        (page_queryset, total) 元组：当前页数据切片和总记录数。
+    """
     total = queryset.count()
     start = (page - 1) * page_size
     end = start + page_size
@@ -107,6 +146,12 @@ def paginate_queryset(queryset, page: int, page_size: int):
 
 
 def build_tokens_for_user(user: User) -> dict:
+    """
+    为指定用户生成 JWT Access / Refresh Token 对。
+
+    Returns:
+        包含 access_token、refresh_token、token_type、expires_in 的字典。
+    """
     refresh = RefreshToken.for_user(user)
     return {
         "access_token": str(refresh.access_token),
@@ -117,16 +162,24 @@ def build_tokens_for_user(user: User) -> dict:
 
 
 def make_order_no() -> str:
+    """生成唯一订单号，格式：HT + 时间戳(14位) + 4位随机数字。"""
     now = timezone.localtime()
     return f"HT{now.strftime('%Y%m%d%H%M%S')}{get_random_string(4, allowed_chars='0123456789')}"
 
 
 def make_payment_no() -> str:
+    """生成唯一支付流水号，格式：PM + 时间戳(14位) + 4位随机数字。"""
     now = timezone.localtime()
     return f"PM{now.strftime('%Y%m%d%H%M%S')}{get_random_string(4, allowed_chars='0123456789')}"
 
 
 def fallback_ai_reply(scene: str) -> str:
+    """
+    当 AI 服务未配置或调用失败时返回占位回复文本。
+
+    Args:
+        scene: AI 场景标识：customer_service / report_summary / review_summary / reply_suggestion。
+    """
     if scene == "customer_service":
         return "您好，这里是智能客服助手。当前系统尚未接入真实 AI 服务，我可以先返回基础说明，建议后续接入 DeepSeek 后提供更准确回答。"
     if scene == "report_summary":
@@ -139,6 +192,7 @@ def fallback_ai_reply(scene: str) -> str:
 
 
 def get_dict_payload() -> dict:
+    """返回系统内置字典数据，包括酒店星级、支付方式、床型等列举选项。"""
     return {
         "hotel_star": [{"label": f"{i} 星", "value": i} for i in [2, 3, 4, 5]],
         "payment_method": [
@@ -159,6 +213,7 @@ def get_dict_payload() -> dict:
 
 
 class ApiRootView(APIView):
+    """API 根入口，返回版本和用户端/管理端基准路径。"""
     permission_classes = [AllowAny]
 
     def get(self, request):
@@ -173,6 +228,7 @@ class ApiRootView(APIView):
 
 
 class UserRegisterView(APIView):
+    """用户注册接口：创建 Django 用户并初始化 UserProfile。"""
     permission_classes = [AllowAny]
 
     def post(self, request):
@@ -195,6 +251,7 @@ class UserRegisterView(APIView):
 
 
 class SystemInitCheckView(APIView):
+    """系统初始化状态检查：判断是否已存在管理员账号。"""
     """检查系统是否已完成初始化（是否存在管理员账号）"""
     permission_classes = [AllowAny]
 
@@ -206,6 +263,7 @@ class SystemInitCheckView(APIView):
 
 
 class SystemInitSetupView(APIView):
+    """系统首次初始化：创建首个系统管理员并返回登录令牌。"""
     """首次初始化：创建管理员账号（仅当系统中无管理员时可用）"""
     permission_classes = [AllowAny]
 
@@ -247,6 +305,7 @@ class SystemInitSetupView(APIView):
 
 
 class BaseLoginView(APIView):
+    """通用登录基类：完成用户名密码校验、角色限制和 JWT 发放。"""
     permission_classes = [AllowAny]
     required_roles: set[str] | None = None
 
@@ -281,14 +340,17 @@ class BaseLoginView(APIView):
 
 
 class UserLoginView(BaseLoginView):
+    """前台用户登录入口，允许 user/hotel_admin/system_admin。"""
     required_roles = {"user", "hotel_admin", "system_admin"}
 
 
 class AdminLoginView(BaseLoginView):
+    """管理端登录入口，仅允许 hotel_admin/system_admin。"""
     required_roles = {"hotel_admin", "system_admin"}
 
 
 class RefreshTokenApiView(APIView):
+    """刷新 Access Token 接口：使用 refresh_token 续期登录态。"""
     permission_classes = [AllowAny]
 
     def post(self, request):
@@ -308,6 +370,7 @@ class RefreshTokenApiView(APIView):
 
 
 class LogoutApiView(APIView):
+    """退出登录接口（无状态 JWT 场景下返回前端确认结果）。"""
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -315,6 +378,7 @@ class LogoutApiView(APIView):
 
 
 class UserAuthMeView(APIView):
+    """当前登录用户信息接口。"""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -323,6 +387,7 @@ class UserAuthMeView(APIView):
 
 
 class CommonCitiesView(APIView):
+    """公共城市列表接口：返回酒店库中可选城市。"""
     permission_classes = [AllowAny]
 
     def get(self, request):
@@ -331,6 +396,7 @@ class CommonCitiesView(APIView):
 
 
 class CommonDictsView(APIView):
+    """公共字典接口：返回星级、支付方式、床型等静态枚举。"""
     permission_classes = [AllowAny]
 
     def get(self, request):
@@ -346,6 +412,7 @@ class CommonDictsView(APIView):
 
 
 class CommonUploadView(APIView):
+    """通用文件上传接口：按业务场景保存文件并返回可访问 URL。"""
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser]
 
@@ -361,6 +428,7 @@ class CommonUploadView(APIView):
 
 
 class PublicHomeView(APIView):
+    """首页聚合接口：返回推荐酒店、推荐房型和活动信息。"""
     permission_classes = [AllowAny]
 
     def get(self, request):
@@ -381,6 +449,7 @@ class PublicHomeView(APIView):
 
 
 class PublicHotelsView(APIView):
+    """酒店列表检索接口：支持关键字、城市、价格、星级和排序分页。"""
     permission_classes = [AllowAny]
 
     def get(self, request):
@@ -423,6 +492,7 @@ class PublicHotelsView(APIView):
 
 
 class PublicHotelSearchSuggestView(APIView):
+    """酒店搜索建议接口：按关键字返回简要联想候选。"""
     permission_classes = [AllowAny]
 
     def get(self, request):
@@ -435,6 +505,7 @@ class PublicHotelSearchSuggestView(APIView):
 
 
 class PublicHotelDetailView(APIView):
+    """酒店详情接口：返回酒店信息及房型明细。"""
     permission_classes = [AllowAny]
 
     def get(self, request):
@@ -449,6 +520,7 @@ class PublicHotelDetailView(APIView):
 
 
 class PublicHotelReviewsView(APIView):
+    """酒店评价列表接口：支持评分筛选和分页。"""
     permission_classes = [AllowAny]
 
     def get(self, request):
@@ -470,6 +542,7 @@ class PublicHotelReviewsView(APIView):
 
 
 class PublicRoomTypeCalendarView(APIView):
+    """房型日历库存接口：查询区间库存，不存在时按默认库存回填。"""
     permission_classes = [AllowAny]
 
     def get(self, request):
@@ -508,6 +581,7 @@ class PublicRoomTypeCalendarView(APIView):
 
 
 class UserProfileView(APIView):
+    """用户资料接口：查询和更新昵称/手机号/性别/生日/邮箱。"""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -530,6 +604,7 @@ class UserProfileView(APIView):
 
 
 class UserProfileAvatarView(APIView):
+    """用户头像上传接口。"""
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser]
 
@@ -545,6 +620,7 @@ class UserProfileAvatarView(APIView):
 
 
 class UserPasswordChangeView(APIView):
+    """用户修改密码接口，需校验旧密码。"""
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -560,6 +636,7 @@ class UserPasswordChangeView(APIView):
 
 
 class UserFavoritesView(APIView):
+    """用户收藏接口：查询收藏列表并支持新增/取消收藏。"""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -589,6 +666,7 @@ class UserFavoritesView(APIView):
 
 
 class UserOrdersView(APIView):
+    """用户订单列表接口：按状态筛选并分页返回。"""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -607,6 +685,7 @@ class UserOrdersView(APIView):
 
 
 class UserOrdersDetailView(APIView):
+    """用户订单详情接口，仅允许查看自己的订单。"""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -620,6 +699,7 @@ class UserOrdersDetailView(APIView):
 
 
 class UserOrdersCreateView(APIView):
+    """创建订单接口：校验房型与日期后生成订单并写入站内通知。"""
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -677,6 +757,7 @@ class UserOrdersCreateView(APIView):
 
 
 class UserOrdersUpdateView(APIView):
+    """用户订单更新接口：修改联系人姓名/手机号/备注。"""
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -695,6 +776,7 @@ class UserOrdersUpdateView(APIView):
 
 
 class UserOrdersPayView(APIView):
+    """用户订单支付接口：创建支付记录并更新订单支付状态。"""
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -729,6 +811,7 @@ class UserOrdersPayView(APIView):
 
 
 class UserOrdersCancelView(APIView):
+    """用户取消订单接口：限制已入住/已完成/已取消订单不可取消。"""
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -748,6 +831,7 @@ class UserOrdersCancelView(APIView):
 
 
 class UserReviewsCreateView(APIView):
+    """用户评价创建接口：可新增或更新评价，首评奖励积分。"""
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -775,6 +859,7 @@ class UserReviewsCreateView(APIView):
 
 
 class UserPointsLogsView(APIView):
+    """用户积分日志接口：返回当前积分及简要来源。"""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -793,6 +878,7 @@ class UserPointsLogsView(APIView):
 
 
 class UserNoticesView(APIView):
+    """用户站内通知列表接口。"""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -808,6 +894,7 @@ class UserNoticesView(APIView):
 
 
 class UserCouponsView(APIView):
+    """用户优惠券列表接口。"""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -818,6 +905,7 @@ class UserCouponsView(APIView):
 
 
 class UserInvoicesView(APIView):
+    """用户发票申请记录列表接口。"""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -828,6 +916,7 @@ class UserInvoicesView(APIView):
 
 
 class UserInvoiceTitleCreateView(APIView):
+    """用户新增发票抬头接口。"""
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -839,6 +928,7 @@ class UserInvoiceTitleCreateView(APIView):
 
 
 class UserInvoiceApplyView(APIView):
+    """用户申请开票接口：关联订单与发票抬头生成申请。"""
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -855,6 +945,7 @@ class UserInvoiceApplyView(APIView):
 
 
 class UserAIChatView(APIView):
+    """用户 AI 客服接口：优先调用模型服务，失败时返回兜底文案。"""
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -880,6 +971,7 @@ class UserAIChatView(APIView):
 
 
 class AdminDashboardOverviewView(APIView):
+    """管理端仪表盘总览接口：统计今日订单、营收、入住率等关键指标。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
 
     def get(self, request):
@@ -908,6 +1000,7 @@ class AdminDashboardOverviewView(APIView):
 
 
 class AdminDashboardChartsView(APIView):
+    """管理端图表数据接口：按日期区间聚合订单量与营收。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
 
     def get(self, request):
@@ -930,6 +1023,7 @@ class AdminDashboardChartsView(APIView):
 
 
 class AdminHotelsView(APIView):
+    """酒店管理接口：列表查询、创建、更新与删除。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
 
     def get(self, request):
@@ -971,6 +1065,7 @@ class AdminHotelsView(APIView):
 
 
 class AdminRoomTypesView(APIView):
+    """房型管理接口：列表查询、创建、更新与删除。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
 
     def get(self, request):
@@ -1009,6 +1104,7 @@ class AdminRoomTypesView(APIView):
 
 
 class AdminInventoryView(APIView):
+    """库存日历管理接口：按日期和房型查询，并支持单日库存更新。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
 
     def get(self, request):
@@ -1045,6 +1141,7 @@ class AdminInventoryView(APIView):
 
 
 class AdminOrdersView(APIView):
+    """管理员订单列表接口：支持关键词与状态筛选。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
 
     def get(self, request):
@@ -1065,6 +1162,7 @@ class AdminOrdersView(APIView):
 
 
 class AdminOrdersDetailView(APIView):
+    """管理员订单详情接口。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
 
     def get(self, request):
@@ -1076,6 +1174,7 @@ class AdminOrdersDetailView(APIView):
 
 
 class AdminOrdersChangeStatusView(APIView):
+    """管理员订单状态流转接口。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
 
     def post(self, request):
@@ -1091,6 +1190,7 @@ class AdminOrdersChangeStatusView(APIView):
 
 
 class AdminOrdersCheckInView(APIView):
+    """入住办理接口：写入房号并切换订单状态为已入住。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
 
     def post(self, request):
@@ -1109,6 +1209,7 @@ class AdminOrdersCheckInView(APIView):
 
 
 class AdminOrdersCheckOutView(APIView):
+    """退房办理接口：切换订单状态为已完成。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
 
     def post(self, request):
@@ -1126,6 +1227,7 @@ class AdminOrdersCheckOutView(APIView):
 
 
 class AdminReviewsView(APIView):
+    """管理员评价列表接口。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
 
     def get(self, request):
@@ -1139,6 +1241,7 @@ class AdminReviewsView(APIView):
 
 
 class AdminReviewsReplyView(APIView):
+    """管理员评价回复接口。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
 
     def post(self, request):
@@ -1154,6 +1257,7 @@ class AdminReviewsReplyView(APIView):
 
 
 class AdminUsersView(APIView):
+    """管理员用户列表接口。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
 
     def get(self, request):
@@ -1167,6 +1271,7 @@ class AdminUsersView(APIView):
 
 
 class AdminUsersChangeStatusView(APIView):
+    """管理员用户状态修改接口。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
 
     def post(self, request):
@@ -1182,6 +1287,7 @@ class AdminUsersChangeStatusView(APIView):
 
 
 class AdminEmployeesView(APIView):
+    """管理员员工管理接口：查询员工列表并创建管理员账号。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
 
     def get(self, request):
@@ -1209,6 +1315,7 @@ class AdminEmployeesView(APIView):
 
 
 class AdminSettingsView(APIView):
+    """平台设置接口：读取与更新系统展示配置。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
 
     def get(self, request):
@@ -1228,6 +1335,7 @@ class AdminSettingsView(APIView):
 
 
 class AdminAISettingsView(APIView):
+    """AI 设置接口：查询当前 AI 配置并接收更新参数。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
 
     def get(self, request):
@@ -1251,6 +1359,7 @@ class AdminAISettingsView(APIView):
 
 
 class AdminAIReportSummaryView(APIView):
+    """AI 报表摘要接口：根据订单数据生成运营总结文案。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
 
     def post(self, request):
@@ -1268,6 +1377,7 @@ class AdminAIReportSummaryView(APIView):
 
 
 class AdminAIReviewSummaryView(APIView):
+    """AI 评价摘要接口：聚合评价区间数据并输出洞察总结。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
 
     def post(self, request):
@@ -1284,6 +1394,7 @@ class AdminAIReviewSummaryView(APIView):
 
 
 class AdminAIReplySuggestionView(APIView):
+    """AI 回复建议接口：基于评价内容生成客服回复建议。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
 
     def post(self, request):
@@ -1298,6 +1409,7 @@ class AdminAIReplySuggestionView(APIView):
 
 
 class AdminReportTasksView(APIView):
+    """报表任务接口：查询任务列表并创建示例报表任务。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
 
     def get(self, request):

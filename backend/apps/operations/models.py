@@ -1,8 +1,11 @@
+"""apps/operations/models.py —— 审计日志与系统通知模型。"""
+
 from django.conf import settings
 from django.db import models
 
 
 class AuditLog(models.Model):
+    """审计日志模型，记录关键操作事件。"""
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="audit_logs")
     action = models.CharField(max_length=100)
     target = models.CharField(max_length=100, blank=True)
@@ -19,6 +22,7 @@ class AuditLog(models.Model):
 
 
 class SystemNotice(models.Model):
+    """系统通知模型，向用户推送站内消息。"""
     TYPE_ORDER = "order"
     TYPE_PAYMENT = "payment"
     TYPE_ACTIVITY = "activity"

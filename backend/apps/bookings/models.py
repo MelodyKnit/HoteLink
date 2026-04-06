@@ -1,8 +1,11 @@
+"""apps/bookings/models.py —— 订单核心数据模型。"""
+
 from django.conf import settings
 from django.db import models
 
 
 class BookingOrder(models.Model):
+    """用户预订订单模型，记录支付状态与入住周期。"""
     STATUS_PENDING_PAYMENT = "pending_payment"
     STATUS_PAID = "paid"
     STATUS_CONFIRMED = "confirmed"

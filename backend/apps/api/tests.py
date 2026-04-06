@@ -1,3 +1,5 @@
+"""apps/api/tests.py —— API 集成测试用例集合。"""
+
 from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -18,8 +20,10 @@ User = get_user_model()
 
 
 class ApiBaseTestCase(APITestCase):
+    """API 测试基类，准备账号、酒店、房型、订单等公共夹具。"""
     @classmethod
     def setUpTestData(cls):
+        """构造全量测试基准数据。"""
         cls.admin_user = User.objects.create_user(username="admin", password="Password123")
         UserProfile.objects.create(
             user=cls.admin_user,
@@ -101,6 +105,7 @@ class ApiBaseTestCase(APITestCase):
         )
 
     def login_user(self):
+        """登录普通用户并注入 Authorization 头。"""
         response = self.client.post(
             "/api/v1/public/auth/login",
             {"username": "zhangsan", "password": "Password123"},
@@ -110,6 +115,7 @@ class ApiBaseTestCase(APITestCase):
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {response.json()['data']['access_token']}")
 
     def login_admin(self):
+        """登录管理员并注入 Authorization 头。"""
         response = self.client.post(
             "/api/v1/public/auth/admin-login",
             {"username": "admin", "password": "Password123"},
@@ -120,7 +126,9 @@ class ApiBaseTestCase(APITestCase):
 
 
 class PublicApiTests(ApiBaseTestCase):
+    """公共接口测试集合。"""
     def test_public_home_and_hotel_search(self):
+        """验证公共首页和酒店搜索接口可用。"""
         home = self.client.get("/api/v1/public/home")
         self.assertEqual(home.status_code, 200)
         self.assertEqual(home.json()["code"], 0)
@@ -134,6 +142,7 @@ class PublicApiTests(ApiBaseTestCase):
         self.assertGreaterEqual(len(suggest.json()["data"]["items"]), 1)
 
     def test_common_dicts_and_cities(self):
+        """验证公共字典与城市接口返回结构。"""
         cities = self.client.get("/api/v1/common/cities")
         self.assertEqual(cities.status_code, 200)
         self.assertEqual(cities.json()["data"]["items"][0]["value"], "北京")
@@ -145,7 +154,9 @@ class PublicApiTests(ApiBaseTestCase):
 
 
 class UserApiTests(ApiBaseTestCase):
+    """用户端接口测试集合。"""
     def test_user_order_flow(self):
+        """验证用户创建订单并支付的核心流程。"""
         self.login_user()
 
         create_response = self.client.post(
@@ -173,6 +184,7 @@ class UserApiTests(ApiBaseTestCase):
         self.assertEqual(pay_response.json()["data"]["payment_status"], "paid")
 
     def test_user_profile_upload_password_coupon_and_invoice(self):
+        """验证头像上传、改密、优惠券和开票流程。"""
         self.login_user()
         test_media_root = Path(__file__).resolve().parents[3] / "test_media"
         if test_media_root.exists():
@@ -213,7 +225,9 @@ class UserApiTests(ApiBaseTestCase):
 
 
 class AdminApiTests(ApiBaseTestCase):
+    """管理端接口测试集合。"""
     def test_admin_dashboard_inventory_and_settings(self):
+        """验证管理端总览、库存更新和设置接口。"""
         self.login_admin()
 
         overview = self.client.get("/api/v1/admin/dashboard/overview")
@@ -243,6 +257,7 @@ class AdminApiTests(ApiBaseTestCase):
         self.assertIn("provider", ai_settings.json()["data"])
 
     def test_admin_can_create_employee(self):
+        """验证管理员创建员工账号流程。"""
         self.login_admin()
         response = self.client.post(
             "/api/v1/admin/employees/create",

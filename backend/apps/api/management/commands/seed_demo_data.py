@@ -1,3 +1,5 @@
+"""seed_demo_data 命令：初始化本地联调所需的演示数据。"""
+
 from datetime import timedelta
 from decimal import Decimal
 
@@ -15,9 +17,11 @@ User = get_user_model()
 
 
 class Command(BaseCommand):
+    """初始化演示数据的 Django 管理命令。"""
     help = "初始化 HoteLink 开发演示数据"
 
     def handle(self, *args, **options):
+        """执行演示数据初始化流程。"""
         admin_user, _ = User.objects.get_or_create(username="admin", defaults={"email": "admin@example.com"})
         admin_user.set_password("Password123")
         admin_user.is_staff = True

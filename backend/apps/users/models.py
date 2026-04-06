@@ -1,8 +1,11 @@
+"""apps/users/models.py —— 用户档案扩展模型。"""
+
 from django.conf import settings
 from django.db import models
 
 
 class UserProfile(models.Model):
+    """用户扩展资料模型，承载角色、状态、会员等级与积分信息。"""
     ROLE_USER = "user"
     ROLE_HOTEL_ADMIN = "hotel_admin"
     ROLE_SYSTEM_ADMIN = "system_admin"
