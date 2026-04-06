@@ -185,19 +185,43 @@ export const settingsApi = {
   update: (data: Record<string, unknown>) => post('/admin/settings/update', data),
 }
 
+// ========== System ==========
+export const adminSystemApi = {
+  reset: (confirm: string) => post<{ reset: boolean; deleted_counts: Record<string, number>; message: string }>('/admin/system/reset', { confirm }),
+}
+
 // ========== AI ==========
 export const aiApi = {
   reportSummary: (data: Record<string, unknown>) => post('/admin/ai/report-summary', data),
   reviewSummary: (data: Record<string, unknown>) => post('/admin/ai/review-summary', data),
-  replySuggestion: (review_id: number) => post('/admin/ai/reply-suggestion', { review_id }),
-  settings: () => get('/admin/ai/settings'),
+  replySuggestion: (payload: number | { review_id: number }) =>
+    post('/admin/ai/reply-suggestion', typeof payload === 'number' ? { review_id: payload } : payload),
+  settings: () => get<{
+    ai_enabled: boolean
+    active_provider: string
+    providers: { name: string; label: string; base_url: string; api_key_configured: boolean; chat_model: string; reasoning_model: string; timeout: number; is_active: boolean }[]
+    builtin_providers: string[]
+    current_provider: Record<string, unknown> | null
+  }>('/admin/ai/settings'),
   updateSettings: (data: Record<string, unknown>) => post('/admin/ai/settings/update', data),
+  addProvider: (data: { name: string; label?: string; base_url: string; api_key?: string; chat_model: string; reasoning_model?: string; timeout?: number }) =>
+    post('/admin/ai/provider/add', data),
+  switchProvider: (provider_name: string) => post('/admin/ai/provider/switch', { provider_name }),
+  deleteProvider: (provider_name: string) => post('/admin/ai/provider/delete', { provider_name }),
 }
 
 // ========== Common ==========
 export const commonApi = {
   cities: () => get<{ items: { label: string; value: string }[] }>('/common/cities'),
   dicts: (types: string) => get('/common/dicts', { types }),
+  upload: (file: File, scene: string) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    fd.append('scene', scene)
+    return http.post<ApiResult<{ file_name: string; file_url: string; scene: string }>>('/common/upload', fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data)
+  },
 }
 
 // ========== Public (User-Web) ==========

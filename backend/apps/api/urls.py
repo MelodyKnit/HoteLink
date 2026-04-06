@@ -5,8 +5,12 @@ from django.urls import path
 from apps.api.views import (
     AdminAIReportSummaryView,
     AdminAISettingsView,
+    AdminAIProviderAddView,
+    AdminAIProviderSwitchView,
+    AdminAIProviderDeleteView,
     AdminAIReplySuggestionView,
     AdminAIReviewSummaryView,
+    AdminSystemResetView,
     SystemInitCheckView,
     SystemInitSetupView,
     AdminDashboardChartsView,
@@ -138,4 +142,9 @@ urlpatterns = [
     path("admin/ai/reply-suggestion", AdminAIReplySuggestionView.as_view(), name="admin-ai-reply-suggestion"),
     path("admin/ai/settings", AdminAISettingsView.as_view(), name="admin-ai-settings"),
     path("admin/ai/settings/update", AdminAISettingsView.as_view(), name="admin-ai-settings-update"),
+    path("admin/ai/provider/add", AdminAIProviderAddView.as_view(), name="admin-ai-provider-add"),
+    path("admin/ai/provider/switch", AdminAIProviderSwitchView.as_view(), name="admin-ai-provider-switch"),
+    path("admin/ai/provider/delete", AdminAIProviderDeleteView.as_view(), name="admin-ai-provider-delete"),
+    # 系统重置接口
+    path("admin/system/reset", AdminSystemResetView.as_view(), name="admin-system-reset"),
 ]

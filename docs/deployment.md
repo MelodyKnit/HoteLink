@@ -99,6 +99,40 @@ sh ./scripts/docker.sh prod up
 
 ## 4. 开发环境部署
 
+## 4.1 测试数据准备（新增）
+
+为了快速验证功能，可使用随机数据脚本批量生成测试数据：
+
+```bash
+cd backend
+python ../scripts/generate_random_data.py --users 30 --hotels 8 --orders 120 --reviews 50
+```
+
+脚本位置：
+
+- `scripts/generate_random_data.py`
+
+默认会生成：
+
+- 用户与用户档案
+- 酒店与房型
+- 订单
+- 评价
+
+## 4.2 系统重置说明（新增）
+
+管理端“系统设置”页面已提供系统重置能力，可清空业务数据恢复初始状态。
+
+安全要求：
+
+- 仅系统管理员可执行
+- 必须输入 `RESET` 并二次确认
+- 该操作不可逆，建议仅在测试环境使用
+
+接口：
+
+- `POST /api/v1/admin/system/reset`
+
 ### 4.1 目的
 
 开发环境的设计目标：

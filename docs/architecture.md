@@ -161,15 +161,17 @@ HoteLink/
 负责：
 
 - 酒店基础资料
+- 酒店图片管理（封面图 + 图片画廊）
 - 房型管理
+- 房型图片管理
 - 房间管理
 - 房态管理
 - 设施服务
 
 核心实体建议：
 
-- Hotel
-- RoomType
+- Hotel（含 `cover_image` URLField、`images` JSONField）
+- RoomType（含 `image` URLField）
 - Room
 - RoomInventory
 - Facility
@@ -245,7 +247,9 @@ HoteLink/
 
 - AI 配置读取
 - AI Provider 统一封装
+- 多 Provider 并行配置与运行时切换
 - DeepSeek 模型接入
+- OpenAI / 智谱 / Moonshot / Qwen 等兼容模型接入
 - Prompt 模板管理
 - AI 审计与调用日志
 - 业务侧 AI 能力服务化输出
@@ -255,6 +259,20 @@ HoteLink/
 - AI 能力归属于 `operations` 或独立 `ai` 域都可以
 - 当前项目已先在 `config.ai` 和 `apps.operations.services.ai_service` 放置基础接入骨架
 - 等后续 AI 相关功能增多时，可再独立拆分 `apps.ai`
+
+### 6.9 system-ops（新增）
+
+负责：
+
+- 管理端系统重置能力
+- 测试环境一键回到初始状态
+- 高危操作审计与权限控制
+
+关键约束：
+
+- 仅 `system_admin` 可以执行重置
+- 需要明确确认字符串（`RESET`）
+- 重置默认保留管理员账号，其余业务数据清空
 
 ## 7. 接口规范建议
 
@@ -346,7 +364,26 @@ HoteLink/
 - Less：主题变量、业务组件样式、品牌皮肤
 - ECharts：统计面板、趋势分析、经营报表的数据可视化
 
-## 8.4 当前前端工程状态
+## 8.4 公共组件与交互体系
+
+### 8.4.1 Toast 通知组件
+
+`packages/ui` 中提供了全局 Toast 通知能力：
+
+- `Toast.vue`：支持 `success`、`error`、`warning`、`info` 四种类型，使用 Teleport 挂载到 `body`，含滑入动画与自动关闭
+- `useToast.ts`：全局状态 composable，通过 `showToast(message, type, duration?)` 触发通知，`closeToast()` 手动关闭
+
+所有管理端视图（酒店管理、房型管理、订单管理、库存管理、评价管理、系统设置）均已接入 Toast，对异步操作的成功与失败进行统一反馈。
+
+### 8.4.2 图片上传
+
+- 后端通过 `POST /api/v1/common/upload` 接收文件，保存至 `media/uploads/{scene}/`，返回文件 URL
+- 前端 `packages/api` 中 `commonApi.upload(file, scene)` 封装了 FormData 上传
+- 酒店管理支持封面图 (`cover_image`) 和图片画廊 (`images` JSON 数组) 的上传与管理
+- 房型管理支持主图 (`image`) 的上传与管理
+- 开发环境下 Django 通过 `static()` 直接提供 `/media/` 文件访问
+
+## 8.5 当前前端工程状态
 
 当前已经完成：
 

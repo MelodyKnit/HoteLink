@@ -47,6 +47,7 @@ class HotelSimpleSerializer(serializers.ModelSerializer):
             "star",
             "phone",
             "cover_image",
+            "images",
             "rating",
             "min_price",
             "status",
@@ -72,6 +73,7 @@ class RoomTypeSerializer(serializers.ModelSerializer):
             "max_guest_count",
             "stock",
             "status",
+            "image",
             "description",
         ]
 
@@ -91,6 +93,7 @@ class HotelDetailSerializer(serializers.ModelSerializer):
             "phone",
             "description",
             "cover_image",
+            "images",
             "rating",
             "min_price",
             "status",
@@ -297,6 +300,7 @@ class HotelCreateSerializer(serializers.ModelSerializer):
             "phone",
             "description",
             "cover_image",
+            "images",
             "rating",
             "min_price",
             "is_recommended",
@@ -323,6 +327,7 @@ class RoomTypeCreateSerializer(serializers.ModelSerializer):
             "max_guest_count",
             "stock",
             "status",
+            "image",
             "description",
         ]
 
@@ -487,6 +492,38 @@ class SettingsUpdateSerializer(serializers.Serializer):
 
 
 class AISettingsUpdateSerializer(serializers.Serializer):
-    """AISettingsUpdate 序列化器：用于接口参数校验或响应数据转换。"""
+    """AISettingsUpdate 序列化器：支持多供应商配置更新。"""
     ai_enabled = serializers.BooleanField(required=False)
-    default_scene = serializers.CharField(max_length=50, required=False)
+    active_provider = serializers.CharField(max_length=50, required=False)
+    providers = serializers.ListField(child=serializers.DictField(), required=False)
+
+
+class AIProviderCreateSerializer(serializers.Serializer):
+    """AIProviderCreate 序列化器：新增或编辑单个 AI 供应商。"""
+    name = serializers.SlugField(max_length=50)
+    label = serializers.CharField(max_length=100, required=False)
+    base_url = serializers.URLField()
+    api_key = serializers.CharField(max_length=500, required=False, allow_blank=True)
+    chat_model = serializers.CharField(max_length=100)
+    reasoning_model = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    timeout = serializers.FloatField(min_value=1, max_value=300, required=False, default=60)
+
+
+class AIProviderSwitchSerializer(serializers.Serializer):
+    """AIProviderSwitch 序列化器：切换活跃供应商。"""
+    provider_name = serializers.CharField(max_length=50)
+
+
+class AIProviderDeleteSerializer(serializers.Serializer):
+    """AIProviderDelete 序列化器：删除供应商。"""
+    provider_name = serializers.CharField(max_length=50)
+
+
+class SystemResetSerializer(serializers.Serializer):
+    """SystemReset 序列化器：系统重置确认。"""
+    confirm = serializers.CharField()
+
+    def validate_confirm(self, value: str) -> str:
+        if value != "RESET":
+            raise serializers.ValidationError("请输入 RESET 以确认重置操作")
+        return value

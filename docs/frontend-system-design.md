@@ -157,6 +157,7 @@ flowchart TD
     DASH --> AUTH["权限中心"]
     DASH --> LOG["审计日志"]
     DASH --> AI["AI 助手 / AI 配置"]
+    DASH --> RESET["系统重置（高危操作）"]
 ```
 
 ## 7. 用户端界面设计清单
@@ -496,14 +497,30 @@ flowchart TD
 - 要支持酒店前台快速查看和切换
 - 移动端可退化为卡片式房态列表
 
+#### 3.5 酒店管理页
+
+核心模块：
+
+- 酒店列表（含封面图缩略图展示）
+- 新建 / 编辑酒店（封面图上传、图片画廊管理）
+- 酒店基本信息（名称、城市、地址、星级、电话、描述）
+- 酒店状态管理（草稿 / 上架 / 下架）
+- 删除酒店
+
+设计要求：
+
+- 图片上传通过通用上传接口（`/api/v1/common/upload`）实现
+- 封面图和画廊图片支持预览和删除
+- 所有操作通过 Toast 通知反馈成功或失败
+
 #### 4. 房型管理页
 
 核心模块：
 
-- 房型列表
+- 房型列表（含房型主图缩略图展示）
 - 房型价格
 - 房型政策
-- 房型图片
+- 房型图片上传与管理（主图上传、预览、删除）
 - 上下架状态
 
 #### 5. 房间管理页
@@ -738,6 +755,21 @@ flowchart TD
 - 消息配置
 - API 配置
 
+#### 27.1 系统重置区（高危）
+
+核心模块：
+
+- 危险操作提示
+- 输入 `RESET` 二次确认
+- 重置进度与结果反馈
+- 风险说明与不可逆提示
+
+设计要求：
+
+- 使用红色危险色系强调风险
+- 必须有文本确认 + 浏览器二次确认
+- 仅系统管理员角色可见
+
 #### 28. 通知中心页
 
 核心模块：
@@ -772,7 +804,8 @@ flowchart TD
 
 核心模块：
 
-- Provider 选择
+- Provider 列表管理（新增 / 编辑 / 删除）
+- 活跃 Provider 切换
 - 模型配置
 - 超时配置
 - 开关控制
@@ -910,7 +943,34 @@ flowchart LR
 - 表格在移动端退化为卡片
 - 筛选器在移动端进入抽屉
 
-## 13. 推荐下一步设计顺序
+## 13. 公共组件与交互体系
+
+### 13.1 Toast 通知组件
+
+`packages/ui` 中提供全局 Toast 通知能力，已在所有管理端视图中统一接入：
+
+- **组件**：`Toast.vue` — 支持 `success`、`error`、`warning`、`info` 四种类型，使用 Teleport 挂载，含滑入动画与自动消失
+- **Composable**：`useToast()` — 全局状态管理，`showToast(message, type, duration?)` 触发通知
+
+使用方式：
+
+```vue
+<script setup>
+import { Toast, useToast } from '@hotelink/ui'
+const { toastVisible, toastMessage, toastType, showToast, closeToast } = useToast()
+</script>
+<template>
+  <Toast :visible="toastVisible" :message="toastMessage" :type="toastType" @close="closeToast" />
+</template>
+```
+
+### 13.2 图片上传
+
+- 前端通过 `commonApi.upload(file, scene)` 调用通用上传接口
+- 支持场景标识：`hotel`（酒店图片）、`room_type`（房型主图）等
+- 上传后返回文件 URL，前端在表单中保存 URL
+
+## 14. 推荐下一步设计顺序
 
 建议按下面顺序推进前端设计与开发：
 

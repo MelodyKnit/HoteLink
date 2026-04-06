@@ -83,6 +83,11 @@ import * as echarts from 'echarts'
 import { dashboardApi, reportApi, hotelApi } from '@hotelink/api'
 import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination } from '@hotelink/ui'
 
+interface HotelOption {
+  id: number
+  name: string
+}
+
 const revenueRef = ref<HTMLElement>()
 const orderRef = ref<HTMLElement>()
 let revenueChart: echarts.ECharts | null = null
@@ -110,7 +115,7 @@ const taskPage = ref(1)
 const taskPageSize = ref(10)
 const taskTotal = ref(0)
 
-const hotels = ref<Record<string, unknown>[]>([])
+const hotels = ref<HotelOption[]>([])
 const showCreate = ref(false)
 const form = reactive({ report_type: 'revenue', hotel_id: '' as string | number, start_date: '', end_date: '' })
 
@@ -162,7 +167,10 @@ async function loadTasks() {
 async function loadHotels() {
   const res = await hotelApi.list({ page: 1, page_size: 200 })
   if (res.code === 0 && res.data) {
-    hotels.value = (res.data as unknown as { items: Record<string, unknown>[] }).items || []
+    hotels.value = ((res.data as unknown as { items: HotelOption[] }).items || []).map(item => ({
+      id: Number(item.id),
+      name: String(item.name || ''),
+    }))
   }
 }
 

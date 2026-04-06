@@ -16,6 +16,10 @@
 
     <div class="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
       <DataTable :columns="columns" :rows="list" :loading="loading">
+        <template #col-image="{ value }">
+          <img v-if="value" :src="String(value)" alt="房型图" class="h-10 w-14 rounded object-cover" />
+          <span v-else class="text-xs text-slate-400">暂无</span>
+        </template>
         <template #col-bed_type="{ value }">{{ BED_TYPE_MAP[value as string] || value }}</template>
         <template #col-base_price="{ value }">¥{{ formatMoney(value as number) }}</template>
         <template #col-status="{ value }">
@@ -76,6 +80,18 @@
             <option value="offline">下架</option>
           </select>
         </div>
+        <!-- 房型主图 -->
+        <div class="sm:col-span-2">
+          <label class="mb-1 block text-sm font-medium">房型图片</label>
+          <div class="flex items-center gap-3">
+            <img v-if="form.image" :src="form.image" alt="房型图" class="h-20 w-28 rounded-lg object-cover ring-1 ring-slate-200" />
+            <label class="cursor-pointer rounded-lg border-2 border-dashed border-slate-300 px-4 py-2 text-sm text-slate-500 hover:border-teal-400 hover:text-teal-600">
+              {{ uploading ? '上传中…' : '选择图片' }}
+              <input type="file" accept="image/*" class="hidden" :disabled="uploading" @change="handleImageUpload" />
+            </label>
+            <button v-if="form.image" type="button" class="text-sm text-red-500 hover:underline" @click="form.image = ''">移除</button>
+          </div>
+        </div>
       </form>
       <template #footer>
         <button class="rounded-lg border border-slate-200 px-4 py-2 text-sm hover:bg-slate-50" @click="showModal = false">取消</button>
@@ -84,17 +100,22 @@
         </button>
       </template>
     </ModalDialog>
+
+    <Toast :visible="toastVisible" :message="toastMessage" :type="toastType" @close="closeToast" />
   </section>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { roomTypeApi, hotelApi } from '@hotelink/api'
+import { roomTypeApi, hotelApi, commonApi } from '@hotelink/api'
 import { formatMoney, BED_TYPE_MAP } from '@hotelink/utils'
-import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination } from '@hotelink/ui'
+import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, Toast, useToast } from '@hotelink/ui'
+
+const { toastVisible, toastMessage, toastType, showToast, closeToast } = useToast()
 
 const columns = [
   { key: 'id', label: 'ID' },
+  { key: 'image', label: '图片' },
   { key: 'name', label: '房型名称' },
   { key: 'hotel_name', label: '所属酒店' },
   { key: 'bed_type', label: '床型' },
@@ -111,27 +132,25 @@ const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
 const filters = reactive({ hotel_id: '' })
+const uploading = ref(false)
 
 const showModal = ref(false)
 const editingId = ref<number | null>(null)
 const saving = ref(false)
 const form = reactive({
   name: '', hotel_id: 0, bed_type: 'queen', area: 30, base_price: 399,
-  breakfast_count: 0, max_guest_count: 2, status: 'online',
+  breakfast_count: 0, max_guest_count: 2, status: 'online', image: '',
 })
 
-// 重置 Form 状态。
 function resetForm() {
   form.name = ''; form.hotel_id = hotels.value[0]?.id || 0; form.bed_type = 'queen'
   form.area = 30; form.base_price = 399; form.breakfast_count = 0
-  form.max_guest_count = 2; form.status = 'online'
+  form.max_guest_count = 2; form.status = 'online'; form.image = ''
   editingId.value = null
 }
 
-// 打开 Create 相关界面。
 function openCreate() { resetForm(); showModal.value = true }
 
-// 打开 Edit 相关界面。
 function openEdit(row: Record<string, unknown>) {
   editingId.value = row.id as number
   form.name = (row.name as string) || ''
@@ -142,53 +161,97 @@ function openEdit(row: Record<string, unknown>) {
   form.breakfast_count = (row.breakfast_count as number) || 0
   form.max_guest_count = (row.max_guest_count as number) || 2
   form.status = (row.status as string) || 'online'
+  form.image = (row.image as string) || ''
   showModal.value = true
 }
 
-// 加载 Hotels 相关数据。
-async function loadHotels() {
-  const res = await hotelApi.list({ page_size: 100 })
-  if (res.code === 0 && res.data) {
-    hotels.value = ((res.data as unknown as { items: Record<string, unknown>[] }).items || []).map(
-      (h) => ({ id: h.id as number, name: h.name as string })
-    )
+async function handleImageUpload(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0]
+  if (!file) return
+  uploading.value = true
+  try {
+    const res = await commonApi.upload(file, 'room_type')
+    if (res.code === 0 && res.data) {
+      form.image = res.data.file_url
+    } else {
+      showToast(res.message || '图片上传失败', 'error')
+    }
+  } catch {
+    showToast('图片上传失败，请重试', 'error')
+  } finally {
+    uploading.value = false
+    ;(e.target as HTMLInputElement).value = ''
   }
 }
 
-// 加载 List 相关数据。
+async function loadHotels() {
+  try {
+    const res = await hotelApi.list({ page_size: 100 })
+    if (res.code === 0 && res.data) {
+      hotels.value = ((res.data as unknown as { items: Record<string, unknown>[] }).items || []).map(
+        (h) => ({ id: h.id as number, name: h.name as string })
+      )
+    }
+  } catch {
+    showToast('加载酒店列表失败', 'error')
+  }
+}
+
 async function loadList() {
   loading.value = true
-  const params: Record<string, unknown> = { page: page.value, page_size: pageSize.value }
-  if (filters.hotel_id) params.hotel_id = filters.hotel_id
-  const res = await roomTypeApi.list(params)
-  if (res.code === 0 && res.data) {
-    list.value = (res.data as unknown as { items: Record<string, unknown>[]; total: number }).items || []
-    total.value = (res.data as unknown as { total: number }).total || 0
+  try {
+    const params: Record<string, unknown> = { page: page.value, page_size: pageSize.value }
+    if (filters.hotel_id) params.hotel_id = filters.hotel_id
+    const res = await roomTypeApi.list(params)
+    if (res.code === 0 && res.data) {
+      list.value = (res.data as unknown as { items: Record<string, unknown>[]; total: number }).items || []
+      total.value = (res.data as unknown as { total: number }).total || 0
+    } else {
+      showToast(res.message || '加载房型列表失败', 'error')
+    }
+  } catch {
+    showToast('加载房型列表失败，请检查网络', 'error')
+  } finally {
+    loading.value = false
   }
-  loading.value = false
 }
 
-// 处理 Save 交互逻辑。
 async function handleSave() {
   saving.value = true
   try {
+    let res
     if (editingId.value) {
-      await roomTypeApi.update({ room_type_id: editingId.value, ...form })
+      res = await roomTypeApi.update({ room_type_id: editingId.value, ...form })
     } else {
-      await roomTypeApi.create({ ...form })
+      res = await roomTypeApi.create({ ...form })
     }
-    showModal.value = false
-    loadList()
+    if (res.code === 0) {
+      showToast(editingId.value ? '房型更新成功' : '房型创建成功', 'success')
+      showModal.value = false
+      loadList()
+    } else {
+      showToast(res.message || '保存失败', 'error')
+    }
+  } catch {
+    showToast('保存失败，请重试', 'error')
   } finally {
     saving.value = false
   }
 }
 
-// 处理 Delete 交互逻辑。
 async function handleDelete(row: Record<string, unknown>) {
   if (!confirm(`确定删除房型「${row.name}」？`)) return
-  await roomTypeApi.delete(row.id as number)
-  loadList()
+  try {
+    const res = await roomTypeApi.delete(row.id as number)
+    if (res.code === 0) {
+      showToast('房型删除成功', 'success')
+      loadList()
+    } else {
+      showToast(res.message || '删除失败', 'error')
+    }
+  } catch {
+    showToast('删除失败，请重试', 'error')
+  }
 }
 
 onMounted(async () => {

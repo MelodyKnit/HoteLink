@@ -50,13 +50,22 @@
         <button class="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700" :disabled="!replyContent.trim()" @click="submitReply">提交回复</button>
       </template>
     </ModalDialog>
+
+    <Toast :visible="toastVisible" :message="toastMessage" :type="toastType" @close="closeToast" />
   </section>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { reviewApi, hotelApi, aiApi } from '@hotelink/api'
-import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination } from '@hotelink/ui'
+import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, Toast, useToast } from '@hotelink/ui'
+
+const { toastVisible, toastMessage, toastType, showToast, closeToast } = useToast()
+
+interface HotelOption {
+  id: number
+  name: string
+}
 
 const columns = [
   { key: 'id', label: 'ID' },
@@ -68,7 +77,7 @@ const columns = [
 ]
 
 const list = ref<Record<string, unknown>[]>([])
-const hotels = ref<Record<string, unknown>[]>([])
+const hotels = ref<HotelOption[]>([])
 const loading = ref(false)
 const page = ref(1)
 const pageSize = ref(20)
@@ -83,22 +92,36 @@ const aiSuggestion = ref('')
 // 加载 List 相关数据。
 async function loadList() {
   loading.value = true
-  const params: Record<string, unknown> = { page: page.value, page_size: pageSize.value }
-  if (hotelId.value) params.hotel_id = hotelId.value
-  const res = await reviewApi.list(params)
-  if (res.code === 0 && res.data) {
-    const d = res.data as unknown as { items: Record<string, unknown>[]; total: number }
-    list.value = d.items || []
-    total.value = d.total || 0
+  try {
+    const params: Record<string, unknown> = { page: page.value, page_size: pageSize.value }
+    if (hotelId.value) params.hotel_id = hotelId.value
+    const res = await reviewApi.list(params)
+    if (res.code === 0 && res.data) {
+      const d = res.data as unknown as { items: Record<string, unknown>[]; total: number }
+      list.value = d.items || []
+      total.value = d.total || 0
+    } else {
+      showToast(res.message || '加载评价列表失败', 'error')
+    }
+  } catch {
+    showToast('加载评价列表失败，请检查网络', 'error')
+  } finally {
+    loading.value = false
   }
-  loading.value = false
 }
 
 // 加载 Hotels 相关数据。
 async function loadHotels() {
-  const res = await hotelApi.list({ page: 1, page_size: 200 })
-  if (res.code === 0 && res.data) {
-    hotels.value = (res.data as unknown as { items: Record<string, unknown>[] }).items || []
+  try {
+    const res = await hotelApi.list({ page: 1, page_size: 200 })
+    if (res.code === 0 && res.data) {
+      hotels.value = ((res.data as unknown as { items: HotelOption[] }).items || []).map(item => ({
+        id: Number(item.id),
+        name: String(item.name || ''),
+      }))
+    }
+  } catch {
+    showToast('加载酒店列表失败', 'error')
   }
 }
 
@@ -116,18 +139,29 @@ async function getAISuggestion(row: Record<string, unknown>) {
   try {
     const res = await aiApi.replySuggestion({ review_id: row.id as number })
     if (res.code === 0 && res.data) {
-      aiSuggestion.value = (res.data as Record<string, unknown>).suggestion as string || ''
+      aiSuggestion.value = (res.data as Record<string, unknown>).suggested_reply as string || ''
+    } else {
+      showToast(res.message || 'AI 建议获取失败', 'warning')
     }
   } catch {
-    // AI service may be unavailable
+    showToast('AI 服务不可用，请检查 AI 配置', 'warning')
   }
 }
 
 // 处理 submitReply 业务流程。
 async function submitReply() {
-  await reviewApi.reply({ review_id: replyTarget.id as number, content: replyContent.value })
-  showReply.value = false
-  loadList()
+  try {
+    const res = await reviewApi.reply({ review_id: replyTarget.id as number, content: replyContent.value })
+    if (res.code === 0) {
+      showToast('回复提交成功', 'success')
+      showReply.value = false
+      loadList()
+    } else {
+      showToast(res.message || '回复提交失败', 'error')
+    }
+  } catch {
+    showToast('回复提交失败，请重试', 'error')
+  }
 }
 
 onMounted(() => {

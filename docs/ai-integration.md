@@ -188,6 +188,38 @@
 - `AI_REASONING_MODEL`
 - `AI_TIMEOUT`
 
+### 6.1 多供应商支持（新增）
+
+系统现已支持多供应商并行配置，支持运行时切换：
+
+- 可在管理端添加多个供应商（如 DeepSeek / OpenAI / 智谱 / Moonshot / Qwen）
+- 可设置当前活跃供应商
+- 当 A 供应商额度不足时，可即时切换到 B 供应商，无需重启服务
+
+后端实现位置：
+
+- `backend/config/ai.py`
+- `backend/apps/operations/services/ai_service.py`
+- `backend/apps/api/views.py`（`AdminAISettingsView` 及 provider 管理接口）
+
+### 6.2 管理端接口（新增）
+
+- `GET /api/v1/admin/ai/settings`：读取 AI 开关、活跃供应商、供应商列表
+- `POST /api/v1/admin/ai/settings/update`：更新 AI 开关/活跃供应商/供应商配置
+- `POST /api/v1/admin/ai/provider/add`：新增或编辑供应商
+- `POST /api/v1/admin/ai/provider/switch`：切换活跃供应商
+- `POST /api/v1/admin/ai/provider/delete`：删除非活跃供应商
+
+### 6.3 前端页面（新增）
+
+管理端 AI 设置页已升级：
+
+- 查看所有供应商状态
+- 快捷添加内置供应商
+- 编辑供应商模型与 Base URL
+- 切换当前活跃供应商
+- 删除非活跃供应商
+
 这些变量当前已写入：
 
 - [`../backend/.env.example`](../backend/.env.example)

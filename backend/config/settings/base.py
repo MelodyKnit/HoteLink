@@ -207,4 +207,5 @@ LOGGING = {
 }
 
 # 在模块加载时立即读取 AI 配置，挂载到 settings.AI_SETTINGS 供全局使用
+# 多供应商配置支持：可通过 config.ai.update_ai_settings() 运行时动态切换
 AI_SETTINGS = load_ai_settings()

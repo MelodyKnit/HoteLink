@@ -15,6 +15,7 @@ from apps.bookings.models import BookingOrder
 from apps.crm.models import InvoiceTitle, UserCoupon
 from apps.hotels.models import Hotel, RoomInventory, RoomType
 from apps.users.models import UserProfile
+from config.ai import _get_runtime_config_path
 
 User = get_user_model()
 
@@ -103,6 +104,12 @@ class ApiBaseTestCase(APITestCase):
             tax_no="91110000123456789X",
             email="invoice@example.com",
         )
+
+    def setUp(self):
+        """清理 AI 运行时配置，避免测试间互相污染。"""
+        path = _get_runtime_config_path()
+        if path.exists():
+            path.unlink()
 
     def login_user(self):
         """登录普通用户并注入 Authorization 头。"""
@@ -254,7 +261,7 @@ class AdminApiTests(ApiBaseTestCase):
 
         ai_settings = self.client.get("/api/v1/admin/ai/settings")
         self.assertEqual(ai_settings.status_code, 200)
-        self.assertIn("provider", ai_settings.json()["data"])
+        self.assertIn("active_provider", ai_settings.json()["data"])
 
     def test_admin_can_create_employee(self):
         """验证管理员创建员工账号流程。"""
@@ -272,3 +279,59 @@ class AdminApiTests(ApiBaseTestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["data"]["role"], "hotel_admin")
+
+    def test_admin_ai_provider_crud_and_switch(self):
+        """验证 AI 供应商新增、切换、读取流程。"""
+        self.login_admin()
+
+        add_response = self.client.post(
+            "/api/v1/admin/ai/provider/add",
+            {
+                "name": "testprovider",
+                "label": "Test Provider",
+                "base_url": "https://example.com/v1",
+                "api_key": "test-key",
+                "chat_model": "test-chat-model",
+                "reasoning_model": "test-reasoning-model",
+            },
+            format="json",
+        )
+        self.assertEqual(add_response.status_code, 200)
+        self.assertEqual(add_response.json()["code"], 0)
+
+        switch_response = self.client.post(
+            "/api/v1/admin/ai/provider/switch",
+            {"provider_name": "testprovider"},
+            format="json",
+        )
+        self.assertEqual(switch_response.status_code, 200)
+        self.assertEqual(switch_response.json()["data"]["active_provider"], "testprovider")
+
+        settings_response = self.client.get("/api/v1/admin/ai/settings")
+        self.assertEqual(settings_response.status_code, 200)
+        providers = settings_response.json()["data"]["providers"]
+        self.assertTrue(any(item["name"] == "testprovider" for item in providers))
+
+    def test_admin_system_reset_requires_confirmation(self):
+        """验证系统重置接口必须输入 RESET 确认。"""
+        self.login_admin()
+        response = self.client.post(
+            "/api/v1/admin/system/reset",
+            {"confirm": "WRONG"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertNotEqual(response.json()["code"], 0)
+
+    def test_admin_system_reset_success(self):
+        """验证系统重置成功执行并返回删除统计。"""
+        self.login_admin()
+        response = self.client.post(
+            "/api/v1/admin/system/reset",
+            {"confirm": "RESET"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["code"], 0)
+        self.assertTrue(response.json()["data"]["reset"])
+        self.assertIn("deleted_counts", response.json()["data"])

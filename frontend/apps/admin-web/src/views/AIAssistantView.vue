@@ -67,12 +67,17 @@ import { ref, reactive, onMounted } from 'vue'
 import { aiApi, hotelApi } from '@hotelink/api'
 import { PageHeader } from '@hotelink/ui'
 
+interface HotelOption {
+  id: number
+  name: string
+}
+
 const today = new Date()
 const thirtyDaysAgo = new Date(today.getTime() - 30 * 86400000)
 const defaultStart = thirtyDaysAgo.toISOString().slice(0, 10)
 const defaultEnd = today.toISOString().slice(0, 10)
 
-const hotels = ref<Record<string, unknown>[]>([])
+const hotels = ref<HotelOption[]>([])
 
 const reportForm = reactive({ hotel_id: '' as string | number, start_date: defaultStart, end_date: defaultEnd })
 const reportLoading = ref(false)
@@ -86,7 +91,10 @@ const reviewResult = ref('')
 async function loadHotels() {
   const res = await hotelApi.list({ page: 1, page_size: 200 })
   if (res.code === 0 && res.data) {
-    hotels.value = (res.data as unknown as { items: Record<string, unknown>[] }).items || []
+    hotels.value = ((res.data as unknown as { items: HotelOption[] }).items || []).map(item => ({
+      id: Number(item.id),
+      name: String(item.name || ''),
+    }))
   }
 }
 

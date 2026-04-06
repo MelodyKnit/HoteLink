@@ -4,7 +4,7 @@ param(
     [string]$Environment = "dev",
 
     [Parameter(Position = 1)]
-    [ValidateSet("up", "down", "ps", "logs", "build", "restart", "check")]
+    [ValidateSet("up", "down", "ps", "logs", "build", "restart", "check", "migrate")]
     [string]$Action = "up"
 )
 
@@ -52,5 +52,10 @@ switch ($Action) {
             throw "check 仅支持开发环境，请使用 .\scripts\docker.ps1 dev check"
         }
         & docker @baseArgs --profile checks run --rm backend-check
+    }
+    "migrate" {
+        $svc = if ($Environment -eq "prod") { "backend" } else { "backend-dev" }
+        Write-Host "在 $svc 容器中执行数据库迁移..."
+        & docker @baseArgs exec $svc python manage.py migrate --noinput
     }
 }

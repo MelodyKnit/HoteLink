@@ -58,6 +58,8 @@
         </button>
       </template>
     </ModalDialog>
+
+    <Toast :visible="toastVisible" :message="toastMessage" :type="toastType" @close="closeToast" />
   </section>
 </template>
 
@@ -65,7 +67,9 @@
 import { ref, reactive, onMounted } from 'vue'
 import { inventoryApi, roomTypeApi } from '@hotelink/api'
 import { formatMoney, formatDate, ROOM_STATUS_MAP } from '@hotelink/utils'
-import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination } from '@hotelink/ui'
+import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, Toast, useToast } from '@hotelink/ui'
+
+const { toastVisible, toastMessage, toastType, showToast, closeToast } = useToast()
 
 const calColumns = [
   { key: 'date', label: '日期' },
@@ -93,11 +97,15 @@ const editForm = reactive({ date: '', price: 0, stock: 0, status: 'available' })
 
 // 加载 RoomTypes 相关数据。
 async function loadRoomTypes() {
-  const res = await roomTypeApi.list({ page_size: 200 })
-  if (res.code === 0 && res.data) {
-    roomTypes.value = ((res.data as unknown as { items: Record<string, unknown>[] }).items || []).map(
-      (rt) => ({ id: rt.id as number, name: rt.name as string, hotel_name: (rt.hotel_name as string) || '' })
-    )
+  try {
+    const res = await roomTypeApi.list({ page_size: 200 })
+    if (res.code === 0 && res.data) {
+      roomTypes.value = ((res.data as unknown as { items: Record<string, unknown>[] }).items || []).map(
+        (rt) => ({ id: rt.id as number, name: rt.name as string, hotel_name: (rt.hotel_name as string) || '' })
+      )
+    }
+  } catch {
+    showToast('加载房型列表失败', 'error')
   }
 }
 
@@ -105,18 +113,25 @@ async function loadRoomTypes() {
 async function loadCalendar() {
   if (!selectedRoomType.value) return
   loading.value = true
-  const res = await inventoryApi.calendar({
-    room_type_id: selectedRoomType.value,
-    start_date: startDate.value,
-    end_date: endDate.value,
-    page: page.value,
-    page_size: pageSize.value,
-  })
-  if (res.code === 0 && res.data) {
-    calendarData.value = (res.data as unknown as { items: Record<string, unknown>[] }).items || []
-    total.value = (res.data as unknown as { total: number }).total || 0
+  try {
+    const res = await inventoryApi.calendar({
+      room_type_id: selectedRoomType.value,
+      start_date: startDate.value,
+      end_date: endDate.value,
+      page: page.value,
+      page_size: pageSize.value,
+    })
+    if (res.code === 0 && res.data) {
+      calendarData.value = (res.data as unknown as { items: Record<string, unknown>[] }).items || []
+      total.value = (res.data as unknown as { total: number }).total || 0
+    } else {
+      showToast(res.message || '加载库存数据失败', 'error')
+    }
+  } catch {
+    showToast('加载库存数据失败，请检查网络', 'error')
+  } finally {
+    loading.value = false
   }
-  loading.value = false
 }
 
 // 打开 Edit 相关界面。
@@ -132,15 +147,22 @@ function openEdit(row: Record<string, unknown>) {
 async function handleSave() {
   saving.value = true
   try {
-    await inventoryApi.update({
+    const res = await inventoryApi.update({
       room_type_id: Number(selectedRoomType.value),
       date: editForm.date,
       price: editForm.price,
       stock: editForm.stock,
       status: editForm.status,
     })
-    showModal.value = false
-    loadCalendar()
+    if (res.code === 0) {
+      showToast('库存更新成功', 'success')
+      showModal.value = false
+      loadCalendar()
+    } else {
+      showToast(res.message || '库存更新失败', 'error')
+    }
+  } catch {
+    showToast('库存更新失败，请重试', 'error')
   } finally {
     saving.value = false
   }

@@ -21,6 +21,10 @@
     <!-- Table -->
     <div class="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
       <DataTable :columns="columns" :rows="list" :loading="loading">
+        <template #col-cover_image="{ value }">
+          <img v-if="value" :src="String(value)" alt="封面" class="h-10 w-14 rounded object-cover" />
+          <span v-else class="text-xs text-slate-400">暂无图片</span>
+        </template>
         <template #col-status="{ value }">
           <StatusBadge :label="HOTEL_STATUS_MAP[value as string] || String(value)" :type="value === 'online' ? 'success' : value === 'offline' ? 'danger' : 'default'" />
         </template>
@@ -37,7 +41,7 @@
     </div>
 
     <!-- Create/Edit Modal -->
-    <ModalDialog :visible="showModal" :title="editingId ? '编辑酒店' : '新增酒店'" @close="showModal = false">
+    <ModalDialog :visible="showModal" :title="editingId ? '编辑酒店' : '新增酒店'" size="lg" @close="showModal = false">
       <form class="space-y-4" @submit.prevent="handleSave">
         <div>
           <label class="mb-1 block text-sm font-medium text-slate-700">酒店名称</label>
@@ -70,6 +74,31 @@
           <label class="mb-1 block text-sm font-medium text-slate-700">描述</label>
           <textarea v-model="form.description" rows="3" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-teal-500" />
         </div>
+        <!-- 封面图上传 -->
+        <div>
+          <label class="mb-1 block text-sm font-medium text-slate-700">封面图</label>
+          <div class="flex items-center gap-3">
+            <img v-if="form.cover_image" :src="form.cover_image" alt="封面" class="h-20 w-28 rounded-lg object-cover ring-1 ring-slate-200" />
+            <label class="cursor-pointer rounded-lg border-2 border-dashed border-slate-300 px-4 py-2 text-sm text-slate-500 hover:border-teal-400 hover:text-teal-600">
+              {{ uploading ? '上传中…' : '选择图片' }}
+              <input type="file" accept="image/*" class="hidden" :disabled="uploading" @change="handleCoverUpload" />
+            </label>
+          </div>
+        </div>
+        <!-- 酒店图集 -->
+        <div>
+          <label class="mb-1 block text-sm font-medium text-slate-700">酒店图集</label>
+          <div class="flex flex-wrap gap-2">
+            <div v-for="(img, idx) in form.images" :key="idx" class="group relative">
+              <img :src="img" alt="图片" class="h-20 w-28 rounded-lg object-cover ring-1 ring-slate-200" />
+              <button type="button" class="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs text-white opacity-0 group-hover:opacity-100" @click="removeImage(idx)">×</button>
+            </div>
+            <label class="flex h-20 w-28 cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-slate-300 text-slate-400 hover:border-teal-400 hover:text-teal-600">
+              <span class="text-2xl">+</span>
+              <input type="file" accept="image/*" class="hidden" :disabled="uploading" @change="handleGalleryUpload" />
+            </label>
+          </div>
+        </div>
         <div>
           <label class="mb-1 block text-sm font-medium text-slate-700">状态</label>
           <select v-model="form.status" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
@@ -86,17 +115,22 @@
         </button>
       </template>
     </ModalDialog>
+
+    <Toast :visible="toastVisible" :message="toastMessage" :type="toastType" @close="closeToast" />
   </section>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { hotelApi } from '@hotelink/api'
+import { hotelApi, commonApi } from '@hotelink/api'
 import { formatMoney, HOTEL_STATUS_MAP } from '@hotelink/utils'
-import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination } from '@hotelink/ui'
+import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, Toast, useToast } from '@hotelink/ui'
+
+const { toastVisible, toastMessage, toastType, showToast, closeToast } = useToast()
 
 const columns = [
   { key: 'id', label: 'ID' },
+  { key: 'cover_image', label: '封面' },
   { key: 'name', label: '酒店名称' },
   { key: 'city', label: '城市' },
   { key: 'star', label: '星级' },
@@ -110,28 +144,28 @@ const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
 const filters = reactive({ keyword: '', status: '' })
+const uploading = ref(false)
 
 const showModal = ref(false)
 const editingId = ref<number | null>(null)
 const saving = ref(false)
 const form = reactive({
-  name: '', city: '', address: '', star: 4, phone: '', description: '', status: 'draft',
+  name: '', city: '', address: '', star: 4, phone: '', description: '',
+  cover_image: '', images: [] as string[], status: 'draft',
 })
 
-// 重置 Form 状态。
 function resetForm() {
   form.name = ''; form.city = ''; form.address = ''; form.star = 4
   form.phone = ''; form.description = ''; form.status = 'draft'
+  form.cover_image = ''; form.images = []
   editingId.value = null
 }
 
-// 打开 Create 相关界面。
 function openCreate() {
   resetForm()
   showModal.value = true
 }
 
-// 打开 Edit 相关界面。
 function openEdit(row: Record<string, unknown>) {
   editingId.value = row.id as number
   form.name = (row.name as string) || ''
@@ -141,44 +175,105 @@ function openEdit(row: Record<string, unknown>) {
   form.phone = (row.phone as string) || ''
   form.description = (row.description as string) || ''
   form.status = (row.status as string) || 'draft'
+  form.cover_image = (row.cover_image as string) || ''
+  form.images = Array.isArray(row.images) ? [...(row.images as string[])] : []
   showModal.value = true
 }
 
-// 加载 List 相关数据。
-async function loadList() {
-  loading.value = true
-  const params: Record<string, unknown> = { page: page.value, page_size: pageSize.value }
-  if (filters.keyword) params.keyword = filters.keyword
-  if (filters.status) params.status = filters.status
-  const res = await hotelApi.list(params)
-  if (res.code === 0 && res.data) {
-    list.value = (res.data as unknown as { items: Record<string, unknown>[]; total: number }).items || []
-    total.value = (res.data as unknown as { total: number }).total || 0
+async function uploadFile(file: File, scene: string): Promise<string | null> {
+  uploading.value = true
+  try {
+    const res = await commonApi.upload(file, scene)
+    if (res.code === 0 && res.data) {
+      return res.data.file_url
+    }
+    showToast(res.message || '图片上传失败', 'error')
+    return null
+  } catch {
+    showToast('图片上传失败，请重试', 'error')
+    return null
+  } finally {
+    uploading.value = false
   }
-  loading.value = false
 }
 
-// 处理 Save 交互逻辑。
+async function handleCoverUpload(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0]
+  if (!file) return
+  const url = await uploadFile(file, 'hotel')
+  if (url) form.cover_image = url
+  ;(e.target as HTMLInputElement).value = ''
+}
+
+async function handleGalleryUpload(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0]
+  if (!file) return
+  const url = await uploadFile(file, 'hotel')
+  if (url) form.images.push(url)
+  ;(e.target as HTMLInputElement).value = ''
+}
+
+function removeImage(idx: number) {
+  form.images.splice(idx, 1)
+}
+
+async function loadList() {
+  loading.value = true
+  try {
+    const params: Record<string, unknown> = { page: page.value, page_size: pageSize.value }
+    if (filters.keyword) params.keyword = filters.keyword
+    if (filters.status) params.status = filters.status
+    const res = await hotelApi.list(params)
+    if (res.code === 0 && res.data) {
+      list.value = (res.data as unknown as { items: Record<string, unknown>[]; total: number }).items || []
+      total.value = (res.data as unknown as { total: number }).total || 0
+    } else {
+      showToast(res.message || '加载酒店列表失败', 'error')
+    }
+  } catch {
+    showToast('加载酒店列表失败，请检查网络', 'error')
+  } finally {
+    loading.value = false
+  }
+}
+
 async function handleSave() {
   saving.value = true
   try {
+    const payload: Record<string, unknown> = { ...form }
+    let res
     if (editingId.value) {
-      await hotelApi.update({ hotel_id: editingId.value, ...form })
+      res = await hotelApi.update({ hotel_id: editingId.value, ...payload })
     } else {
-      await hotelApi.create({ ...form })
+      res = await hotelApi.create(payload)
     }
-    showModal.value = false
-    loadList()
+    if (res.code === 0) {
+      showToast(editingId.value ? '酒店更新成功' : '酒店创建成功', 'success')
+      showModal.value = false
+      loadList()
+    } else {
+      showToast(res.message || '保存失败', 'error')
+    }
+  } catch {
+    showToast('保存失败，请重试', 'error')
   } finally {
     saving.value = false
   }
 }
 
-// 处理 Delete 交互逻辑。
 async function handleDelete(row: Record<string, unknown>) {
   if (!confirm(`确定删除酒店「${row.name}」？`)) return
-  await hotelApi.delete(row.id as number)
-  loadList()
+  try {
+    const res = await hotelApi.delete(row.id as number)
+    if (res.code === 0) {
+      showToast('酒店删除成功', 'success')
+      loadList()
+    } else {
+      showToast(res.message || '删除失败', 'error')
+    }
+  } catch {
+    showToast('删除失败，请重试', 'error')
+  }
 }
 
 onMounted(loadList)

@@ -58,9 +58,18 @@ case "$action" in
     fi
     docker compose --env-file "$env_file" -f "$compose_file" --profile checks run --rm backend-check
     ;;
+  migrate)
+    if [ "$environment" = "prod" ]; then
+      svc="backend"
+    else
+      svc="backend-dev"
+    fi
+    echo "在 $svc 容器中执行数据库迁移..."
+    docker compose --env-file "$env_file" -f "$compose_file" exec "$svc" python manage.py migrate --noinput
+    ;;
   *)
     echo "Unsupported action: $action"
-    echo "Usage: ./scripts/docker.sh [dev|prod] [up|down|ps|logs|build|restart|check]"
+    echo "Usage: ./scripts/docker.sh [dev|prod] [up|down|ps|logs|build|restart|check|migrate]"
     exit 1
     ;;
 esac

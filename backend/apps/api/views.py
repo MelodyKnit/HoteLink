@@ -44,6 +44,9 @@ from apps.api.permissions import IsAdminRole
 from apps.api.responses import api_response, paginated_response
 from apps.api.serializers import (
     AIChatSerializer,
+    AIProviderCreateSerializer,
+    AIProviderDeleteSerializer,
+    AIProviderSwitchSerializer,
     AIReplySuggestionSerializer,
     AIReportSummarySerializer,
     AIReviewSummarySerializer,
@@ -84,6 +87,7 @@ from apps.api.serializers import (
     RoomTypeUpdateSerializer,
     SettingsUpdateSerializer,
     SystemNoticeSerializer,
+    SystemResetSerializer,
     UploadSerializer,
     UserCouponSerializer,
     UserProfileSerializer,
@@ -93,6 +97,7 @@ from apps.crm.models import FavoriteHotel, InvoiceRequest, InvoiceTitle, Review,
 from apps.hotels.models import Hotel, RoomInventory, RoomType
 from apps.operations.models import SystemNotice
 from apps.operations.services.ai_service import AIChatService
+from config.ai import load_ai_settings, update_ai_settings, BUILTIN_PROVIDERS
 from apps.payments.models import PaymentRecord
 from apps.reports.models import ReportTask
 from apps.users.models import UserProfile
@@ -1335,19 +1340,19 @@ class AdminSettingsView(APIView):
 
 
 class AdminAISettingsView(APIView):
-    """AI 设置接口：查询当前 AI 配置并接收更新参数。"""
+    """AI 设置接口：查询当前 AI 多供应商配置，支持增删改查和切换活跃供应商。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
 
     def get(self, request):
-        ai_settings = settings.AI_SETTINGS
+        ai_settings = load_ai_settings()
+        active = ai_settings.get_active_provider()
         return api_response(
             data={
-                "provider": ai_settings.provider,
                 "ai_enabled": ai_settings.enabled,
-                "chat_model": ai_settings.chat_model,
-                "reasoning_model": ai_settings.reasoning_model,
-                "base_url": ai_settings.base_url,
-                "api_key_configured": ai_settings.is_configured,
+                "active_provider": ai_settings.active_provider,
+                "providers": ai_settings.list_providers(),
+                "builtin_providers": list(BUILTIN_PROVIDERS.keys()),
+                "current_provider": active.to_dict() if active else None,
             }
         )
 
@@ -1355,7 +1360,73 @@ class AdminAISettingsView(APIView):
         serializer = AISettingsUpdateSerializer(data=request.data)
         if not serializer.is_valid():
             return api_response(code=4001, message="invalid parameters", data={"errors": serializer.errors}, status_code=400)
-        return api_response(data=serializer.validated_data)
+        data = serializer.validated_data
+        new_settings = update_ai_settings(
+            enabled=data.get("ai_enabled"),
+            active_provider=data.get("active_provider"),
+            provider_configs=data.get("providers"),
+        )
+        return api_response(data={
+            "ai_enabled": new_settings.enabled,
+            "active_provider": new_settings.active_provider,
+            "providers": new_settings.list_providers(),
+        })
+
+
+class AdminAIProviderAddView(APIView):
+    """新增或编辑 AI 供应商接口。"""
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def post(self, request):
+        serializer = AIProviderCreateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return api_response(code=4001, message="invalid parameters", data={"errors": serializer.errors}, status_code=400)
+        data = serializer.validated_data
+        new_settings = update_ai_settings(provider_configs=[data])
+        return api_response(data={
+            "providers": new_settings.list_providers(),
+        })
+
+
+class AdminAIProviderSwitchView(APIView):
+    """切换活跃 AI 供应商接口。"""
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def post(self, request):
+        serializer = AIProviderSwitchSerializer(data=request.data)
+        if not serializer.is_valid():
+            return api_response(code=4001, message="invalid parameters", data={"errors": serializer.errors}, status_code=400)
+        provider_name = serializer.validated_data["provider_name"]
+        ai_settings = load_ai_settings()
+        if provider_name not in ai_settings.providers:
+            return api_response(code=4040, message=f"供应商 '{provider_name}' 不存在", data=None, status_code=404)
+        new_settings = update_ai_settings(active_provider=provider_name)
+        return api_response(data={
+            "active_provider": new_settings.active_provider,
+            "providers": new_settings.list_providers(),
+        })
+
+
+class AdminAIProviderDeleteView(APIView):
+    """删除 AI 供应商接口（不允许删除当前活跃供应商）。"""
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def post(self, request):
+        serializer = AIProviderDeleteSerializer(data=request.data)
+        if not serializer.is_valid():
+            return api_response(code=4001, message="invalid parameters", data={"errors": serializer.errors}, status_code=400)
+        provider_name = serializer.validated_data["provider_name"]
+        ai_settings = load_ai_settings()
+        if provider_name == ai_settings.active_provider:
+            return api_response(code=4093, message="不能删除当前活跃的供应商，请先切换到其他供应商", data=None, status_code=409)
+        from config.ai import _load_runtime_config, _save_runtime_config
+        runtime = _load_runtime_config()
+        runtime["providers"] = [p for p in runtime.get("providers", []) if p.get("name") != provider_name]
+        _save_runtime_config(runtime)
+        new_settings = load_ai_settings()
+        return api_response(data={
+            "providers": new_settings.list_providers(),
+        })
 
 
 class AdminAIReportSummaryView(APIView):
@@ -1457,3 +1528,60 @@ class AdminReportTasksView(APIView):
                 "result_summary": task.result_summary,
             }
         )
+
+
+class AdminSystemResetView(APIView):
+    """系统重置接口：清除所有业务数据，恢复到初始状态。仅系统管理员可用。"""
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def post(self, request):
+        serializer = SystemResetSerializer(data=request.data)
+        if not serializer.is_valid():
+            return api_response(code=4001, message="请输入 RESET 确认重置", data={"errors": serializer.errors}, status_code=400)
+
+        profile = ensure_profile(request.user)
+        if profile.role != UserProfile.ROLE_SYSTEM_ADMIN and not request.user.is_superuser:
+            return api_response(code=4030, message="仅系统管理员可以执行重置操作", data=None, status_code=403)
+
+        # 按依赖顺序清除所有业务数据
+        from apps.crm.models import (
+            CustomerProfile, FavoriteHotel, InvoiceRequest, InvoiceTitle,
+            Review, UserCoupon,
+        )
+        from apps.operations.models import AuditLog
+        from config.ai import _get_runtime_config_path
+
+        deleted_counts = {}
+        deleted_counts["payment_records"] = PaymentRecord.objects.all().delete()[0]
+        deleted_counts["invoice_requests"] = InvoiceRequest.objects.all().delete()[0]
+        deleted_counts["invoice_titles"] = InvoiceTitle.objects.all().delete()[0]
+        deleted_counts["reviews"] = Review.objects.all().delete()[0]
+        deleted_counts["booking_orders"] = BookingOrder.objects.all().delete()[0]
+        deleted_counts["user_coupons"] = UserCoupon.objects.all().delete()[0]
+        deleted_counts["favorite_hotels"] = FavoriteHotel.objects.all().delete()[0]
+        deleted_counts["customer_profiles"] = CustomerProfile.objects.all().delete()[0]
+        deleted_counts["room_inventories"] = RoomInventory.objects.all().delete()[0]
+        deleted_counts["room_types"] = RoomType.objects.all().delete()[0]
+        deleted_counts["hotels"] = Hotel.objects.all().delete()[0]
+        deleted_counts["system_notices"] = SystemNotice.objects.all().delete()[0]
+        deleted_counts["audit_logs"] = AuditLog.objects.all().delete()[0]
+        deleted_counts["report_tasks"] = ReportTask.objects.all().delete()[0]
+
+        # 删除非管理员用户和 Profile
+        non_admin_profiles = UserProfile.objects.exclude(
+            role__in=[UserProfile.ROLE_SYSTEM_ADMIN, UserProfile.ROLE_HOTEL_ADMIN]
+        )
+        non_admin_user_ids = list(non_admin_profiles.values_list("user_id", flat=True))
+        deleted_counts["user_profiles"] = non_admin_profiles.delete()[0]
+        deleted_counts["users"] = User.objects.filter(id__in=non_admin_user_ids).delete()[0]
+
+        # 重置 AI 运行时配置
+        ai_config_path = _get_runtime_config_path()
+        if ai_config_path.exists():
+            ai_config_path.unlink()
+
+        return api_response(data={
+            "reset": True,
+            "deleted_counts": deleted_counts,
+            "message": "系统已重置为初始状态，管理员账号已保留。",
+        })

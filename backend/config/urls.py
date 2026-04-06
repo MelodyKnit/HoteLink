@@ -9,6 +9,8 @@ config/urls.py —— 项目根路由配置。
   docs/         → Swagger UI 交互文档
   redoc/        → ReDoc 验证文档
 """
+from django.conf import settings
+from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
@@ -29,3 +31,7 @@ urlpatterns = [
     # ReDoc: 更简洁的静态 API 文档页
     path("redoc/", SpectacularRedocView.as_view(url_name="schema"), name="redoc"),
 ]
+
+# 开发模式下启用媒体文件直接服务
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

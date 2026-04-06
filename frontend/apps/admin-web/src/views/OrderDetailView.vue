@@ -86,11 +86,20 @@ import { orderApi } from '@hotelink/api'
 import { formatMoney, formatDateTime, ORDER_STATUS_MAP, PAYMENT_STATUS_MAP, PAYMENT_METHOD_MAP } from '@hotelink/utils'
 import { PageHeader, StatusBadge } from '@hotelink/ui'
 
+interface PaymentItem {
+  id: number
+  payment_no: string
+  method: string
+  paid_at?: string
+  created_at?: string
+  amount: number
+}
+
 const route = useRoute()
 
 const loading = ref(true)
 const order = ref<Record<string, unknown> | null>(null)
-const payments = ref<Record<string, unknown>[]>([])
+const payments = ref<PaymentItem[]>([])
 
 // 根据状态值返回对应展示信息。
 function statusType(status: string) {

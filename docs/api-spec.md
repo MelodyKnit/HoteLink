@@ -259,6 +259,113 @@ X-App-Version: 1.0.0
 
 ### 7.1 用户角色 `role`
 
+## 8. 管理端新增接口（2026-04）
+
+### 8.1 AI 多供应商管理
+
+1. 查询 AI 配置
+
+- `GET /api/v1/admin/ai/settings`
+- 权限：`hotel_admin` / `system_admin`
+
+响应重点字段：
+
+- `ai_enabled`
+- `active_provider`
+- `providers[]`
+- `builtin_providers[]`
+
+2. 更新 AI 配置
+
+- `POST /api/v1/admin/ai/settings/update`
+- 权限：`hotel_admin` / `system_admin`
+
+请求示例：
+
+```json
+{
+  "ai_enabled": true,
+  "active_provider": "deepseek"
+}
+```
+
+3. 新增或编辑供应商
+
+- `POST /api/v1/admin/ai/provider/add`
+- 权限：`hotel_admin` / `system_admin`
+
+请求示例：
+
+```json
+{
+  "name": "openai",
+  "label": "OpenAI",
+  "base_url": "https://api.openai.com/v1",
+  "api_key": "sk-***",
+  "chat_model": "gpt-4o-mini",
+  "reasoning_model": "gpt-4o"
+}
+```
+
+4. 切换活跃供应商
+
+- `POST /api/v1/admin/ai/provider/switch`
+
+```json
+{
+  "provider_name": "openai"
+}
+```
+
+5. 删除供应商
+
+- `POST /api/v1/admin/ai/provider/delete`
+
+```json
+{
+  "provider_name": "openai"
+}
+```
+
+注意：不能删除当前活跃供应商。
+
+### 8.2 系统重置
+
+1. 重置系统数据
+
+- `POST /api/v1/admin/system/reset`
+- 权限：仅 `system_admin`
+
+请求示例：
+
+```json
+{
+  "confirm": "RESET"
+}
+```
+
+响应示例：
+
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "reset": true,
+    "deleted_counts": {
+      "booking_orders": 120,
+      "hotels": 8
+    },
+    "message": "系统已重置为初始状态，管理员账号已保留。"
+  }
+}
+```
+
+安全说明：
+
+- 该接口为高危接口，必须进行二次确认
+- 建议仅在测试环境或初始化阶段使用
+
 | 值 | 含义 |
 |---|---|
 | `user` | 普通用户 |
@@ -469,7 +576,7 @@ Authorization: Bearer <access_token>
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `file` | file | 是 | 上传文件 |
-| `scene` | string | 是 | 上传场景，如 `avatar`、`hotel_image`、`review_image` |
+| `scene` | string | 是 | 上传场景，如 `avatar`、`hotel`、`room_type`、`review_image` |
 
 **成功返回**
 
@@ -1102,9 +1209,16 @@ Authorization: Bearer <access_token>
   "star": 4,
   "phone": "010-88886666",
   "description": "地理位置优越，适合商务入住。",
+  "cover_image": "/media/uploads/hotel/cover.jpg",
+  "images": ["/media/uploads/hotel/gallery1.jpg", "/media/uploads/hotel/gallery2.jpg"],
   "status": "online"
 }
 ```
+
+说明：
+
+- `cover_image`：酒店封面图 URL，通过 `/api/v1/common/upload`（scene=`hotel`）上传后获得
+- `images`：酒店图片画廊 URL 列表（JSON 数组），支持多张图片
 
 ### 13.5 更新酒店
 
@@ -1116,6 +1230,8 @@ Authorization: Bearer <access_token>
 {
   "hotel_id": 1001,
   "name": "HoteLink 北京国贸旗舰店",
+  "cover_image": "/media/uploads/hotel/new_cover.jpg",
+  "images": ["/media/uploads/hotel/gallery1.jpg"],
   "status": "online"
 }
 ```
@@ -1151,9 +1267,14 @@ Authorization: Bearer <access_token>
   "breakfast_count": 2,
   "base_price": 399.00,
   "max_guest_count": 2,
+  "image": "/media/uploads/room_type/deluxe_king.jpg",
   "status": "online"
 }
 ```
+
+说明：
+
+- `image`：房型主图 URL，通过 `/api/v1/common/upload`（scene=`room_type`）上传后获得
 
 ### 13.9 更新房型
 

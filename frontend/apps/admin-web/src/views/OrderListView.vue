@@ -80,6 +80,8 @@
         <button class="rounded-lg bg-orange-600 px-4 py-2 text-sm font-medium text-white hover:bg-orange-700" @click="handleCheckOut">确认退房</button>
       </template>
     </ModalDialog>
+
+    <Toast :visible="toastVisible" :message="toastMessage" :type="toastType" @close="closeToast" />
   </section>
 </template>
 
@@ -87,7 +89,9 @@
 import { ref, reactive, onMounted } from 'vue'
 import { orderApi } from '@hotelink/api'
 import { formatMoney, ORDER_STATUS_MAP, PAYMENT_STATUS_MAP } from '@hotelink/utils'
-import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination } from '@hotelink/ui'
+import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, Toast, useToast } from '@hotelink/ui'
+
+const { toastVisible, toastMessage, toastType, showToast, closeToast } = useToast()
 
 const columns = [
   { key: 'order_no', label: '订单号' },
@@ -125,22 +129,38 @@ function statusType(status: string) {
 // 加载 List 相关数据。
 async function loadList() {
   loading.value = true
-  const params: Record<string, unknown> = { page: page.value, page_size: pageSize.value }
-  if (filters.keyword) params.keyword = filters.keyword
-  if (filters.status) params.status = filters.status
-  const res = await orderApi.list(params)
-  if (res.code === 0 && res.data) {
-    list.value = (res.data as unknown as { items: Record<string, unknown>[] }).items || []
-    total.value = (res.data as unknown as { total: number }).total || 0
+  try {
+    const params: Record<string, unknown> = { page: page.value, page_size: pageSize.value }
+    if (filters.keyword) params.keyword = filters.keyword
+    if (filters.status) params.status = filters.status
+    const res = await orderApi.list(params)
+    if (res.code === 0 && res.data) {
+      list.value = (res.data as unknown as { items: Record<string, unknown>[] }).items || []
+      total.value = (res.data as unknown as { total: number }).total || 0
+    } else {
+      showToast(res.message || '加载订单列表失败', 'error')
+    }
+  } catch {
+    showToast('加载订单列表失败，请检查网络', 'error')
+  } finally {
+    loading.value = false
   }
-  loading.value = false
 }
 
 // 处理 confirmOrder 业务流程。
 async function confirmOrder(row: Record<string, unknown>) {
   if (!confirm('确认此订单？')) return
-  await orderApi.changeStatus({ order_id: row.id as number, target_status: 'confirmed' })
-  loadList()
+  try {
+    const res = await orderApi.changeStatus({ order_id: row.id as number, target_status: 'confirmed' })
+    if (res.code === 0) {
+      showToast('订单已确认', 'success')
+      loadList()
+    } else {
+      showToast(res.message || '确认订单失败', 'error')
+    }
+  } catch {
+    showToast('确认订单失败，请重试', 'error')
+  }
 }
 
 // 打开 CheckIn 相关界面。
@@ -154,13 +174,22 @@ function openCheckIn(row: Record<string, unknown>) {
 
 // 处理 CheckIn 交互逻辑。
 async function handleCheckIn() {
-  await orderApi.checkIn({
-    order_id: checkInForm.order_id,
-    room_no: checkInForm.room_no,
-    operator_remark: checkInForm.operator_remark,
-  })
-  showCheckIn.value = false
-  loadList()
+  try {
+    const res = await orderApi.checkIn({
+      order_id: checkInForm.order_id,
+      room_no: checkInForm.room_no,
+      operator_remark: checkInForm.operator_remark,
+    })
+    if (res.code === 0) {
+      showToast('入住办理成功', 'success')
+      showCheckIn.value = false
+      loadList()
+    } else {
+      showToast(res.message || '入住办理失败', 'error')
+    }
+  } catch {
+    showToast('入住办理失败，请重试', 'error')
+  }
 }
 
 // 打开 CheckOut 相关界面。
@@ -174,13 +203,22 @@ function openCheckOut(row: Record<string, unknown>) {
 
 // 处理 CheckOut 交互逻辑。
 async function handleCheckOut() {
-  await orderApi.checkOut({
-    order_id: checkOutForm.order_id,
-    consume_amount: checkOutForm.consume_amount,
-    operator_remark: checkOutForm.operator_remark,
-  })
-  showCheckOut.value = false
-  loadList()
+  try {
+    const res = await orderApi.checkOut({
+      order_id: checkOutForm.order_id,
+      consume_amount: checkOutForm.consume_amount,
+      operator_remark: checkOutForm.operator_remark,
+    })
+    if (res.code === 0) {
+      showToast('退房办理成功', 'success')
+      showCheckOut.value = false
+      loadList()
+    } else {
+      showToast(res.message || '退房办理失败', 'error')
+    }
+  } catch {
+    showToast('退房办理失败，请重试', 'error')
+  }
 }
 
 onMounted(loadList)
