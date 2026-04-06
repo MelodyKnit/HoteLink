@@ -57,6 +57,8 @@ pnpm-debug.log*
 # Secrets and local credentials
 .secrets/
 secrets/
+backend/.ai_providers.json
+**/.ai_providers.json
 private/*
 !private/.gitkeep
 *.pem

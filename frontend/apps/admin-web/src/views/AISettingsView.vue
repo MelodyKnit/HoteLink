@@ -118,15 +118,18 @@
         </form>
       </div>
 
-      <p v-if="message" class="text-center text-sm" :class="messageType === 'success' ? 'text-green-600' : 'text-red-600'">{{ message }}</p>
     </div>
+
+    <Toast :visible="toastVisible" :message="toastMessage" :type="toastType" @close="closeToast" />
   </section>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { aiApi } from '@hotelink/api'
-import { PageHeader, StatusBadge } from '@hotelink/ui'
+import { PageHeader, StatusBadge, Toast, useToast } from '@hotelink/ui'
+
+const { toastVisible, toastMessage, toastType, showToast, closeToast } = useToast()
 
 interface ProviderInfo {
   name: string
@@ -143,8 +146,6 @@ const loading = ref(true)
 const saving = ref(false)
 const showForm = ref(false)
 const isEditing = ref(false)
-const message = ref('')
-const messageType = ref<'success' | 'error'>('success')
 
 const aiEnabled = ref(false)
 const providers = ref<ProviderInfo[]>([])
@@ -152,13 +153,6 @@ const builtinProviders = ref<string[]>([])
 const providerNames = computed(() => new Set(providers.value.map(p => p.name)))
 
 const form = reactive({ name: '', label: '', base_url: '', api_key: '', chat_model: '', reasoning_model: '' })
-
-// 显示操作结果提示
-function showMessage(text: string, type: 'success' | 'error' = 'success') {
-  message.value = text
-  messageType.value = type
-  setTimeout(() => { message.value = '' }, 3000)
-}
 
 // 加载 AI 配置
 async function loadSettings() {
@@ -168,14 +162,20 @@ async function loadSettings() {
     aiEnabled.value = res.data.ai_enabled
     providers.value = res.data.providers
     builtinProviders.value = res.data.builtin_providers
+  } else if (res.code !== 0) {
+    showToast(res.message || '加载配置失败', 'error')
   }
   loading.value = false
 }
 
 // 切换 AI 功能总开关
 async function toggleEnabled() {
-  await aiApi.updateSettings({ ai_enabled: aiEnabled.value })
-  showMessage(aiEnabled.value ? 'AI 功能已启用' : 'AI 功能已关闭')
+  const res = await aiApi.updateSettings({ ai_enabled: aiEnabled.value })
+  if (res.code === 0) {
+    showToast(aiEnabled.value ? 'AI 功能已启用' : 'AI 功能已关闭', 'success')
+  } else {
+    showToast(res.message || '操作失败', 'error')
+  }
 }
 
 // 切换活跃供应商
@@ -183,9 +183,9 @@ async function switchProvider(name: string) {
   const res = await aiApi.switchProvider(name)
   if (res.code === 0) {
     await loadSettings()
-    showMessage(`已切换到 ${name}`)
+    showToast(`已切换到 ${name}`, 'success')
   } else {
-    showMessage(res.message || '切换失败', 'error')
+    showToast(res.message || '切换失败', 'error')
   }
 }
 
@@ -195,9 +195,9 @@ async function deleteProvider(name: string) {
   const res = await aiApi.deleteProvider(name)
   if (res.code === 0) {
     await loadSettings()
-    showMessage(`已删除 ${name}`)
+    showToast(`已删除 ${name}`, 'success')
   } else {
-    showMessage(res.message || '删除失败', 'error')
+    showToast(res.message || '删除失败', 'error')
   }
 }
 
@@ -232,9 +232,9 @@ async function saveProvider() {
   if (res.code === 0) {
     showForm.value = false
     await loadSettings()
-    showMessage('保存成功')
+    showToast('保存成功', 'success')
   } else {
-    showMessage(res.message || '保存失败', 'error')
+    showToast(res.message || '保存失败，请检查填写内容', 'error')
   }
 }
 

@@ -75,7 +75,14 @@ function createHttp(baseURL: string): AxiosInstance {
         clearTokens()
         window.location.href = _loginRedirect
       }
-      return Promise.reject(error)
+      const serverMessage: string =
+        error.response?.data?.message ||
+        error.response?.data?.detail ||
+        error.message ||
+        '请求失败'
+      const serverCode: number = error.response?.data?.code ?? error.response?.status ?? 5000
+      const fallback: ApiResult = { code: serverCode, message: serverMessage, data: null }
+      return Promise.resolve({ data: fallback })
     }
   )
 
@@ -312,4 +319,77 @@ export const userNoticeApi = {
 export const userAiApi = {
   chat: (data: { scene: string; question: string; hotel_id?: number; order_id?: number }) =>
     post<{ answer: string; scene: string }>('/user/ai/chat', data),
+
+  async *chatStream(
+    data: { scene: string; question: string; hotel_id?: number; order_id?: number }
+  ): AsyncGenerator<{ content: string; done: boolean }> {
+    const token = getToken()
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (token) {
+      headers.Authorization = `Bearer ${token}`
+    }
+
+    let resp: Response
+    try {
+      resp = await fetch('/api/v1/user/ai/chat/stream', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(data),
+      })
+    } catch {
+      yield { content: '', done: true }
+      return
+    }
+
+    if (!resp.ok || !resp.body) {
+      yield { content: '', done: true }
+      return
+    }
+
+    const reader = resp.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) {
+        break
+      }
+
+      buffer += decoder.decode(value, { stream: true })
+
+      let boundary = buffer.indexOf('\n\n')
+      while (boundary !== -1) {
+        const eventBlock = buffer.slice(0, boundary)
+        buffer = buffer.slice(boundary + 2)
+
+        for (const line of eventBlock.split('\n')) {
+          if (!line.startsWith('data: ')) {
+            continue
+          }
+
+          try {
+            const event = JSON.parse(line.slice(6)) as { content: string; done: boolean }
+            yield event
+            if (event.done) {
+              return
+            }
+          } catch {
+            // ignore malformed events
+          }
+        }
+
+        boundary = buffer.indexOf('\n\n')
+      }
+    }
+
+    if (buffer.trim().startsWith('data: ')) {
+      try {
+        const event = JSON.parse(buffer.trim().slice(6)) as { content: string; done: boolean }
+        yield event
+      } catch {
+        // ignore malformed tail event
+      }
+    }
+  },
 }

@@ -500,7 +500,7 @@ class AISettingsUpdateSerializer(serializers.Serializer):
 
 class AIProviderCreateSerializer(serializers.Serializer):
     """AIProviderCreate 序列化器：新增或编辑单个 AI 供应商。"""
-    name = serializers.SlugField(max_length=50)
+    name = serializers.CharField(max_length=50)
     label = serializers.CharField(max_length=100, required=False)
     base_url = serializers.URLField()
     api_key = serializers.CharField(max_length=500, required=False, allow_blank=True)

@@ -41,6 +41,7 @@ from apps.api.views import (
     PublicHotelsView,
     PublicRoomTypeCalendarView,
     UserAIChatView,
+    UserAIChatStreamView,
     UserAuthMeView,
     UserCouponsView,
     UserFavoritesView,
@@ -109,6 +110,7 @@ urlpatterns = [
     path("user/invoices/create", UserInvoiceTitleCreateView.as_view(), name="user-invoices-create"),
     path("user/invoices/apply", UserInvoiceApplyView.as_view(), name="user-invoices-apply"),
     path("user/ai/chat", UserAIChatView.as_view(), name="user-ai-chat"),
+    path("user/ai/chat/stream", UserAIChatStreamView.as_view(), name="user-ai-chat-stream"),
     # 管理端接口
     path("admin/dashboard/overview", AdminDashboardOverviewView.as_view(), name="admin-dashboard-overview"),
     path("admin/dashboard/charts", AdminDashboardChartsView.as_view(), name="admin-dashboard-charts"),

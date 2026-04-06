@@ -97,6 +97,7 @@ from apps.crm.models import FavoriteHotel, InvoiceRequest, InvoiceTitle, Review,
 from apps.hotels.models import Hotel, RoomInventory, RoomType
 from apps.operations.models import SystemNotice
 from apps.operations.services.ai_service import AIChatService
+from apps.operations.services.prompt_service import PromptSceneError
 from config.ai import load_ai_settings, update_ai_settings, BUILTIN_PROVIDERS
 from apps.payments.models import PaymentRecord
 from apps.reports.models import ReportTask
@@ -186,7 +187,7 @@ def fallback_ai_reply(scene: str) -> str:
         scene: AI 场景标识：customer_service / report_summary / review_summary / reply_suggestion。
     """
     if scene == "customer_service":
-        return "您好，这里是智能客服助手。当前系统尚未接入真实 AI 服务，我可以先返回基础说明，建议后续接入 DeepSeek 后提供更准确回答。"
+        return "您好，这里是 HoteLink 智能客服。当前我暂时无法从系统已接入的数据中生成可靠答复，请稍后重试，或联系人工客服进一步处理。"
     if scene == "report_summary":
         return "当前时间段内营收与订单波动建议结合入住率、取消率和均价变化综合判断。"
     if scene == "review_summary":
@@ -960,19 +961,74 @@ class UserAIChatView(APIView):
         data = serializer.validated_data
         service = AIChatService()
         try:
+            scene, messages = service.build_customer_service_messages(
+                user=request.user,
+                scene=data["scene"],
+                question=data["question"],
+                hotel_id=data.get("hotel_id"),
+                order_id=data.get("order_id"),
+            )
+        except PromptSceneError as exc:
+            return api_response(code=4002, message=str(exc), data=None, status_code=400)
+
+        try:
             if service.is_available():
-                result = service.create_chat_completion(
-                    [
-                        {"role": "system", "content": "你是酒店管理系统的中文客服助手，请用简洁专业的语气回答。"},
-                        {"role": "user", "content": data["question"]},
-                    ]
-                )
+                result = service.create_chat_completion(messages, temperature=0.2)
                 answer = result["content"]
             else:
-                answer = fallback_ai_reply(data["scene"])
+                answer = fallback_ai_reply(scene)
         except Exception:
-            answer = fallback_ai_reply(data["scene"])
-        return api_response(data={"answer": answer, "scene": data["scene"]})
+            answer = fallback_ai_reply(scene)
+        return api_response(data={"answer": answer, "scene": scene})
+
+
+class UserAIChatStreamView(APIView):
+    """用户 AI 客服流式接口：以 SSE 格式逐 token 推送回复内容。"""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        import json
+        from django.http import StreamingHttpResponse
+
+        serializer = AIChatSerializer(data=request.data)
+        if not serializer.is_valid():
+            return api_response(code=4001, message="invalid parameters", data={"errors": serializer.errors}, status_code=400)
+        data = serializer.validated_data
+        service = AIChatService()
+        try:
+            scene, messages = service.build_customer_service_messages(
+                user=request.user,
+                scene=data["scene"],
+                question=data["question"],
+                hotel_id=data.get("hotel_id"),
+                order_id=data.get("order_id"),
+            )
+        except PromptSceneError as exc:
+            return api_response(code=4002, message=str(exc), data=None, status_code=400)
+
+        def event_stream():
+            try:
+                if not service.is_available():
+                    fallback = fallback_ai_reply(scene)
+                    yield f"data: {json.dumps({'content': fallback, 'done': False}, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps({'content': '', 'done': True})}\n\n"
+                    return
+
+                stream = service.stream_chat_completion(messages, temperature=0.2)
+                for chunk in stream:
+                    delta = chunk.choices[0].delta if chunk.choices else None
+                    token = (delta.content or "") if delta else ""
+                    done = (chunk.choices[0].finish_reason is not None) if chunk.choices else False
+                    yield f"data: {json.dumps({'content': token, 'done': done}, ensure_ascii=False)}\n\n"
+            except Exception:
+                fallback = fallback_ai_reply(scene)
+                yield f"data: {json.dumps({'content': fallback, 'done': False}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'content': '', 'done': True})}\n\n"
+
+        response = StreamingHttpResponse(event_stream(), content_type="text/event-stream; charset=utf-8")
+        response["Cache-Control"] = "no-cache"
+        response["X-Accel-Buffering"] = "no"
+        return response
 
 
 class AdminDashboardOverviewView(APIView):
