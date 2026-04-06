@@ -6,7 +6,7 @@
       <div class="flex items-center gap-2">
         <span class="flex h-8 w-8 items-center justify-center rounded-full bg-brand text-white">🤖</span>
         <div>
-          <h1 class="text-sm font-semibold text-gray-800">AI 智能客服</h1>
+          <h1 class="text-sm font-semibold text-gray-800">{{ pageTitle }}</h1>
           <p class="text-xs text-green-500">在线</p>
         </div>
       </div>
@@ -23,7 +23,25 @@
             <span class="inline-block h-2 w-2 animate-bounce rounded-full bg-gray-300" style="animation-delay: 150ms" />
             <span class="inline-block h-2 w-2 animate-bounce rounded-full bg-gray-300" style="animation-delay: 300ms" />
           </div>
-          <div v-else-if="msg.role === 'assistant'" class="ai-markdown" v-html="renderMd(msg.content)" />
+          <template v-else-if="msg.role === 'assistant'">
+            <div class="ai-markdown" v-html="renderMd(msg.content)" />
+            <div v-if="msg.bookingAssistant?.options?.length" class="mt-3 space-y-2">
+              <button
+                v-for="option in msg.bookingAssistant.options"
+                :key="`${option.type}-${option.value}-${option.label}`"
+                @click="handleAssistantOption(option)"
+                class="w-full rounded-2xl border border-brand/15 bg-brand/5 px-3 py-3 text-left transition hover:border-brand/30 hover:bg-brand/10"
+              >
+                <div class="flex items-center justify-between gap-3">
+                  <div>
+                    <p class="text-sm font-semibold text-gray-800">{{ option.label }}</p>
+                    <p v-if="option.description" class="mt-1 text-xs leading-5 text-gray-500">{{ option.description }}</p>
+                  </div>
+                  <span class="shrink-0 text-xs font-medium text-brand">{{ option.type === 'navigate_booking' ? '去下单' : '选择' }}</span>
+                </div>
+              </button>
+            </div>
+          </template>
           <p v-else class="whitespace-pre-wrap">{{ msg.content }}</p>
         </div>
       </div>
@@ -53,25 +71,79 @@
 
 <script setup lang="ts">
 import { ref, nextTick, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { marked } from 'marked'
 import { userAiApi } from '@hotelink/api'
 
+const router = useRouter()
+const route = useRoute()
 const chatBox = ref<HTMLElement | null>(null)
 const input = ref('')
 const sending = ref(false)
 
-interface Msg { role: 'user' | 'assistant'; content: string; loading?: boolean }
+interface BookingContext {
+  [key: string]: string | number | null | undefined
+  intent?: string
+  selected_city?: string | null
+  selected_hotel_id?: number | null
+}
+
+interface AssistantOption {
+  type: string
+  label: string
+  value: string
+  description?: string
+  payload?: Record<string, unknown>
+  route?: string
+  query?: Record<string, string>
+}
+
+interface BookingAssistant {
+  intent: string
+  phase: string
+  context?: BookingContext
+  options?: AssistantOption[]
+}
+
+interface Msg {
+  role: 'user' | 'assistant'
+  content: string
+  loading?: boolean
+  bookingAssistant?: BookingAssistant | null
+}
+
+const isBookingMode = route.path === '/ai-booking'
+const scene = isBookingMode ? 'booking_assistant' : 'customer_service'
+
+const pageTitle = isBookingMode ? 'AI 订房助手' : 'AI 智能客服'
+
 const messages = ref<Msg[]>([
-  { role: 'assistant', content: '您好，我是 HoteLink 智能客服 🤖\n\n请问有什么可以帮您？' },
+  {
+    role: 'assistant',
+    content: isBookingMode
+      ? '您好，我是 HoteLink AI 订房助手 🧭\n\n告诉我目的地或酒店名，我会带您直接到可下单房型。'
+      : '您好，我是 HoteLink 智能客服 🤖\n\n请问有什么可以帮您？',
+  },
 ])
 
-const quickQuestions = [
-  '如何预订酒店？',
-  '如何取消订单？',
-  '如何申请退款？',
-  '会员有什么权益？',
-  '推荐热门酒店',
-]
+const bookingContext = ref<BookingContext>({})
+
+const quickQuestions = isBookingMode
+  ? [
+      '我想订酒店',
+      '我想订上海的酒店',
+      '帮我找高评分酒店',
+      '推荐适合亲子的酒店',
+      '我想住离地铁近的酒店',
+    ]
+  : [
+      '如何预订酒店？',
+      '如何取消订单？',
+      '如何申请退款？',
+      '会员有什么权益？',
+      '推荐热门酒店',
+    ]
 
 function escapeHtml(text: string): string {
   return text
@@ -86,15 +158,41 @@ function renderMd(text: string): string {
   return marked.parse(escapeHtml(text)) as string
 }
 
+function mergeBookingContext(contextPatch?: Record<string, unknown>): BookingContext {
+  const patch = (contextPatch || {}) as BookingContext
+  return {
+    ...bookingContext.value,
+    ...patch,
+  }
+}
+
+function shouldCarryBookingContext(message: string, contextPatch?: Record<string, unknown>): boolean {
+  if (contextPatch) return true
+  if (!bookingContext.value.intent) return false
+  const value = message.trim()
+  if (value.length <= 10) return true
+  return ['订', '预订', '房型', '入住', '酒店'].some(keyword => value.includes(keyword))
+}
+
 // 将列表滚动到容器底部。
 function scrollBottom() {
   nextTick(() => { chatBox.value?.scrollTo({ top: chatBox.value.scrollHeight, behavior: 'smooth' }) })
 }
 
+async function handleAssistantOption(option: AssistantOption) {
+  if (option.route) {
+    await router.push({ path: option.route, query: option.query || {} })
+    return
+  }
+  await sendMessage(option.label, option.payload)
+}
+
 // 处理 sendMessage 业务流程（流式）。
-async function sendMessage(text?: string) {
+async function sendMessage(text?: string, contextPatch?: Record<string, unknown>) {
   const msg = (text || input.value).trim()
   if (!msg || sending.value) return
+  const carryBookingContext = shouldCarryBookingContext(msg, contextPatch)
+  const nextBookingContext = carryBookingContext ? mergeBookingContext(contextPatch) : undefined
   input.value = ''
   messages.value.push({ role: 'user', content: msg })
   scrollBottom()
@@ -105,23 +203,45 @@ async function sendMessage(text?: string) {
   sending.value = true
 
   let receivedAny = false
+  let pendingBookingAssistant: BookingAssistant | null = null
   try {
-    for await (const event of userAiApi.chatStream({ scene: 'general', question: msg })) {
+    for await (const event of userAiApi.chatStream({
+      scene,
+      question: msg,
+      hotel_id: nextBookingContext?.selected_hotel_id || undefined,
+      booking_context: nextBookingContext,
+    })) {
+      if (event.type === 'meta') {
+        pendingBookingAssistant = (event.booking_assistant as BookingAssistant) || null
+        if (pendingBookingAssistant?.context) {
+          bookingContext.value = { ...pendingBookingAssistant.context }
+        }
+        continue
+      }
+
+      const chunk = typeof event.content === 'string' ? event.content : ''
+      const isDone = event.done === true || event.type === 'done'
       if (!receivedAny) {
         messages.value.pop()
-        messages.value.push({ role: 'assistant', content: '' })
+        messages.value.push({ role: 'assistant', content: '', bookingAssistant: pendingBookingAssistant })
         receivedAny = true
       }
-      if (event.content) {
-        messages.value[messages.value.length - 1].content += event.content
+      if (chunk) {
+        messages.value[messages.value.length - 1].content += chunk
         scrollBottom()
       }
-      if (event.done) break
+      if (isDone) break
     }
     if (!receivedAny) throw new Error('no reply')
+    if (!pendingBookingAssistant && !carryBookingContext) {
+      bookingContext.value = {}
+    }
   } catch {
     if (!receivedAny) messages.value.pop()
     messages.value.push({ role: 'assistant', content: generateFallback(msg) })
+    if (!carryBookingContext) {
+      bookingContext.value = {}
+    }
   }
   sending.value = false
   scrollBottom()
@@ -133,11 +253,17 @@ function generateFallback(q: string): string {
   if (q.includes('取消')) return '您可以在「我的订单」页面找到对应订单，点击「取消订单」即可。\n\n请注意查看酒店的取消政策哦。'
   if (q.includes('退款')) return '取消订单后，退款将在 **1-3 个工作日**内原路返回到您的支付账户。'
   if (q.includes('会员') || q.includes('权益')) return '成为会员可享受：\n\n- 专属折扣\n- 延迟退房\n- 免费升房\n\n入住即可累积积分升级哦！🎁'
-  if (q.includes('推荐') || q.includes('热门')) return '为您推荐几家热门酒店：\n\n- 🏨 海景花园大酒店（三亚）\n- 🏨 城市精品酒店（上海）\n- 🏨 山水度假村（桂林）\n\n您可以在首页查看更多推荐。'
+  if (q.includes('推荐') || q.includes('热门')) return '我可以根据城市、预算和评分偏好为您推荐酒店。\n\n您可以直接说：\n- 我想订上海的酒店\n- 预算 500 左右\n- 优先高评分酒店'
   return '感谢您的提问！目前 AI 客服正在学习中。\n\n如需紧急帮助，请拨打客服电话：**400-123-4567**'
 }
 
-onMounted(scrollBottom)
+onMounted(async () => {
+  scrollBottom()
+  const ask = typeof route.query.ask === 'string' ? route.query.ask.trim() : ''
+  if (ask) {
+    await sendMessage(ask)
+  }
+})
 </script>
 
 <style scoped>

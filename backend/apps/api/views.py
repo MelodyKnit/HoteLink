@@ -961,25 +961,25 @@ class UserAIChatView(APIView):
         data = serializer.validated_data
         service = AIChatService()
         try:
-            scene, messages = service.build_customer_service_messages(
+            result = service.reply_customer_service(
                 user=request.user,
                 scene=data["scene"],
                 question=data["question"],
                 hotel_id=data.get("hotel_id"),
                 order_id=data.get("order_id"),
+                booking_context=data.get("booking_context"),
             )
         except PromptSceneError as exc:
             return api_response(code=4002, message=str(exc), data=None, status_code=400)
 
-        try:
-            if service.is_available():
-                result = service.create_chat_completion(messages, temperature=0.2)
-                answer = result["content"]
-            else:
-                answer = fallback_ai_reply(scene)
-        except Exception:
-            answer = fallback_ai_reply(scene)
-        return api_response(data={"answer": answer, "scene": scene})
+        answer = result["answer"] or fallback_ai_reply(result["scene"])
+        return api_response(
+            data={
+                "answer": answer,
+                "scene": result["scene"],
+                "booking_assistant": result.get("booking_assistant"),
+            }
+        )
 
 
 class UserAIChatStreamView(APIView):
@@ -996,34 +996,54 @@ class UserAIChatStreamView(APIView):
         data = serializer.validated_data
         service = AIChatService()
         try:
-            scene, messages = service.build_customer_service_messages(
+            result = service.reply_customer_service(
                 user=request.user,
                 scene=data["scene"],
                 question=data["question"],
                 hotel_id=data.get("hotel_id"),
                 order_id=data.get("order_id"),
+                booking_context=data.get("booking_context"),
             )
         except PromptSceneError as exc:
             return api_response(code=4002, message=str(exc), data=None, status_code=400)
 
+        scene = result["scene"]
+        booking_assistant = result.get("booking_assistant")
+
         def event_stream():
             try:
-                if not service.is_available():
-                    fallback = fallback_ai_reply(scene)
-                    yield f"data: {json.dumps({'content': fallback, 'done': False}, ensure_ascii=False)}\n\n"
-                    yield f"data: {json.dumps({'content': '', 'done': True})}\n\n"
+                if booking_assistant is not None:
+                    yield f"data: {json.dumps({'type': 'meta', 'scene': scene, 'booking_assistant': booking_assistant}, ensure_ascii=False)}\n\n"
+                    answer = result["answer"] or fallback_ai_reply(scene)
+                    for chunk in service.iter_text_chunks(answer):
+                        yield f"data: {json.dumps({'type': 'chunk', 'content': chunk, 'done': False}, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps({'type': 'done', 'content': '', 'done': True}, ensure_ascii=False)}\n\n"
                     return
 
+                if not service.is_available():
+                    fallback = fallback_ai_reply(scene)
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': fallback, 'done': False}, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps({'type': 'done', 'content': '', 'done': True})}\n\n"
+                    return
+
+                _, messages = service.build_customer_service_messages(
+                    user=request.user,
+                    scene=scene,
+                    question=data["question"],
+                    hotel_id=data.get("hotel_id"),
+                    order_id=data.get("order_id"),
+                )
                 stream = service.stream_chat_completion(messages, temperature=0.2)
                 for chunk in stream:
                     delta = chunk.choices[0].delta if chunk.choices else None
                     token = (delta.content or "") if delta else ""
                     done = (chunk.choices[0].finish_reason is not None) if chunk.choices else False
-                    yield f"data: {json.dumps({'content': token, 'done': done}, ensure_ascii=False)}\n\n"
+                    event_type = 'done' if done else 'chunk'
+                    yield f"data: {json.dumps({'type': event_type, 'content': token, 'done': done}, ensure_ascii=False)}\n\n"
             except Exception:
                 fallback = fallback_ai_reply(scene)
-                yield f"data: {json.dumps({'content': fallback, 'done': False}, ensure_ascii=False)}\n\n"
-                yield f"data: {json.dumps({'content': '', 'done': True})}\n\n"
+                yield f"data: {json.dumps({'type': 'chunk', 'content': fallback, 'done': False}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'done', 'content': '', 'done': True})}\n\n"
 
         response = StreamingHttpResponse(event_stream(), content_type="text/event-stream; charset=utf-8")
         response["Cache-Control"] = "no-cache"

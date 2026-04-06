@@ -6,6 +6,8 @@
     </header>
 
     <div class="mx-auto max-w-2xl px-4 py-6 pb-24 md:pb-6">
+      <p v-if="error" class="mb-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-600">{{ error }}</p>
+
       <!-- Member Card -->
       <div class="rounded-2xl p-6 text-white" :class="levelGradient">
         <div class="flex items-center gap-3">
@@ -79,6 +81,7 @@ import { userPointsApi } from '@hotelink/api'
 const authStore = useUserAuthStore()
 const points = ref(0)
 const pointLogs = ref<any[]>([])
+const error = ref('')
 
 const levels = [
   { name: '普通会员', threshold: 0, icon: '🌱', bg: 'bg-gray-100' },
@@ -129,12 +132,8 @@ onMounted(async () => {
     const res = await userPointsApi.logs()
     if (res.code === 0 && res.data) { pointLogs.value = res.data.items || res.data }
   } catch {
-    pointLogs.value = [
-      { id: 1, title: '入住奖励', time: '2026-03-20', points: 200 },
-      { id: 2, title: '评价奖励', time: '2026-03-15', points: 50 },
-      { id: 3, title: '注册奖励', time: '2026-03-01', points: 100 },
-    ]
-    points.value = points.value || 350
+    pointLogs.value = []
+    error.value = '积分记录加载失败，请稍后重试'
   }
 })
 </script>

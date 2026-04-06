@@ -71,12 +71,13 @@ const memberLevelMap: Record<string, string> = {
 }
 
 const menuItems = [
+  { path: '/ai-booking', icon: '🧭', label: 'AI 订房助手' },
+  { path: '/ai-chat', icon: '💬', label: 'AI 智能客服' },
   { path: '/my/favorites', icon: '❤️', label: '我的收藏' },
   { path: '/my/coupons', icon: '🎫', label: '优惠券' },
   { path: '/my/membership', icon: '👑', label: '会员中心' },
   { path: '/my/reviews', icon: '⭐', label: '我的评价' },
   { path: '/my/invoices', icon: '📄', label: '发票管理' },
-  { path: '/ai-chat', icon: '🤖', label: 'AI 客服' },
   { path: '/help', icon: '❓', label: '帮助中心' },
   { path: '/about', icon: '📖', label: '关于我们' },
 ]

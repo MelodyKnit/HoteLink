@@ -6,6 +6,8 @@
     </header>
 
     <div class="mx-auto max-w-2xl px-4 py-4 pb-24 md:pb-4">
+      <p v-if="error" class="mb-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-600">{{ error }}</p>
+
       <div v-if="loading" class="flex justify-center py-20">
         <div class="h-8 w-8 animate-spin rounded-full border-4 border-brand border-t-transparent" />
       </div>
@@ -45,6 +47,7 @@ import { userFavoriteApi } from '@hotelink/api'
 
 const loading = ref(true)
 const hotels = ref<any[]>([])
+const error = ref('')
 
 // 删除 Fav 数据。
 async function removeFav(id: number) {
@@ -59,10 +62,8 @@ onMounted(async () => {
     const res = await userFavoriteApi.list()
     if (res.code === 0 && res.data) hotels.value = res.data.items || res.data
   } catch {
-    hotels.value = [
-      { id: 1, name: '海景花园大酒店', cover: '', star_level: 5, city: '三亚', address: '海棠湾路88号', min_price: '688' },
-      { id: 2, name: '城市商务酒店', cover: '', star_level: 4, city: '上海', address: '南京西路1266号', min_price: '428' },
-    ]
+    hotels.value = []
+    error.value = '收藏数据加载失败，请稍后重试'
   } finally { loading.value = false }
 })
 </script>

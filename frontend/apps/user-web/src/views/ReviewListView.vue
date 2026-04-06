@@ -6,6 +6,8 @@
     </header>
 
     <div class="mx-auto max-w-2xl px-4 py-4 pb-24 md:pb-4">
+      <p v-if="error" class="mb-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-600">{{ error }}</p>
+
       <div v-if="loading" class="flex justify-center py-20">
         <div class="h-8 w-8 animate-spin rounded-full border-4 border-brand border-t-transparent" />
       </div>
@@ -47,6 +49,7 @@ import { userOrderApi } from '@hotelink/api'
 
 const loading = ref(true)
 const reviews = ref<any[]>([])
+const error = ref('')
 
 onMounted(async () => {
   try {
@@ -54,12 +57,10 @@ onMounted(async () => {
        or a dedicated review list API if available */
     const res = await (userOrderApi as any).reviews?.() || { code: -1 }
     if (res.code === 0 && res.data) reviews.value = res.data.items || res.data
-    else throw new Error('fallback')
+    else reviews.value = []
   } catch {
-    reviews.value = [
-      { id: 1, hotel_name: '海景花园大酒店', room_type_name: '海景大床房', score: 5, content: '环境非常好，服务周到，下次还会来！', created_at: '2026-03-28', images: [], reply: '感谢您的好评，期待再次光临！' },
-      { id: 2, hotel_name: '城市商务酒店', room_type_name: '标准双人间', score: 4, content: '位置方便，性价比高，房间比较干净。', created_at: '2026-03-15', images: [], reply: '' },
-    ]
+    reviews.value = []
+    error.value = '评价数据加载失败，请稍后重试'
   } finally { loading.value = false }
 })
 </script>

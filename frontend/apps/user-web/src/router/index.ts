@@ -33,6 +33,7 @@ const router = createRouter({
     { path: '/my/invoices', name: 'invoices', component: () => import('../views/InvoiceView.vue'), meta: { auth: true } },
     { path: '/help', name: 'help', component: () => import('../views/HelpView.vue') },
     { path: '/ai-chat', name: 'ai-chat', component: () => import('../views/AIChatView.vue'), meta: { auth: true } },
+    { path: '/ai-booking', name: 'ai-booking', component: () => import('../views/AIChatView.vue'), meta: { auth: true } },
     { path: '/about', name: 'about', component: () => import('../views/AboutView.vue') },
     { path: '/contact', name: 'contact', component: () => import('../views/ContactView.vue') },
     { path: '/:pathMatch(.*)*', redirect: '/' },

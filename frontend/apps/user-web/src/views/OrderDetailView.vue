@@ -10,6 +10,8 @@
     </div>
 
     <div v-else class="mx-auto max-w-2xl px-4 py-6">
+      <p v-if="error" class="mb-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-600">{{ error }}</p>
+
       <!-- Status -->
       <div class="rounded-2xl bg-gradient-to-r from-brand to-teal-500 p-5 text-white">
         <p class="text-sm text-teal-100">订单状态</p>
@@ -137,6 +139,7 @@ const router = useRouter()
 const orderId = Number(route.params.id)
 const loading = ref(true)
 const order = ref<any>({})
+const error = ref('')
 
 const showCancelModal = ref(false)
 const cancelReason = ref('')
@@ -189,18 +192,8 @@ onMounted(async () => {
     const res = await userOrderApi.detail(orderId)
     if (res.code === 0 && res.data) order.value = res.data
   } catch {
-    order.value = {
-      id: orderId, order_no: `ORD${orderId}`, status: 'confirmed',
-      hotel_name: '示例酒店', hotel_id: 1, room_type_name: '豪华大床房',
-      check_in_date: '2026-04-10', check_out_date: '2026-04-12',
-      guest_name: '张三', guest_mobile: '138****0000', guest_count: 2,
-      total_amount: '1376.00', payment_method: 'mock', payment_status: 'paid',
-      timeline: [
-        { title: '订单已确认', time: '2026-04-08 16:30' },
-        { title: '支付成功', time: '2026-04-08 16:25' },
-        { title: '订单已创建', time: '2026-04-08 16:20' },
-      ],
-    }
+    order.value = {}
+    error.value = '订单详情加载失败，请稍后重试'
   } finally {
     loading.value = false
   }

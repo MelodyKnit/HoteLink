@@ -269,6 +269,7 @@ HoteLink/
 - 场景规范化：`general -> customer_service`
 - 未支持场景直接拒绝（`PromptSceneError`），避免无约束生成
 - 客服上下文绑定：用户订单、关联酒店/房型、系统通知、系统字典
+- 智能订房编排：命中订房意图时，服务端按城市、酒店、房型阶段输出结构化动作，并复用现有 `/booking` 下单链路
 - 接口层能力：`/api/v1/user/ai/chat`（普通）与 `/api/v1/user/ai/chat/stream`（流式）
 - 等后续 AI 相关功能增多时，可再独立拆分 `apps.ai`
 

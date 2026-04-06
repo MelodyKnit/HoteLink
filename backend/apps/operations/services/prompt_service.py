@@ -12,6 +12,7 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined, TemplateNotFo
 SUPPORTED_SCENE_ALIASES = {
     "general": "customer_service",
     "customer_service": "customer_service",
+    "booking_assistant": "customer_service",
 }
 
 SUPPORTED_CUSTOMER_SERVICE_TOPICS = (

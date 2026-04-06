@@ -392,6 +392,7 @@ class AIChatSerializer(serializers.Serializer):
     question = serializers.CharField()
     hotel_id = serializers.IntegerField(required=False, allow_null=True)
     order_id = serializers.IntegerField(required=False, allow_null=True)
+    booking_context = serializers.JSONField(required=False)
 
 
 class AIReportSummarySerializer(serializers.Serializer):

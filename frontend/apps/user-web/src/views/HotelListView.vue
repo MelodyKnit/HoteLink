@@ -1,5 +1,7 @@
 <template>
   <div class="mx-auto max-w-5xl px-4 py-6">
+    <p v-if="error" class="mb-4 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-600">{{ error }}</p>
+
     <!-- Search & Filter bar -->
     <div class="mb-6 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-gray-100">
       <div class="flex flex-col gap-3 md:flex-row md:items-end">
@@ -94,6 +96,7 @@ import { publicApi } from '@hotelink/api'
 const route = useRoute()
 const loading = ref(true)
 const hotels = ref<any[]>([])
+const error = ref('')
 const page = ref(1)
 const pageSize = 10
 const total = ref(0)
@@ -126,13 +129,9 @@ async function fetchList() {
       total.value = (res.data as any).total || 0
     }
   } catch {
-    hotels.value = [
-      { id: 1, name: 'HoteLink 北京国贸店', city: '北京', address: '朝阳区国贸 CBD', star: 5, min_price: 688, rating: 4.8, review_count: 256, image_url: '', tags: ['商务出行', '地铁直达'] },
-      { id: 2, name: 'HoteLink 上海外滩店', city: '上海', address: '黄浦区外滩核心', star: 5, min_price: 888, rating: 4.9, review_count: 312, image_url: '', tags: ['江景房', '亲子友好'] },
-      { id: 3, name: 'HoteLink 杭州西湖店', city: '杭州', address: '西湖景区旁', star: 4, min_price: 458, rating: 4.7, review_count: 189, image_url: '', tags: ['湖景', '温泉'] },
-      { id: 4, name: 'HoteLink 深圳南山店', city: '深圳', address: '南山区科技园', star: 4, min_price: 398, rating: 4.6, review_count: 145, image_url: '', tags: ['商务', '新装修'] },
-    ]
-    total.value = hotels.value.length
+    hotels.value = []
+    total.value = 0
+    error.value = '酒店列表加载失败，请稍后重试'
   } finally {
     loading.value = false
   }

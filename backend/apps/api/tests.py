@@ -230,6 +230,82 @@ class UserApiTests(ApiBaseTestCase):
         self.assertEqual(invoice_apply.status_code, 200)
         self.assertEqual(invoice_apply.json()["data"]["status"], "pending")
 
+    def test_user_ai_chat_returns_booking_assistant_options(self):
+        """验证 AI 订房可返回结构化城市与房型动作。"""
+        self.login_user()
+        shanghai_hotel = Hotel.objects.create(
+            name="HoteLink 上海外滩店",
+            city="上海",
+            address="上海市黄浦区示例路 8 号",
+            star=5,
+            phone="021-66668888",
+            description="外滩景观酒店",
+            rating=Decimal("4.9"),
+            min_price=Decimal("899.00"),
+            is_recommended=True,
+            status=Hotel.STATUS_ONLINE,
+        )
+        shanghai_room = RoomType.objects.create(
+            hotel=shanghai_hotel,
+            name="江景大床房",
+            bed_type=RoomType.BED_QUEEN,
+            area=42,
+            breakfast_count=2,
+            base_price=Decimal("899.00"),
+            max_guest_count=2,
+            stock=6,
+            status=RoomType.STATUS_ONLINE,
+        )
+
+        city_response = self.client.post(
+            "/api/v1/user/ai/chat",
+            {
+                "scene": "general",
+                "question": "我想订酒店",
+            },
+            format="json",
+        )
+        self.assertEqual(city_response.status_code, 200)
+        city_data = city_response.json()["data"]
+        self.assertEqual(city_data["booking_assistant"]["phase"], "select_city")
+        self.assertTrue(any(item["label"] == "北京" for item in city_data["booking_assistant"]["options"]))
+
+        room_response = self.client.post(
+            "/api/v1/user/ai/chat",
+            {
+                "scene": "general",
+                "question": "我想订 HoteLink 上海外滩店",
+            },
+            format="json",
+        )
+        self.assertEqual(room_response.status_code, 200)
+        room_data = room_response.json()["data"]
+        self.assertEqual(room_data["booking_assistant"]["phase"], "select_room_type")
+        option = room_data["booking_assistant"]["options"][0]
+        self.assertEqual(option["type"], "navigate_booking")
+        self.assertEqual(option["label"], shanghai_room.name)
+        self.assertEqual(option["query"]["hotel_id"], str(shanghai_hotel.id))
+        self.assertEqual(option["query"]["room_type_id"], str(shanghai_room.id))
+
+    def test_user_ai_chat_stream_returns_booking_meta_events(self):
+        """验证 AI 订房流式接口会先返回结构化 meta 事件。"""
+        self.login_user()
+
+        response = self.client.post(
+            "/api/v1/user/ai/chat/stream",
+            {
+                "scene": "general",
+                "question": "我想订酒店",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = b"".join(response.streaming_content).decode("utf-8")
+        self.assertIn('"type": "meta"', payload)
+        self.assertIn('"phase": "select_city"', payload)
+        self.assertIn('"type": "chunk"', payload)
+        self.assertIn('"type": "done"', payload)
+
 
 class AdminApiTests(ApiBaseTestCase):
     """管理端接口测试集合。"""

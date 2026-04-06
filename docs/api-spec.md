@@ -1472,7 +1472,12 @@ Authorization: Bearer <access_token>
   "scene": "customer_service",
   "question": "这家酒店可以几点入住？",
   "hotel_id": 1001,
-  "order_id": 3001
+  "order_id": 3001,
+  "booking_context": {
+    "intent": "hotel_booking",
+    "selected_city": "上海",
+    "selected_hotel_id": 1001
+  }
 }
 ```
 
@@ -1484,6 +1489,7 @@ Authorization: Bearer <access_token>
 | `question` | string | 是 | 用户问题 |
 | `hotel_id` | int | 否 | 酒店相关问题时传入 |
 | `order_id` | int | 否 | 订单相关问题时传入 |
+| `booking_context` | object | 否 | AI 订房上下文，承载已选城市/酒店等结构化状态 |
 
 场景约束：
 
@@ -1498,11 +1504,38 @@ Authorization: Bearer <access_token>
   "code": 0,
   "message": "success",
   "data": {
-    "answer": "本酒店标准入住时间为 14:00 后，若您提前到店，可联系前台确认是否可提前安排。",
-    "scene": "customer_service"
+    "answer": "已为您切到上海，这里有 4 家当前可预订酒店。点一家，我继续把房型直接展开给您。",
+    "scene": "customer_service",
+    "booking_assistant": {
+      "intent": "hotel_booking",
+      "phase": "select_hotel",
+      "context": {
+        "intent": "hotel_booking",
+        "selected_city": "上海",
+        "selected_hotel_id": null
+      },
+      "options": [
+        {
+          "type": "select_hotel",
+          "label": "外滩景观酒店",
+          "value": "1001",
+          "description": "上海 | 5星 | 评分4.8 | ¥899.00起",
+          "payload": {
+            "intent": "hotel_booking",
+            "selected_city": "上海",
+            "selected_hotel_id": 1001
+          }
+        }
+      ]
+    }
   }
 }
 ```
+
+说明：
+
+- 当用户进入 AI 订房流程时，接口会在 `booking_assistant` 中返回结构化阶段、上下文与候选动作。
+- `options[].type=select_city/select_hotel` 表示继续对话选择；`options[].type=navigate_booking` 表示可直接跳转到下单页。
 
 ### 14.2 用户端 AI 客服（流式）
 
@@ -1513,17 +1546,18 @@ Authorization: Bearer <access_token>
 响应类型：
 
 - `text/event-stream`
-- 每条事件格式：`data: {"content": "...", "done": false}`
-- 结束事件：`data: {"content": "", "done": true}`
+- 结构化事件：`data: {"type": "meta", "scene": "customer_service", "booking_assistant": {...}}`
+- 文本分块事件：`data: {"type": "chunk", "content": "...", "done": false}`
+- 结束事件：`data: {"type": "done", "content": "", "done": true}`
 
 示例：
 
 ```text
-data: {"content":"您好","done":false}
+data: {"type":"meta","scene":"customer_service","booking_assistant":{"intent":"hotel_booking","phase":"select_city"}}
 
-data: {"content":"，我来帮您查询订单信息。","done":false}
+data: {"type":"chunk","content":"可以，我来帮您直接订酒店。","done":false}
 
-data: {"content":"","done":true}
+data: {"type":"done","content":"","done":true}
 ```
 
 ### 14.3 管理端 AI 经营摘要

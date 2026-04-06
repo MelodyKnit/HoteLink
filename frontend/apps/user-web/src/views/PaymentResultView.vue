@@ -5,6 +5,8 @@
     </header>
 
     <div class="mx-auto max-w-md px-4 py-16 text-center">
+      <p v-if="error" class="mb-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-600">{{ error }}</p>
+
       <div class="text-6xl">{{ success ? '✅' : '❌' }}</div>
       <h2 class="mt-4 text-xl font-bold" :class="success ? 'text-green-600' : 'text-red-600'">
         {{ success ? '支付成功' : '支付失败' }}
@@ -39,6 +41,7 @@ const route = useRoute()
 const orderId = Number(route.params.orderId)
 const success = ref(true)
 const order = ref<any>({})
+const error = ref('')
 
 onMounted(async () => {
   try {
@@ -49,7 +52,9 @@ onMounted(async () => {
       success.value = status !== 'pending_payment'
     }
   } catch {
-    order.value = { order_no: `ORD${orderId}`, hotel_name: '示例酒店', room_type_name: '豪华大床房', check_in_date: '2026-04-10', check_out_date: '2026-04-12', total_amount: '1376.00' }
+    order.value = {}
+    error.value = '支付结果读取失败，请稍后在订单页查看'
+    success.value = false
   }
 })
 </script>

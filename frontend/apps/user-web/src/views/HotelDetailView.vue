@@ -12,6 +12,11 @@
       <div class="h-8 w-8 animate-spin rounded-full border-4 border-brand border-t-transparent" />
     </div>
 
+    <div v-else-if="error" class="mx-auto max-w-5xl px-4 py-16 text-center">
+      <p class="text-sm text-red-500">{{ error }}</p>
+      <router-link to="/hotels" class="mt-3 inline-block rounded-xl bg-brand px-4 py-2 text-sm text-white">返回酒店列表</router-link>
+    </div>
+
     <template v-else>
       <!-- Image gallery -->
       <div class="relative h-56 overflow-hidden bg-gray-200 md:h-80">
@@ -132,6 +137,7 @@ const hotel = ref<any>({})
 const reviews = ref<any[]>([])
 const currentImg = ref(0)
 const isFav = ref(false)
+const error = ref('')
 const bedTypeMap = BED_TYPE_MAP
 
 // 切换Fav显示状态。
@@ -163,19 +169,9 @@ onMounted(async () => {
     if (hotelRes.code === 0 && hotelRes.data) hotel.value = hotelRes.data
     if (reviewRes.code === 0 && reviewRes.data) reviews.value = (reviewRes.data as any).items || []
   } catch {
-    hotel.value = {
-      id: hotelId, name: 'HoteLink 示例酒店', city: '北京', address: '朝阳区示例路1号',
-      star: 5, rating: 4.8, review_count: 128, phone: '010-88886666',
-      description: '地理位置优越，交通便利，设施齐全的高端商务酒店。',
-      check_in_time: '14:00 后', check_out_time: '12:00 前',
-      facilities: ['WiFi', '停车场', '健身房', '餐厅', '会议室', '行李寄存', '24小时前台'],
-      room_types: [
-        { id: 1, name: '豪华大床房', bed_type: 'queen', area: 35, base_price: 688, max_guest_count: 2, breakfast_count: 2 },
-        { id: 2, name: '商务双床房', bed_type: 'twin', area: 40, base_price: 788, max_guest_count: 2, breakfast_count: 2 },
-        { id: 3, name: '行政套房', bed_type: 'queen', area: 65, base_price: 1288, max_guest_count: 3, breakfast_count: 2 },
-      ],
-      images: [],
-    }
+    hotel.value = {}
+    reviews.value = []
+    error.value = '酒店详情加载失败，请稍后重试'
   } finally {
     loading.value = false
   }

@@ -6,6 +6,8 @@
     </header>
 
     <div class="mx-auto max-w-2xl px-4 py-6">
+      <p v-if="error && !loading" class="mb-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-600">{{ error }}</p>
+
       <div v-if="loading" class="flex justify-center py-20">
         <div class="h-8 w-8 animate-spin rounded-full border-4 border-brand border-t-transparent" />
       </div>
@@ -109,7 +111,8 @@ onMounted(async () => {
     const res = await userOrderApi.detail(orderId)
     if (res.code === 0 && res.data) order.value = res.data
   } catch {
-    order.value = { order_no: `ORD${orderId}`, hotel_name: '示例酒店', room_type_name: '豪华大床房', check_in_date: '2026-04-10', check_out_date: '2026-04-12', guest_name: '张三', total_amount: '1376.00' }
+    order.value = {}
+    error.value = '订单信息加载失败，请稍后重试'
   } finally {
     loading.value = false
   }

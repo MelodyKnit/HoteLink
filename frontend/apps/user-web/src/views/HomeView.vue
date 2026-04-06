@@ -1,5 +1,7 @@
 <template>
   <div>
+    <p v-if="error" class="mx-auto mt-4 max-w-5xl rounded-xl bg-red-50 px-3 py-2 text-xs text-red-600">{{ error }}</p>
+
     <!-- Hero Banner -->
     <section class="relative bg-gradient-to-br from-brand-dark via-brand to-teal-500 px-4 pb-12 pt-8 text-white md:pb-20 md:pt-16">
       <div class="mx-auto max-w-5xl">
@@ -23,6 +25,49 @@
             </div>
           </div>
           <button @click="handleSearch" class="mt-4 w-full rounded-xl bg-brand px-8 py-3 text-sm font-semibold text-white transition hover:bg-brand-dark md:mt-0 md:w-auto">搜索</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- AI Signature Entry -->
+    <section class="mx-auto max-w-5xl px-4 pt-5">
+      <div class="rounded-2xl border border-teal-100 bg-white p-4 shadow-sm">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <p class="inline-flex items-center gap-2 rounded-full bg-teal-50 px-2.5 py-1 text-[11px] font-semibold text-teal-700">
+              <span class="inline-block h-1.5 w-1.5 rounded-full bg-teal-500" />
+              特色功能
+            </p>
+            <h2 class="mt-2 text-base font-semibold text-gray-900 md:text-lg">AI 智能订房助手</h2>
+            <p class="mt-1 text-xs leading-5 text-gray-500 md:text-sm">一句话即可进入“城市 → 酒店 → 房型 → 下单”流程。</p>
+          </div>
+          <button
+            @click="goAiBooking()"
+            class="shrink-0 rounded-xl bg-brand px-4 py-2 text-xs font-semibold text-white transition hover:bg-brand-dark md:text-sm"
+          >
+            立即体验
+          </button>
+        </div>
+
+        <div class="mt-3 flex flex-wrap gap-2">
+          <button
+            @click="goAiBooking('我想订酒店')"
+            class="rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs text-gray-600 transition hover:border-brand/40 hover:bg-brand/5 hover:text-brand"
+          >
+            我想订酒店
+          </button>
+          <button
+            @click="goAiBooking('我想订上海的酒店')"
+            class="rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs text-gray-600 transition hover:border-brand/40 hover:bg-brand/5 hover:text-brand"
+          >
+            我想订上海的酒店
+          </button>
+          <button
+            @click="goAiBooking('帮我找高评分的酒店')"
+            class="rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs text-gray-600 transition hover:border-brand/40 hover:bg-brand/5 hover:text-brand"
+          >
+            帮我找高评分的酒店
+          </button>
         </div>
       </div>
     </section>
@@ -117,6 +162,7 @@ import { formatDate } from '@hotelink/utils'
 
 const router = useRouter()
 const loading = ref(true)
+const error = ref('')
 const keyword = ref('')
 const today = formatDate(new Date())
 const checkIn = ref(today)
@@ -153,6 +199,10 @@ function handleSearch() {
   router.push({ path: '/hotels', query })
 }
 
+function goAiBooking(question = '我想订酒店') {
+  router.push({ path: '/ai-booking', query: { ask: question } })
+}
+
 onMounted(async () => {
   try {
     const res = await publicApi.home()
@@ -163,11 +213,8 @@ onMounted(async () => {
       }
     }
   } catch {
-    recommendedHotels.value = [
-      { id: 1, name: 'HoteLink 北京国贸店', city: '北京', address: '朝阳区国贸 CBD', star: 5, min_price: 688, rating: 4.8, review_count: 256, image_url: '', tags: ['商务出行', '地铁直达'] },
-      { id: 2, name: 'HoteLink 上海外滩店', city: '上海', address: '黄浦区外滩核心', star: 5, min_price: 888, rating: 4.9, review_count: 312, image_url: '', tags: ['江景房', '亲子友好'] },
-      { id: 3, name: 'HoteLink 杭州西湖店', city: '杭州', address: '西湖景区旁', star: 4, min_price: 458, rating: 4.7, review_count: 189, image_url: '', tags: ['湖景', '温泉'] },
-    ]
+    recommendedHotels.value = []
+    error.value = '首页数据加载失败，请稍后刷新重试'
   } finally {
     loading.value = false
   }

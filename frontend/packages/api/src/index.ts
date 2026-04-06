@@ -317,12 +317,12 @@ export const userNoticeApi = {
 
 // ========== User AI Chat ==========
 export const userAiApi = {
-  chat: (data: { scene: string; question: string; hotel_id?: number; order_id?: number }) =>
-    post<{ answer: string; scene: string }>('/user/ai/chat', data),
+  chat: (data: { scene: string; question: string; hotel_id?: number; order_id?: number; booking_context?: Record<string, unknown> }) =>
+    post<{ answer: string; scene: string; booking_assistant?: Record<string, unknown> | null }>('/user/ai/chat', data),
 
   async *chatStream(
-    data: { scene: string; question: string; hotel_id?: number; order_id?: number }
-  ): AsyncGenerator<{ content: string; done: boolean }> {
+    data: { scene: string; question: string; hotel_id?: number; order_id?: number; booking_context?: Record<string, unknown> }
+  ): AsyncGenerator<Record<string, unknown>> {
     const token = getToken()
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
     if (token) {
@@ -369,7 +369,7 @@ export const userAiApi = {
           }
 
           try {
-            const event = JSON.parse(line.slice(6)) as { content: string; done: boolean }
+            const event = JSON.parse(line.slice(6)) as Record<string, unknown>
             yield event
             if (event.done) {
               return
