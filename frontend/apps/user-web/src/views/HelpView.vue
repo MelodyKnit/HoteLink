@@ -64,6 +64,7 @@ import { ref, computed } from 'vue'
 const search = ref('')
 const expanded = ref(new Set<number>())
 
+// 切换当前显示状态。
 function toggle(idx: number) {
   if (expanded.value.has(idx)) expanded.value.delete(idx)
   else expanded.value.add(idx)

@@ -91,6 +91,7 @@ const showModal = ref(false)
 const saving = ref(false)
 const editForm = reactive({ date: '', price: 0, stock: 0, status: 'available' })
 
+// 加载 RoomTypes 相关数据。
 async function loadRoomTypes() {
   const res = await roomTypeApi.list({ page_size: 200 })
   if (res.code === 0 && res.data) {
@@ -100,6 +101,7 @@ async function loadRoomTypes() {
   }
 }
 
+// 加载 Calendar 相关数据。
 async function loadCalendar() {
   if (!selectedRoomType.value) return
   loading.value = true
@@ -117,6 +119,7 @@ async function loadCalendar() {
   loading.value = false
 }
 
+// 打开 Edit 相关界面。
 function openEdit(row: Record<string, unknown>) {
   editForm.date = row.date as string
   editForm.price = row.price as number
@@ -125,6 +128,7 @@ function openEdit(row: Record<string, unknown>) {
   showModal.value = true
 }
 
+// 处理 Save 交互逻辑。
 async function handleSave() {
   saving.value = true
   try {

@@ -82,6 +82,7 @@ const reviewForm = reactive({ hotel_id: '' as string | number, start_date: defau
 const reviewLoading = ref(false)
 const reviewResult = ref('')
 
+// 加载 Hotels 相关数据。
 async function loadHotels() {
   const res = await hotelApi.list({ page: 1, page_size: 200 })
   if (res.code === 0 && res.data) {
@@ -89,6 +90,7 @@ async function loadHotels() {
   }
 }
 
+// 处理 getReportSummary 业务流程。
 async function getReportSummary() {
   reportLoading.value = true
   reportResult.value = ''
@@ -101,6 +103,7 @@ async function getReportSummary() {
   reportLoading.value = false
 }
 
+// 处理 getReviewSummary 业务流程。
 async function getReviewSummary() {
   reviewLoading.value = true
   reviewResult.value = ''

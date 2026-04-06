@@ -114,6 +114,7 @@ const hotels = ref<Record<string, unknown>[]>([])
 const showCreate = ref(false)
 const form = reactive({ report_type: 'revenue', hotel_id: '' as string | number, start_date: '', end_date: '' })
 
+// 加载 Charts 相关数据。
 async function loadCharts() {
   const res = await dashboardApi.charts({ start_date: chartStart.value, end_date: chartEnd.value })
   if (res.code !== 0 || !res.data) return
@@ -145,6 +146,7 @@ async function loadCharts() {
   }
 }
 
+// 加载 Tasks 相关数据。
 async function loadTasks() {
   tasksLoading.value = true
   const res = await reportApi.tasks({ page: taskPage.value, page_size: taskPageSize.value })
@@ -156,6 +158,7 @@ async function loadTasks() {
   tasksLoading.value = false
 }
 
+// 加载 Hotels 相关数据。
 async function loadHotels() {
   const res = await hotelApi.list({ page: 1, page_size: 200 })
   if (res.code === 0 && res.data) {
@@ -163,6 +166,7 @@ async function loadHotels() {
   }
 }
 
+// 打开 Create 相关界面。
 function openCreate() {
   form.report_type = 'revenue'
   form.hotel_id = ''
@@ -171,6 +175,7 @@ function openCreate() {
   showCreate.value = true
 }
 
+// 处理 Create 交互逻辑。
 async function handleCreate() {
   const payload: Record<string, unknown> = { report_type: form.report_type, start_date: form.start_date, end_date: form.end_date }
   if (form.hotel_id) payload.hotel_id = form.hotel_id
@@ -179,6 +184,7 @@ async function handleCreate() {
   loadTasks()
 }
 
+// 处理 Resize 交互逻辑。
 function handleResize() {
   revenueChart?.resize()
   orderChart?.resize()

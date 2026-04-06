@@ -96,6 +96,7 @@ const applying = ref(false)
 const titleForm = ref({ invoice_type: 'personal', title: '', tax_no: '', email: '' })
 const applyForm = ref({ order_id: 0, invoice_title_id: 0 })
 
+// 处理 AddTitle 交互逻辑。
 async function handleAddTitle() {
   if (!titleForm.value.title.trim()) return
   addingTitle.value = true
@@ -108,6 +109,7 @@ async function handleAddTitle() {
   addingTitle.value = false
 }
 
+// 处理 Apply 交互逻辑。
 async function handleApply() {
   if (!applyForm.value.invoice_title_id || !applyForm.value.order_id) { alert('请填写完整信息'); return }
   applying.value = true

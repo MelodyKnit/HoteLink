@@ -80,6 +80,7 @@ const replyTarget = reactive<Record<string, unknown>>({})
 const replyContent = ref('')
 const aiSuggestion = ref('')
 
+// 加载 List 相关数据。
 async function loadList() {
   loading.value = true
   const params: Record<string, unknown> = { page: page.value, page_size: pageSize.value }
@@ -93,6 +94,7 @@ async function loadList() {
   loading.value = false
 }
 
+// 加载 Hotels 相关数据。
 async function loadHotels() {
   const res = await hotelApi.list({ page: 1, page_size: 200 })
   if (res.code === 0 && res.data) {
@@ -100,6 +102,7 @@ async function loadHotels() {
   }
 }
 
+// 打开 Reply 相关界面。
 function openReply(row: Record<string, unknown>) {
   Object.assign(replyTarget, row)
   replyContent.value = (row.reply_content as string) || ''
@@ -107,6 +110,7 @@ function openReply(row: Record<string, unknown>) {
   showReply.value = true
 }
 
+// 处理 getAISuggestion 业务流程。
 async function getAISuggestion(row: Record<string, unknown>) {
   openReply(row)
   try {
@@ -119,6 +123,7 @@ async function getAISuggestion(row: Record<string, unknown>) {
   }
 }
 
+// 处理 submitReply 业务流程。
 async function submitReply() {
   await reviewApi.reply({ review_id: replyTarget.id as number, content: replyContent.value })
   showReply.value = false

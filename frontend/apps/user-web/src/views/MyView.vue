@@ -81,6 +81,7 @@ const menuItems = [
   { path: '/about', icon: '📖', label: '关于我们' },
 ]
 
+// 处理 Logout 交互逻辑。
 function handleLogout() {
   auth.logout()
   router.replace('/login')

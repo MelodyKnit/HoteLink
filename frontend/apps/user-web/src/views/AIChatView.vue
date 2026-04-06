@@ -71,10 +71,12 @@ const quickQuestions = [
   '推荐热门酒店',
 ]
 
+// 将列表滚动到容器底部。
 function scrollBottom() {
   nextTick(() => { chatBox.value?.scrollTo({ top: chatBox.value.scrollHeight, behavior: 'smooth' }) })
 }
 
+// 处理 sendMessage 业务流程。
 async function sendMessage(text?: string) {
   const msg = (text || input.value).trim()
   if (!msg || sending.value) return
@@ -106,6 +108,7 @@ async function sendMessage(text?: string) {
   scrollBottom()
 }
 
+// 处理 generateFallback 业务流程。
 function generateFallback(q: string): string {
   if (q.includes('预订')) return '预订酒店非常简单：\n1. 在首页搜索或浏览酒店\n2. 选择心仪的房型\n3. 填写入住信息并支付\n即可完成预订 😊'
   if (q.includes('取消')) return '您可以在「我的订单」页面找到对应订单，点击「取消订单」即可。请注意查看酒店的取消政策哦。'

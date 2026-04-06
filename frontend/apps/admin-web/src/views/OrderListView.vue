@@ -114,6 +114,7 @@ const checkInForm = reactive({ order_id: 0, order_no: '', room_no: '', operator_
 const showCheckOut = ref(false)
 const checkOutForm = reactive({ order_id: 0, order_no: '', consume_amount: 0, operator_remark: '' })
 
+// 根据状态值返回对应展示信息。
 function statusType(status: string) {
   if (status === 'checked_in' || status === 'completed') return 'success' as const
   if (status === 'cancelled') return 'danger' as const
@@ -121,6 +122,7 @@ function statusType(status: string) {
   return 'info' as const
 }
 
+// 加载 List 相关数据。
 async function loadList() {
   loading.value = true
   const params: Record<string, unknown> = { page: page.value, page_size: pageSize.value }
@@ -134,12 +136,14 @@ async function loadList() {
   loading.value = false
 }
 
+// 处理 confirmOrder 业务流程。
 async function confirmOrder(row: Record<string, unknown>) {
   if (!confirm('确认此订单？')) return
   await orderApi.changeStatus({ order_id: row.id as number, target_status: 'confirmed' })
   loadList()
 }
 
+// 打开 CheckIn 相关界面。
 function openCheckIn(row: Record<string, unknown>) {
   checkInForm.order_id = row.id as number
   checkInForm.order_no = row.order_no as string
@@ -148,6 +152,7 @@ function openCheckIn(row: Record<string, unknown>) {
   showCheckIn.value = true
 }
 
+// 处理 CheckIn 交互逻辑。
 async function handleCheckIn() {
   await orderApi.checkIn({
     order_id: checkInForm.order_id,
@@ -158,6 +163,7 @@ async function handleCheckIn() {
   loadList()
 }
 
+// 打开 CheckOut 相关界面。
 function openCheckOut(row: Record<string, unknown>) {
   checkOutForm.order_id = row.id as number
   checkOutForm.order_no = row.order_no as string
@@ -166,6 +172,7 @@ function openCheckOut(row: Record<string, unknown>) {
   showCheckOut.value = true
 }
 
+// 处理 CheckOut 交互逻辑。
 async function handleCheckOut() {
   await orderApi.checkOut({
     order_id: checkOutForm.order_id,

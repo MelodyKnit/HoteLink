@@ -22,28 +22,34 @@ const REFRESH_KEY = 'hotelink_refresh_token'
 
 let _loginRedirect = '/admin/login'
 
+// 处理 configureApi 业务流程。
 export function configureApi(options: { loginRedirect?: string }) {
   if (options.loginRedirect) _loginRedirect = options.loginRedirect
 }
 
+// 处理 getToken 业务流程。
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY)
 }
 
+// 设置 Tokens 状态。
 export function setTokens(access: string, refresh: string) {
   localStorage.setItem(TOKEN_KEY, access)
   localStorage.setItem(REFRESH_KEY, refresh)
 }
 
+// 清理 Tokens 状态。
 export function clearTokens() {
   localStorage.removeItem(TOKEN_KEY)
   localStorage.removeItem(REFRESH_KEY)
 }
 
+// 处理 getRefreshToken 业务流程。
 export function getRefreshToken(): string | null {
   return localStorage.getItem(REFRESH_KEY)
 }
 
+// 创建 Http 资源。
 function createHttp(baseURL: string): AxiosInstance {
   const instance = axios.create({ baseURL, timeout: 30000 })
 

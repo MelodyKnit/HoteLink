@@ -92,6 +92,7 @@ const loading = ref(true)
 const order = ref<Record<string, unknown> | null>(null)
 const payments = ref<Record<string, unknown>[]>([])
 
+// 根据状态值返回对应展示信息。
 function statusType(status: string) {
   if (status === 'checked_in' || status === 'completed') return 'success' as const
   if (status === 'cancelled') return 'danger' as const
@@ -99,6 +100,7 @@ function statusType(status: string) {
   return 'info' as const
 }
 
+// 加载 Detail 相关数据。
 async function loadDetail() {
   loading.value = true
   const id = Number(route.params.id)
@@ -109,12 +111,14 @@ async function loadDetail() {
   loading.value = false
 }
 
+// 处理 confirmOrder 业务流程。
 async function confirmOrder() {
   if (!confirm('确认此订单？')) return
   await orderApi.changeStatus({ order_id: order.value!.id as number, target_status: 'confirmed' })
   loadDetail()
 }
 
+// 处理 doCheckIn 业务流程。
 async function doCheckIn() {
   const roomNo = prompt('请输入房间号')
   if (!roomNo) return
@@ -122,6 +126,7 @@ async function doCheckIn() {
   loadDetail()
 }
 
+// 处理 doCheckOut 业务流程。
 async function doCheckOut() {
   await orderApi.checkOut({ order_id: order.value!.id as number })
   loadDetail()

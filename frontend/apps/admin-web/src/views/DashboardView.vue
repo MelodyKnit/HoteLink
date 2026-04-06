@@ -76,11 +76,13 @@ const orderChartRef = ref<HTMLElement>()
 let revenueChart: echarts.ECharts | null = null
 let orderChart: echarts.ECharts | null = null
 
+// 加载 Overview 相关数据。
 async function loadOverview() {
   const res = await dashboardApi.overview()
   if (res.code === 0 && res.data) Object.assign(overview, res.data)
 }
 
+// 加载 Charts 相关数据。
 async function loadCharts() {
   const end = new Date()
   const start = new Date()

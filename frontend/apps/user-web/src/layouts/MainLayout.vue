@@ -82,6 +82,7 @@ const tabs = [
   { path: '/my', icon: '👤', label: '我的' },
 ]
 
+// 判断TabActive条件是否成立。
 function isTabActive(path: string): boolean {
   if (path === '/') return route.path === '/'
   return route.path.startsWith(path)

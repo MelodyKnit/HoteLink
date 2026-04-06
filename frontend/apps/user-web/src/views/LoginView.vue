@@ -45,6 +45,7 @@ const error = ref('')
 
 const form = ref({ username: '', password: '' })
 
+// 处理 Login 交互逻辑。
 async function handleLogin() {
   if (!form.value.username || !form.value.password) { error.value = '请输入用户名和密码'; return }
   loading.value = true

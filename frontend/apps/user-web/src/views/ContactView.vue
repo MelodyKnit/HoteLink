@@ -108,6 +108,7 @@ const addresses = [
   { city: '深圳', label: '分公司', address: '南山区科技中一路腾讯滨海大厦旁创新科技园6层', phone: '0755-8688-0003' },
 ]
 
+// 处理 submitFeedback 业务流程。
 async function submitFeedback() {
   if (!feedback.value.type || !feedback.value.content.trim()) {
     alert('请选择反馈类型并填写内容')

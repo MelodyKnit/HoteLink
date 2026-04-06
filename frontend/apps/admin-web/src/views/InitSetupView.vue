@@ -76,6 +76,7 @@ const form = reactive({ username: '', password: '', confirm_password: '' })
 const submitting = ref(false)
 const errorMsg = ref('')
 
+// 处理 Submit 交互逻辑。
 async function handleSubmit() {
   errorMsg.value = ''
 

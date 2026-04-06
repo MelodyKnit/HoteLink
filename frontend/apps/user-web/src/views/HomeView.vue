@@ -144,6 +144,7 @@ const previewReviews = ref([
   { name: '王先生', score: 4, content: '整体不错，性价比很高。前台服务热情周到，退房流程也很便捷。' },
 ])
 
+// 处理 Search 交互逻辑。
 function handleSearch() {
   const query: Record<string, string> = {}
   if (keyword.value) query.keyword = keyword.value

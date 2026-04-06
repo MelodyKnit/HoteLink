@@ -54,6 +54,7 @@ const pageSize = ref(20)
 const total = ref(0)
 const keyword = ref('')
 
+// 加载 List 相关数据。
 async function loadList() {
   loading.value = true
   const params: Record<string, unknown> = { page: page.value, page_size: pageSize.value }
@@ -67,6 +68,7 @@ async function loadList() {
   loading.value = false
 }
 
+// 处理 changeStatus 业务流程。
 async function changeStatus(row: Record<string, unknown>, status: string) {
   const label = status === 'active' ? '启用' : '禁用'
   if (!confirm(`确认${label}该用户？`)) return

@@ -120,6 +120,7 @@ const form = reactive({
   breakfast_count: 0, max_guest_count: 2, status: 'online',
 })
 
+// 重置 Form 状态。
 function resetForm() {
   form.name = ''; form.hotel_id = hotels.value[0]?.id || 0; form.bed_type = 'queen'
   form.area = 30; form.base_price = 399; form.breakfast_count = 0
@@ -127,8 +128,10 @@ function resetForm() {
   editingId.value = null
 }
 
+// 打开 Create 相关界面。
 function openCreate() { resetForm(); showModal.value = true }
 
+// 打开 Edit 相关界面。
 function openEdit(row: Record<string, unknown>) {
   editingId.value = row.id as number
   form.name = (row.name as string) || ''
@@ -142,6 +145,7 @@ function openEdit(row: Record<string, unknown>) {
   showModal.value = true
 }
 
+// 加载 Hotels 相关数据。
 async function loadHotels() {
   const res = await hotelApi.list({ page_size: 100 })
   if (res.code === 0 && res.data) {
@@ -151,6 +155,7 @@ async function loadHotels() {
   }
 }
 
+// 加载 List 相关数据。
 async function loadList() {
   loading.value = true
   const params: Record<string, unknown> = { page: page.value, page_size: pageSize.value }
@@ -163,6 +168,7 @@ async function loadList() {
   loading.value = false
 }
 
+// 处理 Save 交互逻辑。
 async function handleSave() {
   saving.value = true
   try {
@@ -178,6 +184,7 @@ async function handleSave() {
   }
 }
 
+// 处理 Delete 交互逻辑。
 async function handleDelete(row: Record<string, unknown>) {
   if (!confirm(`确定删除房型「${row.name}」？`)) return
   await roomTypeApi.delete(row.id as number)

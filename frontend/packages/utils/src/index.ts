@@ -1,3 +1,4 @@
+// 处理 formatDate 业务流程。
 export function formatDate(date: Date | string): string {
   const d = typeof date === 'string' ? new Date(date) : date
   const y = d.getFullYear()
@@ -6,11 +7,13 @@ export function formatDate(date: Date | string): string {
   return `${y}-${m}-${day}`
 }
 
+// 处理 formatDateTime 业务流程。
 export function formatDateTime(date: Date | string): string {
   const d = typeof date === 'string' ? new Date(date) : date
   return `${formatDate(d)} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`
 }
 
+// 处理 formatMoney 业务流程。
 export function formatMoney(amount: number | string): string {
   const n = typeof amount === 'string' ? parseFloat(amount) : amount
   if (isNaN(n)) return '0.00'

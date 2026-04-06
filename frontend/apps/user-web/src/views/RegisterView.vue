@@ -62,6 +62,7 @@ const form = ref({
   email: '',
 })
 
+// 处理 Register 交互逻辑。
 async function handleRegister() {
   const f = form.value
   if (!f.username || !f.mobile || !f.password || !f.confirm_password) { error.value = '请填写所有必填项'; return }

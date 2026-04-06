@@ -135,6 +135,7 @@ const nights = computed(() => {
 
 const totalPrice = computed(() => (unitPrice * nights.value).toFixed(2))
 
+// 处理 Submit 交互逻辑。
 async function handleSubmit() {
   if (!form.value.guest_name.trim()) { error.value = '请输入入住人姓名'; return }
   if (!form.value.guest_mobile.trim()) { error.value = '请输入手机号'; return }

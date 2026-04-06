@@ -39,6 +39,7 @@ const saving = ref(false)
 const saved = ref(false)
 const form = reactive({ platform_name: '', support_phone: '', order_auto_cancel_minutes: 30 })
 
+// 加载 Settings 相关数据。
 async function loadSettings() {
   loading.value = true
   const res = await settingsApi.get()
@@ -51,6 +52,7 @@ async function loadSettings() {
   loading.value = false
 }
 
+// 处理 Save 交互逻辑。
 async function handleSave() {
   saving.value = true
   saved.value = false

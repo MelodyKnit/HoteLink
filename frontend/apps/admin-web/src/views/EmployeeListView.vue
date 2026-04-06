@@ -75,6 +75,7 @@ const total = ref(0)
 const showCreate = ref(false)
 const form = reactive({ username: '', password: '', name: '', mobile: '', role: 'hotel_admin' })
 
+// 加载 List 相关数据。
 async function loadList() {
   loading.value = true
   const res = await employeeApi.list({ page: page.value, page_size: pageSize.value })
@@ -86,6 +87,7 @@ async function loadList() {
   loading.value = false
 }
 
+// 打开 Create 相关界面。
 function openCreate() {
   form.username = ''
   form.password = ''
@@ -95,6 +97,7 @@ function openCreate() {
   showCreate.value = true
 }
 
+// 处理 Create 交互逻辑。
 async function handleCreate() {
   await employeeApi.create(form)
   showCreate.value = false

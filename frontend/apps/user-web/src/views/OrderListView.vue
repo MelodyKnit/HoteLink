@@ -75,9 +75,12 @@ const tabs = [
   { value: 'cancelled', label: '已取消' },
 ]
 
+// 根据状态值返回对应展示信息。
 function statusLabel(s: string): string { return ORDER_STATUS_MAP[s]?.label || s }
+// 根据状态值返回对应展示信息。
 function statusColor(s: string): string { return ORDER_STATUS_MAP[s]?.color || 'text-gray-500' }
 
+// 加载 fetchOrders 相关数据。
 async function fetchOrders() {
   loading.value = true
   try {

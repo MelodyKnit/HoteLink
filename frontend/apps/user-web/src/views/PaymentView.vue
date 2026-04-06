@@ -86,6 +86,7 @@ const methods = [
   { value: 'alipay', icon: '🔵', label: '支付宝' },
 ]
 
+// 处理 Pay 交互逻辑。
 async function handlePay() {
   paying.value = true
   error.value = ''

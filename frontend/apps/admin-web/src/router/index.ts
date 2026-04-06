@@ -4,6 +4,7 @@ import AdminLayout from '../layouts/AdminLayout.vue'
 
 let systemInitialized: boolean | null = null
 
+// 检查 Initialized 条件是否满足。
 async function checkInitialized(): Promise<boolean> {
   if (systemInitialized !== null) return systemInitialized
   try {
@@ -15,6 +16,7 @@ async function checkInitialized(): Promise<boolean> {
   return systemInitialized
 }
 
+// 重置 InitCache 状态。
 export function resetInitCache() {
   systemInitialized = null
 }

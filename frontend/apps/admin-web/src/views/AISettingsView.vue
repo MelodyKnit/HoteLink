@@ -64,6 +64,7 @@ const saved = ref(false)
 const settings = reactive({ ai_enabled: false, api_key_configured: false })
 const form = reactive({ provider: '', chat_model: '', reasoning_model: '', base_url: '', api_key: '', ai_enabled: false })
 
+// 加载 Settings 相关数据。
 async function loadSettings() {
   loading.value = true
   const res = await aiApi.settings()
@@ -80,6 +81,7 @@ async function loadSettings() {
   loading.value = false
 }
 
+// 处理 Save 交互逻辑。
 async function handleSave() {
   saving.value = true
   saved.value = false

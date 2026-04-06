@@ -59,6 +59,7 @@ const form = reactive({ username: '', password: '' })
 const loading = ref(false)
 const errorMsg = ref('')
 
+// 处理 Login 交互逻辑。
 async function handleLogin() {
   errorMsg.value = ''
   loading.value = true

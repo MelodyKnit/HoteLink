@@ -134,6 +134,7 @@ const currentImg = ref(0)
 const isFav = ref(false)
 const bedTypeMap = BED_TYPE_MAP
 
+// 切换Fav显示状态。
 async function toggleFav() {
   if (!getToken()) { router.push({ name: 'login', query: { redirect: route.fullPath } }); return }
   try {
@@ -147,6 +148,7 @@ async function toggleFav() {
   } catch { /* ignore */ }
 }
 
+// 处理 Book 交互逻辑。
 function handleBook(room: any) {
   if (!getToken()) { router.push({ name: 'login', query: { redirect: route.fullPath } }); return }
   router.push({ path: '/booking', query: { hotel_id: String(hotelId), room_type_id: String(room.id), room_name: room.name, price: String(room.base_price), hotel_name: hotel.value.name } })

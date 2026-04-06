@@ -46,6 +46,7 @@ import { userFavoriteApi } from '@hotelink/api'
 const loading = ref(true)
 const hotels = ref<any[]>([])
 
+// 删除 Fav 数据。
 async function removeFav(id: number) {
   try {
     const res = await userFavoriteApi.remove(id)

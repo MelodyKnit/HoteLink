@@ -84,10 +84,12 @@ const todayStr = computed(() => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 })
 
+// 判断Active条件是否成立。
 function isActive(path: string): boolean {
   return route.path === path || route.path.startsWith(path + '/')
 }
 
+// 处理 Logout 交互逻辑。
 function handleLogout() {
   auth.logout()
   router.push('/admin/login')

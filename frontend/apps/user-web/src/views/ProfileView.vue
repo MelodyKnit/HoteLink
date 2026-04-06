@@ -96,6 +96,7 @@ const form = ref({
 
 const pw = ref({ old_password: '', new_password: '', confirm_password: '' })
 
+// 处理 Avatar 交互逻辑。
 async function handleAvatar(e: Event) {
   const file = (e.target as HTMLInputElement).files?.[0]
   if (!file) return
@@ -107,6 +108,7 @@ async function handleAvatar(e: Event) {
   }
 }
 
+// 处理 Save 交互逻辑。
 async function handleSave() {
   saving.value = true
   try {
@@ -119,6 +121,7 @@ async function handleSave() {
   saving.value = false
 }
 
+// 处理 ChangePw 交互逻辑。
 async function handleChangePw() {
   if (pw.value.new_password !== pw.value.confirm_password) { alert('两次密码不一致'); return }
   if (pw.value.new_password.length < 6) { alert('密码至少6位'); return }

@@ -8,6 +8,7 @@ export const useAuthStore = defineStore('auth', () => {
   const isLoggedIn = computed(() => !!token.value)
   const isAdmin = computed(() => user.value?.role === 'hotel_admin' || user.value?.role === 'system_admin')
 
+  // 执行login流程并同步登录态。
   async function login(username: string, password: string) {
     const res = await authApi.adminLogin({ username, password })
     if (res.code === 0 && res.data) {
@@ -18,6 +19,7 @@ export const useAuthStore = defineStore('auth', () => {
     return res
   }
 
+  // 加载 fetchMe 相关数据。
   async function fetchMe() {
     if (!token.value) return
     const res = await authApi.me()
@@ -31,6 +33,7 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  // 执行logout流程并同步登录态。
   function logout() {
     const refresh = getRefreshToken()
     if (refresh) authApi.logout(refresh).catch(() => {})
@@ -51,6 +54,7 @@ export const useUserAuthStore = defineStore('userAuth', () => {
   const token = ref<string | null>(getToken())
   const isLoggedIn = computed(() => !!token.value)
 
+  // 执行login流程并同步登录态。
   async function login(username: string, password: string) {
     const res = await userAuthApi.login({ username, password })
     if (res.code === 0 && res.data) {
@@ -61,10 +65,12 @@ export const useUserAuthStore = defineStore('userAuth', () => {
     return res
   }
 
+  // 执行register流程并同步登录态。
   async function register(data: { username: string; password: string; confirm_password: string; mobile: string; email?: string }) {
     return await userAuthApi.register(data)
   }
 
+  // 加载 fetchMe 相关数据。
   async function fetchMe() {
     if (!token.value) return
     try {
@@ -80,6 +86,7 @@ export const useUserAuthStore = defineStore('userAuth', () => {
     } catch { /* ignore */ }
   }
 
+  // 执行logout流程并同步登录态。
   function logout() {
     const refresh = getRefreshToken()
     if (refresh) userAuthApi.logout(refresh).catch(() => {})

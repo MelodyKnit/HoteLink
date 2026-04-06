@@ -108,6 +108,7 @@ const filters = reactive({
   max_price: undefined as number | undefined,
 })
 
+// 加载 fetchList 相关数据。
 async function fetchList() {
   loading.value = true
   try {

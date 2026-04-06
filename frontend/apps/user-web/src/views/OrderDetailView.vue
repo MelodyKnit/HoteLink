@@ -150,11 +150,14 @@ const reviewing = ref(false)
 const paymentMethodMap = PAYMENT_METHOD_MAP
 const paymentStatusMap = PAYMENT_STATUS_MAP
 
+// 根据状态值返回对应展示信息。
 function statusLabel(s: string): string { return ORDER_STATUS_MAP[s]?.label || s || '未知' }
 const canCancel = computed(() => ['pending_payment', 'paid', 'confirmed'].includes(order.value.status))
 
+// 处理 goToPay 业务流程。
 function goToPay() { router.push(`/payment/${orderId}`) }
 
+// 处理 Cancel 交互逻辑。
 async function handleCancel() {
   cancelling.value = true
   try {
@@ -167,6 +170,7 @@ async function handleCancel() {
   cancelling.value = false
 }
 
+// 处理 Review 交互逻辑。
 async function handleReview() {
   if (!reviewContent.value.trim()) return
   reviewing.value = true
