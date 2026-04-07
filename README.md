@@ -54,8 +54,8 @@ python manage.py check
   - `private/local-dev/seed_commands/`（仓库根目录本地私有）
   以上目录均被 `.gitignore` 忽略，不参与提交。
 - 目前已桥接的命令：
-  - `python manage.py seed_demo_data`
-  - `python manage.py import_hotels_from_dist_images`
+  - `python scripts/generate/seed_demo_data.py`
+  - `python scripts/generate/import_hotels_from_dist_images.py --count 200 --images-dir dist/images`
 - 若本地缺少对应脚本，命令会直接报错提示，不会影响生产代码。
 
 ## 已确定技术方向
@@ -459,13 +459,13 @@ sh ./scripts/docker.sh dev up
 
 ```bash
 cd backend
-python manage.py seed_demo_data
+python scripts/generate/seed_demo_data.py
 ```
 
 如果你使用 Anaconda 的 `Website` 环境，可以运行：
 
 ```bash
-conda run -n Website python manage.py seed_demo_data
+conda run -n Website python scripts/generate/seed_demo_data.py
 ```
 
 初始化后可直接使用：

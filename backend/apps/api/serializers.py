@@ -72,6 +72,8 @@ class HotelSimpleSerializer(serializers.ModelSerializer):
             "images",
             "rating",
             "min_price",
+            "latitude",
+            "longitude",
             "status",
             "is_recommended",
         ]
@@ -125,6 +127,8 @@ class HotelDetailSerializer(serializers.ModelSerializer):
             "images",
             "rating",
             "min_price",
+            "latitude",
+            "longitude",
             "status",
             "is_recommended",
             "room_types",
@@ -169,6 +173,17 @@ class BookingOrderSerializer(serializers.ModelSerializer):
     """BookingOrder 序列化器：用于接口参数校验或响应数据转换。"""
     hotel_name = serializers.CharField(source="hotel.name", read_only=True)
     room_type_name = serializers.CharField(source="room_type.name", read_only=True)
+    hotel_id = serializers.IntegerField(read_only=True)
+    room_type_id = serializers.IntegerField(read_only=True)
+    payment_method = serializers.SerializerMethodField()
+    total_amount = serializers.SerializerMethodField()
+
+    def get_payment_method(self, obj):
+        latest_payment = obj.payments.order_by("-id").first()
+        return latest_payment.method if latest_payment else ""
+
+    def get_total_amount(self, obj):
+        return obj.pay_amount
 
     class Meta:
         model = BookingOrder
@@ -176,11 +191,14 @@ class BookingOrderSerializer(serializers.ModelSerializer):
             "id",
             "order_no",
             "hotel",
+            "hotel_id",
             "hotel_name",
             "room_type",
+            "room_type_id",
             "room_type_name",
             "status",
             "payment_status",
+            "payment_method",
             "check_in_date",
             "check_out_date",
             "guest_name",
@@ -192,6 +210,7 @@ class BookingOrderSerializer(serializers.ModelSerializer):
             "original_amount",
             "discount_amount",
             "pay_amount",
+            "total_amount",
             "created_at",
         ]
 

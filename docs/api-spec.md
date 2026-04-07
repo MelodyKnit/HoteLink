@@ -1015,7 +1015,35 @@ Authorization: Bearer <access_token>
 | `page` | int | 否 | 页码 |
 | `page_size` | int | 否 | 每页数量 |
 
-### 12.9 用户订单详情
+### 12.9 历史入住人信息
+
+`GET /api/v1/user/orders/guest-history`
+
+**查询参数**
+
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `limit` | int | 否 | 返回条数，默认 `6`，范围 `1-20` |
+
+**返回示例**
+
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "items": [
+      {
+        "guest_name": "张三",
+        "guest_mobile": "13800138000",
+        "masked_mobile": "138***000"
+      }
+    ]
+  }
+}
+```
+
+### 12.10 用户订单详情
 
 `GET /api/v1/user/orders/detail`
 
@@ -1025,7 +1053,15 @@ Authorization: Bearer <access_token>
 |---|---|---|---|
 | `order_id` | int | 是 | 订单 ID |
 
-### 12.10 创建订单
+**返回字段补充**
+
+- `original_amount`：原始订单金额
+- `discount_amount`：优惠金额
+- `pay_amount`：实际应付金额
+- `total_amount`：兼容字段，等同于 `pay_amount`
+- `payment_method`：最近一次支付记录使用的支付方式
+
+### 12.11 创建订单
 
 `POST /api/v1/user/orders/create`
 

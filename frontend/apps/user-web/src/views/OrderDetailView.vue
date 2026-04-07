@@ -57,7 +57,7 @@
             <p>支付方式：{{ paymentMethodMap[order.payment_method] || order.payment_method || '待支付' }}</p>
             <p>支付状态：{{ paymentStatusMap[order.payment_status] || order.payment_status || '-' }}</p>
           </div>
-          <span class="text-xl font-bold text-orange-600">¥{{ order.total_amount || '0.00' }}</span>
+          <span class="text-xl font-bold text-orange-600">¥{{ formatMoney(order.pay_amount || order.total_amount || order.original_amount || 0) }}</span>
         </div>
       </div>
 
@@ -86,7 +86,7 @@
           class="flex-1 rounded-2xl border border-red-200 py-3 text-center text-sm font-medium text-red-500 hover:bg-red-50">取消订单</button>
         <button v-if="order.status === 'completed' && !order.has_review" @click="showReviewModal = true"
           class="flex-1 rounded-2xl bg-brand py-3 text-center text-sm font-semibold text-white hover:bg-brand-dark">评价</button>
-        <router-link v-if="order.hotel_id" :to="`/hotels/${order.hotel_id}`"
+        <router-link v-if="order.hotel_id || order.hotel" :to="`/hotels/${order.hotel_id || order.hotel}`"
           class="flex-1 rounded-2xl border border-gray-200 py-3 text-center text-sm font-medium text-gray-600 hover:bg-gray-50">再次预订</router-link>
       </div>
     </div>
@@ -132,7 +132,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { userOrderApi, userReviewApi } from '@hotelink/api'
-import { ORDER_STATUS_MAP, PAYMENT_METHOD_MAP, PAYMENT_STATUS_MAP } from '@hotelink/utils'
+import { ORDER_STATUS_MAP, PAYMENT_METHOD_MAP, PAYMENT_STATUS_MAP, formatMoney } from '@hotelink/utils'
 
 const route = useRoute()
 const router = useRouter()
@@ -190,7 +190,12 @@ async function handleReview() {
 onMounted(async () => {
   try {
     const res = await userOrderApi.detail(orderId)
-    if (res.code === 0 && res.data) order.value = res.data
+    if (res.code === 0 && res.data) {
+      order.value = res.data
+    } else {
+      order.value = {}
+      error.value = res.message || '订单详情加载失败，请稍后重试'
+    }
   } catch {
     order.value = {}
     error.value = '订单详情加载失败，请稍后重试'

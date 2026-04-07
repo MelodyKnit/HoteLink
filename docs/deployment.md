@@ -322,7 +322,7 @@ docker compose --env-file .env.docker.dev -f docker-compose.dev.yml exec backend
 ```bash
 python manage.py check
 python manage.py test apps.api
-python manage.py seed_demo_data
+python scripts/generate/seed_demo_data.py
 ```
 
 ## 5. 生产环境部署

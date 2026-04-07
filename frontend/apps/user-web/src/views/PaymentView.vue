@@ -44,19 +44,19 @@
         <div class="mt-4 rounded-2xl bg-white p-5 shadow-sm">
           <div class="flex items-end justify-between">
             <span class="text-sm text-gray-500">应付金额</span>
-            <span class="text-2xl font-bold text-orange-600">¥{{ order.total_amount || '0.00' }}</span>
+            <span class="text-2xl font-bold text-orange-600">¥{{ payableAmount }}</span>
           </div>
         </div>
 
         <!-- Countdown -->
-        <p v-if="countdown > 0" class="mt-3 text-center text-xs text-gray-400">
+        <p v-if="countdown > 0 && !isPaid" class="mt-3 text-center text-xs text-gray-400">
           请在 <span class="font-semibold text-orange-600">{{ Math.floor(countdown / 60) }}:{{ String(countdown % 60).padStart(2, '0') }}</span> 内完成支付
         </p>
 
         <!-- Pay button -->
         <div class="sticky bottom-16 mt-6 md:bottom-0">
-          <button @click="handlePay" :disabled="paying" class="w-full rounded-2xl bg-brand py-3.5 text-center text-sm font-semibold text-white transition hover:bg-brand-dark disabled:opacity-50">
-            {{ paying ? '支付中...' : `确认支付 ¥${order.total_amount || '0.00'}` }}
+          <button @click="handlePay" :disabled="paying || isPaid" class="w-full rounded-2xl bg-brand py-3.5 text-center text-sm font-semibold text-white transition hover:bg-brand-dark disabled:opacity-50">
+            {{ paying ? '支付中...' : isPaid ? '订单已支付' : `确认支付 ¥${payableAmount}` }}
           </button>
         </div>
 
@@ -67,9 +67,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { userOrderApi } from '@hotelink/api'
+import { formatMoney } from '@hotelink/utils'
 
 const route = useRoute()
 const router = useRouter()
@@ -81,6 +82,22 @@ const order = ref<any>({})
 const payMethod = ref('mock')
 const countdown = ref(900) // 15 min
 let timer: ReturnType<typeof setInterval>
+const payableAmount = computed(() => formatMoney(order.value?.pay_amount ?? order.value?.total_amount ?? order.value?.original_amount ?? 0))
+const isPaid = computed(() => order.value?.payment_status === 'paid')
+
+function buildFallbackOrderFromRoute() {
+  return {
+    order_no: (route.query.order_no as string) || '',
+    hotel_name: (route.query.hotel_name as string) || '',
+    room_type_name: (route.query.room_name as string) || '',
+    check_in_date: (route.query.check_in_date as string) || '',
+    check_out_date: (route.query.check_out_date as string) || '',
+    guest_name: (route.query.guest_name as string) || '',
+    pay_amount: (route.query.pay_amount as string) || '0.00',
+    total_amount: (route.query.pay_amount as string) || '0.00',
+    payment_status: 'unpaid',
+  }
+}
 
 const methods = [
   { value: 'mock', icon: '💳', label: '模拟支付（演示）' },
@@ -90,6 +107,7 @@ const methods = [
 
 // 处理 Pay 交互逻辑。
 async function handlePay() {
+  if (isPaid.value) return
   paying.value = true
   error.value = ''
   try {
@@ -107,11 +125,15 @@ async function handlePay() {
 }
 
 onMounted(async () => {
+  order.value = buildFallbackOrderFromRoute()
   try {
     const res = await userOrderApi.detail(orderId)
-    if (res.code === 0 && res.data) order.value = res.data
+    if (res.code === 0 && res.data) {
+      order.value = res.data
+    } else {
+      error.value = res.message || '订单信息加载失败，请稍后重试'
+    }
   } catch {
-    order.value = {}
     error.value = '订单信息加载失败，请稍后重试'
   } finally {
     loading.value = false

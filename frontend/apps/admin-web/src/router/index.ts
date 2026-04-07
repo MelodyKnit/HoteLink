@@ -53,11 +53,12 @@ const router = createRouter({
         { path: 'settings', name: 'settings', component: () => import('../views/SettingsView.vue') },
         { path: 'ai', name: 'ai', component: () => import('../views/AIAssistantView.vue') },
         { path: 'ai-settings', name: 'ai-settings', component: () => import('../views/AISettingsView.vue') },
+        { path: '404', name: 'admin-not-found', component: () => import('../views/NotFoundView.vue') },
       ],
     },
     {
       path: '/:pathMatch(.*)*',
-      redirect: '/admin',
+      redirect: '/admin/404',
     },
   ],
 })

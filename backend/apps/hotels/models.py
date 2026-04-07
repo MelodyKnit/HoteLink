@@ -24,6 +24,8 @@ class Hotel(models.Model):
     images = models.JSONField(default=list, blank=True, help_text="酒店图片 URL 列表")
     rating = models.DecimalField(max_digits=3, decimal_places=1, default=4.5)
     min_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     is_recommended = models.BooleanField(default=False)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_DRAFT)
     created_at = models.DateTimeField(auto_now_add=True)

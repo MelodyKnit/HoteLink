@@ -5,7 +5,7 @@
       <h1 class="text-sm font-semibold text-gray-800">填写订单</h1>
     </header>
 
-    <div class="mx-auto max-w-2xl px-4 py-6">
+    <div class="mx-auto max-w-2xl px-4 py-6 pb-28 md:pb-8">
       <!-- Room Summary -->
       <div class="surface-card rounded-2xl p-5">
         <h3 class="font-semibold text-gray-800">{{ hotelName }}</h3>
@@ -46,7 +46,7 @@
       <div class="surface-card mt-4 rounded-2xl p-5">
         <h4 class="mb-3 font-semibold text-gray-800">入住人信息</h4>
         <div class="space-y-3">
-          <div>
+          <div class="relative">
             <label class="mb-1 block text-xs text-gray-400">入住人姓名 *</label>
             <input
               v-model="form.guest_name"
@@ -54,7 +54,23 @@
               placeholder="请输入入住人真实姓名"
               class="w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition"
               :class="fieldErrors.guest_name ? 'border-red-400 bg-red-50/60 focus:border-red-500' : 'border-gray-200 focus:border-brand'"
+              @focus="handleGuestNameFocus"
+              @input="handleGuestNameInput"
+              @blur="handleGuestNameBlur"
             />
+            <div v-if="showGuestSuggestions" class="absolute left-0 right-0 top-[calc(100%+8px)] z-20 rounded-2xl border border-brand/10 bg-white p-2 shadow-lg ring-1 ring-slate-100">
+              <p class="px-2 pb-1 text-[11px] font-medium text-gray-400">常用入住人</p>
+              <button
+                v-for="item in filteredGuestHistory"
+                :key="`${item.guest_name}-${item.guest_mobile}`"
+                type="button"
+                class="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left transition hover:bg-brand/5"
+                @mousedown.prevent="applyGuestHistory(item)"
+              >
+                <span class="truncate text-sm text-gray-800">{{ item.guest_name }}</span>
+                <span class="ml-3 shrink-0 text-xs text-gray-400">{{ item.masked_mobile }}</span>
+              </button>
+            </div>
             <p v-if="fieldErrors.guest_name" class="mt-1 text-xs text-red-500">{{ fieldErrors.guest_name }}</p>
           </div>
           <div>
@@ -102,7 +118,7 @@
       </div>
 
       <!-- Submit -->
-      <div class="sticky bottom-16 z-30 mt-6 space-y-3 md:bottom-0">
+      <div class="mt-6 space-y-3 pb-[calc(env(safe-area-inset-bottom)+8px)]">
         <div v-if="error" class="feedback-error-card flex items-start gap-2 rounded-xl px-3 py-2.5 text-sm text-red-700">
           <span class="mt-0.5 text-base">⚠</span>
           <div>
@@ -119,10 +135,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { userOrderApi } from '@hotelink/api'
 import { formatDate } from '@hotelink/utils'
+
+const GUEST_HISTORY_KEY = 'hotelink_guest_history'
 
 const route = useRoute()
 const router = useRouter()
@@ -139,6 +157,9 @@ const checkOutDate = ref(formatDate(tomorrow))
 const submitting = ref(false)
 const error = ref('')
 const fieldErrors = ref<{ guest_name?: string; guest_mobile?: string }>({})
+const guestHistory = ref<Array<{ guest_name: string; guest_mobile: string; masked_mobile: string }>>([])
+const guestSuggestionOpen = ref(false)
+let guestSuggestionCloseTimer: number | null = null
 
 const form = ref({
   guest_name: '',
@@ -155,6 +176,115 @@ const nights = computed(() => {
 })
 
 const totalPrice = computed(() => (unitPrice * nights.value).toFixed(2))
+const filteredGuestHistory = computed(() => {
+  const keyword = form.value.guest_name.trim().toLowerCase()
+  if (!keyword) return guestHistory.value
+  return guestHistory.value.filter((item) => item.guest_name.toLowerCase().includes(keyword))
+})
+
+const showGuestSuggestions = computed(() => {
+  if (!guestSuggestionOpen.value || !guestHistory.value.length) return false
+  const name = form.value.guest_name.trim()
+  const mobile = form.value.guest_mobile.trim()
+  if (!name && !mobile) return true
+  return !!name && filteredGuestHistory.value.length > 0
+})
+
+function maskMobile(mobile: string): string {
+  const value = (mobile || '').trim()
+  if (value.length < 7) return value
+  return `${value.slice(0, 3)}***${value.slice(-3)}`
+}
+
+function normalizeGuestHistory(items: Array<{ guest_name: string; guest_mobile: string; masked_mobile?: string }>) {
+  const seen = new Set<string>()
+  return items
+    .map((item) => ({
+      guest_name: (item.guest_name || '').trim(),
+      guest_mobile: (item.guest_mobile || '').trim(),
+      masked_mobile: item.masked_mobile || maskMobile(item.guest_mobile || ''),
+    }))
+    .filter((item) => item.guest_name && item.guest_mobile)
+    .filter((item) => {
+      const key = `${item.guest_name}::${item.guest_mobile}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    .slice(0, 6)
+}
+
+function loadLocalGuestHistory() {
+  try {
+    const raw = localStorage.getItem(GUEST_HISTORY_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as Array<{ guest_name: string; guest_mobile: string; masked_mobile?: string }>
+    return normalizeGuestHistory(Array.isArray(parsed) ? parsed : [])
+  } catch {
+    return []
+  }
+}
+
+function saveLocalGuestHistory() {
+  localStorage.setItem(GUEST_HISTORY_KEY, JSON.stringify(guestHistory.value))
+}
+
+function rememberGuestHistory(name: string, mobile: string) {
+  const merged = normalizeGuestHistory([
+    { guest_name: name, guest_mobile: mobile, masked_mobile: maskMobile(mobile) },
+    ...guestHistory.value,
+  ])
+  guestHistory.value = merged
+  saveLocalGuestHistory()
+}
+
+async function loadGuestHistory() {
+  guestHistory.value = loadLocalGuestHistory()
+  if (guestHistory.value.length && !form.value.guest_name && !form.value.guest_mobile) {
+    applyGuestHistory(guestHistory.value[0])
+  }
+  try {
+    const res = await userOrderApi.guestHistory({ limit: 6 })
+    if (res.code === 0 && res.data) {
+      guestHistory.value = normalizeGuestHistory([
+        ...((res.data as { items: Array<{ guest_name: string; guest_mobile: string; masked_mobile: string }> }).items || []),
+        ...guestHistory.value,
+      ])
+      saveLocalGuestHistory()
+      if (guestHistory.value.length && !form.value.guest_name && !form.value.guest_mobile) {
+        applyGuestHistory(guestHistory.value[0])
+      }
+    }
+  } catch {
+    // ignore history load failure to avoid blocking order creation
+  }
+}
+
+function applyGuestHistory(item: { guest_name: string; guest_mobile: string; masked_mobile: string }) {
+  form.value.guest_name = item.guest_name
+  form.value.guest_mobile = item.guest_mobile
+  fieldErrors.value = { ...fieldErrors.value, guest_name: undefined, guest_mobile: undefined }
+  error.value = ''
+  guestSuggestionOpen.value = false
+}
+
+function handleGuestNameFocus() {
+  if (guestSuggestionCloseTimer) {
+    window.clearTimeout(guestSuggestionCloseTimer)
+    guestSuggestionCloseTimer = null
+  }
+  guestSuggestionOpen.value = true
+}
+
+function handleGuestNameInput() {
+  guestSuggestionOpen.value = true
+}
+
+function handleGuestNameBlur() {
+  guestSuggestionCloseTimer = window.setTimeout(() => {
+    guestSuggestionOpen.value = false
+  }, 120)
+}
 
 function validateForm(): boolean {
   const nextErrors: { guest_name?: string; guest_mobile?: string } = {}
@@ -195,7 +325,20 @@ async function handleSubmit() {
       remark: form.value.remark,
     })
     if (res.code === 0 && res.data) {
-      router.replace(`/payment/${(res.data as any).order_id || (res.data as any).id}`)
+      rememberGuestHistory(form.value.guest_name.trim(), form.value.guest_mobile.trim())
+      const orderData = res.data as any
+      router.replace({
+        path: `/payment/${orderData.order_id || orderData.id}`,
+        query: {
+          order_no: String(orderData.order_no || ''),
+          hotel_name: hotelName,
+          room_name: roomName,
+          check_in_date: checkInDate.value,
+          check_out_date: checkOutDate.value,
+          guest_name: form.value.guest_name,
+          pay_amount: String(orderData.pay_amount || totalPrice.value),
+        },
+      })
     } else {
       error.value = res.message || '提交失败'
     }
@@ -205,6 +348,8 @@ async function handleSubmit() {
     submitting.value = false
   }
 }
+
+onMounted(loadGuestHistory)
 </script>
 
 <style scoped>

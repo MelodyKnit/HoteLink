@@ -273,6 +273,7 @@ export const userProfileApi = {
 // ========== User Orders ==========
 export const userOrderApi = {
   list: (params?: Record<string, unknown>) => get<PaginatedData>('/user/orders', params),
+  guestHistory: (params?: { limit?: number }) => get<{ items: { guest_name: string; guest_mobile: string; masked_mobile: string }[] }>('/user/orders/guest-history', params as Record<string, unknown>),
   detail: (order_id: number) => get('/user/orders/detail', { order_id }),
   create: (data: Record<string, unknown>) => post('/user/orders/create', data),
   update: (data: Record<string, unknown>) => post('/user/orders/update', data),

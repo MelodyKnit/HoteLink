@@ -57,6 +57,7 @@ services:
     working_dir: /app
     volumes:
       - ./backend:/app
+      - ./scripts:/scripts
       - poetry_cache:/root/.cache/pypoetry
     ports:
       - "${BACKEND_PORT:-8000}:8000"
@@ -84,6 +85,7 @@ services:
     working_dir: /app
     volumes:
       - ./backend:/app
+      - ./scripts:/scripts
       - poetry_cache:/root/.cache/pypoetry
     command: >
       sh -c "python manage.py check &&

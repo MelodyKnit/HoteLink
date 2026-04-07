@@ -20,7 +20,7 @@
           <p>房型：{{ order.room_type_name || '-' }}</p>
           <p>入住日期：{{ order.check_in_date }}</p>
           <p>离店日期：{{ order.check_out_date }}</p>
-          <p>支付金额：<span class="font-semibold text-orange-600">¥{{ order.total_amount || '0.00' }}</span></p>
+          <p>支付金额：<span class="font-semibold text-orange-600">¥{{ payableAmount }}</span></p>
         </div>
       </div>
 
@@ -33,23 +33,27 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { userOrderApi } from '@hotelink/api'
+import { formatMoney } from '@hotelink/utils'
 
 const route = useRoute()
 const orderId = Number(route.params.orderId)
 const success = ref(true)
 const order = ref<any>({})
 const error = ref('')
+const payableAmount = computed(() => formatMoney(order.value?.pay_amount ?? order.value?.total_amount ?? order.value?.original_amount ?? 0))
 
 onMounted(async () => {
   try {
     const res = await userOrderApi.detail(orderId)
     if (res.code === 0 && res.data) {
       order.value = res.data
-      const status = (res.data as any).status
-      success.value = status !== 'pending_payment'
+      success.value = (res.data as any).payment_status === 'paid'
+    } else {
+      error.value = res.message || '支付结果读取失败，请稍后在订单页查看'
+      success.value = false
     }
   } catch {
     order.value = {}

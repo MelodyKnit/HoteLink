@@ -38,7 +38,7 @@
             <p>{{ order.check_in_date }} — {{ order.check_out_date }}</p>
             <p class="text-xs text-gray-400">订单号：{{ order.order_no }}</p>
           </div>
-          <span class="text-base font-bold text-orange-600">¥{{ order.total_amount }}</span>
+          <span class="text-base font-bold text-orange-600">¥{{ formatMoney(order.pay_amount || order.total_amount || order.original_amount || 0) }}</span>
         </div>
       </router-link>
     </div>
@@ -56,7 +56,7 @@
 import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { userOrderApi } from '@hotelink/api'
-import { ORDER_STATUS_MAP } from '@hotelink/utils'
+import { ORDER_STATUS_MAP, formatMoney } from '@hotelink/utils'
 
 const route = useRoute()
 const loading = ref(true)

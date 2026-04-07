@@ -43,7 +43,29 @@
           </div>
           <p class="mt-3 text-sm text-gray-500">📍 {{ hotel.city }} {{ hotel.address }}</p>
           <p v-if="hotel.phone" class="mt-1 text-sm text-gray-500">📞 {{ hotel.phone }}</p>
+          <p v-if="poiName && poiDistanceText" class="mt-2 rounded-lg bg-brand/10 px-3 py-2 text-xs text-brand">
+            📍 距 {{ poiName }} 约 {{ poiDistanceText }} km（来自 AI 智能订房）
+          </p>
           <p v-if="hotel.description" class="mt-3 text-sm leading-relaxed text-gray-600">{{ hotel.description }}</p>
+        </div>
+
+        <!-- Map -->
+        <div class="mt-4 rounded-2xl bg-white p-5 shadow-sm">
+          <h3 class="mb-3 font-semibold text-gray-800">地图位置</h3>
+          <div v-if="googleMapEmbedUrl" class="overflow-hidden rounded-xl border border-gray-100">
+            <iframe
+              :src="googleMapEmbedUrl"
+              class="h-64 w-full"
+              loading="lazy"
+              referrerpolicy="no-referrer-when-downgrade"
+            />
+          </div>
+          <div v-if="hasCoordinates" class="mt-3 flex flex-wrap gap-2">
+            <a :href="baiduMapPageUrl" target="_blank" rel="noopener noreferrer" class="rounded-lg bg-[#2f88ff] px-3 py-1.5 text-xs font-medium text-white">百度地图打开</a>
+            <a :href="aMapPageUrl" target="_blank" rel="noopener noreferrer" class="rounded-lg bg-[#00b578] px-3 py-1.5 text-xs font-medium text-white">高德地图打开</a>
+            <a :href="googleMapPageUrl" target="_blank" rel="noopener noreferrer" class="rounded-lg bg-gray-800 px-3 py-1.5 text-xs font-medium text-white">Google 地图打开</a>
+          </div>
+          <p v-else class="text-sm text-gray-500">该酒店暂未配置坐标，暂时无法展示地图。</p>
         </div>
 
         <!-- Facilities -->
@@ -124,7 +146,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { publicApi, userFavoriteApi, getToken } from '@hotelink/api'
 import { BED_TYPE_MAP } from '@hotelink/utils'
@@ -138,6 +160,53 @@ const currentImg = ref(0)
 const isFav = ref(false)
 const error = ref('')
 const bedTypeMap = BED_TYPE_MAP
+
+const poiName = computed(() => {
+  const value = route.query.poi
+  return typeof value === 'string' ? value : ''
+})
+
+const poiDistanceText = computed(() => {
+  const value = route.query.distance_km
+  return typeof value === 'string' ? value : ''
+})
+
+const hasCoordinates = computed(() => {
+  const lat = Number(hotel.value?.latitude)
+  const lng = Number(hotel.value?.longitude)
+  return Number.isFinite(lat) && Number.isFinite(lng)
+})
+
+const googleMapEmbedUrl = computed(() => {
+  const lat = Number(hotel.value?.latitude)
+  const lng = Number(hotel.value?.longitude)
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return ''
+  return `https://www.google.com/maps?q=${lat},${lng}&z=15&output=embed`
+})
+
+const baiduMapPageUrl = computed(() => {
+  const lat = Number(hotel.value?.latitude)
+  const lng = Number(hotel.value?.longitude)
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return '#'
+  const title = encodeURIComponent(String(hotel.value?.name || '酒店'))
+  const content = encodeURIComponent(String(hotel.value?.address || '酒店位置'))
+  return `https://api.map.baidu.com/marker?location=${lat},${lng}&title=${title}&content=${content}&output=html`
+})
+
+const aMapPageUrl = computed(() => {
+  const lat = Number(hotel.value?.latitude)
+  const lng = Number(hotel.value?.longitude)
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return '#'
+  const name = encodeURIComponent(String(hotel.value?.name || '酒店'))
+  return `https://uri.amap.com/marker?position=${lng},${lat}&name=${name}`
+})
+
+const googleMapPageUrl = computed(() => {
+  const lat = Number(hotel.value?.latitude)
+  const lng = Number(hotel.value?.longitude)
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return '#'
+  return `https://www.google.com/maps?q=${lat},${lng}`
+})
 
 function formatRating(value: unknown): string {
   const n = Number(value)

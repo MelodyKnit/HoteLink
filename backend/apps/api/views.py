@@ -176,6 +176,13 @@ def get_thumb_size_by_mode(mode: str | None) -> tuple[int, int]:
     return 56, 40
 
 
+def mask_mobile(mobile: str) -> str:
+    value = (mobile or "").strip()
+    if len(value) < 7:
+        return value
+    return f"{value[:3]}***{value[-3:]}"
+
+
 def build_tokens_for_user(user: User) -> dict:
     """
     为指定用户生成 JWT Access / Refresh Token 对。
@@ -760,6 +767,48 @@ class UserOrdersView(APIView):
             page_size=page_size,
             total=total,
         )
+
+
+class UserOrderGuestHistoryView(APIView):
+    """用户历史入住人信息接口：返回最近常用入住人，供下单自动填充。"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            limit = int(request.query_params.get("limit", 6))
+        except (TypeError, ValueError):
+            limit = 6
+        limit = min(max(limit, 1), 20)
+
+        queryset = (
+            BookingOrder.objects.filter(user=request.user)
+            .exclude(guest_name="")
+            .exclude(guest_mobile="")
+            .order_by("-created_at")
+            .values("guest_name", "guest_mobile")
+        )
+
+        seen: set[tuple[str, str]] = set()
+        items = []
+        for row in queryset:
+            name = str(row.get("guest_name") or "").strip()
+            mobile = str(row.get("guest_mobile") or "").strip()
+            if not name or not mobile:
+                continue
+            key = (name, mobile)
+            if key in seen:
+                continue
+            seen.add(key)
+            items.append(
+                {
+                    "guest_name": name,
+                    "guest_mobile": mobile,
+                    "masked_mobile": mask_mobile(mobile),
+                }
+            )
+            if len(items) >= limit:
+                break
+        return api_response(data={"items": items})
 
 
 class UserOrdersDetailView(APIView):

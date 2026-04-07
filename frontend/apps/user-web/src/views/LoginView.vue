@@ -47,11 +47,12 @@ const form = ref({ username: '', password: '' })
 
 // 处理 Login 交互逻辑。
 async function handleLogin() {
-  if (!form.value.username || !form.value.password) { error.value = '请输入用户名和密码'; return }
+  const username = form.value.username.trim()
+  if (!username || !form.value.password) { error.value = '请输入用户名和密码'; return }
   loading.value = true
   error.value = ''
   try {
-    const res = await auth.login(form.value.username, form.value.password)
+    const res = await auth.login(username, form.value.password)
     if (res.code === 0) {
       await auth.fetchMe()
       const redirect = (route.query.redirect as string) || '/'

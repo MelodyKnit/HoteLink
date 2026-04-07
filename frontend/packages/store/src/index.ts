@@ -10,7 +10,8 @@ export const useAuthStore = defineStore('auth', () => {
 
   // 执行login流程并同步登录态。
   async function login(username: string, password: string) {
-    const res = await authApi.adminLogin({ username, password })
+    const normalizedUsername = username.trim()
+    const res = await authApi.adminLogin({ username: normalizedUsername, password })
     if (res.code === 0 && res.data) {
       token.value = res.data.access_token
       setTokens(res.data.access_token, res.data.refresh_token)
@@ -56,7 +57,8 @@ export const useUserAuthStore = defineStore('userAuth', () => {
 
   // 执行login流程并同步登录态。
   async function login(username: string, password: string) {
-    const res = await userAuthApi.login({ username, password })
+    const normalizedUsername = username.trim()
+    const res = await userAuthApi.login({ username: normalizedUsername, password })
     if (res.code === 0 && res.data) {
       token.value = res.data.access_token
       setTokens(res.data.access_token, res.data.refresh_token)

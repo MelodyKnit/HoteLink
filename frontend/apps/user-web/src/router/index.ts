@@ -36,7 +36,8 @@ const router = createRouter({
     { path: '/ai-booking', name: 'ai-booking', component: () => import('../views/AIChatView.vue'), meta: { auth: true } },
     { path: '/about', name: 'about', component: () => import('../views/AboutView.vue') },
     { path: '/contact', name: 'contact', component: () => import('../views/ContactView.vue') },
-    { path: '/:pathMatch(.*)*', redirect: '/' },
+    { path: '/404', name: 'not-found', component: () => import('../views/NotFoundView.vue') },
+    { path: '/:pathMatch(.*)*', redirect: '/404' },
   ],
 })
 
