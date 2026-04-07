@@ -120,6 +120,8 @@ const menuGroups = [
     label: '客户与评价',
     items: [
       { path: '/admin/users', icon: '👥', label: '用户管理' },
+      { path: '/admin/members', icon: '👑', label: '会员管理' },
+      { path: '/admin/coupons', icon: '🎫', label: '优惠券管理' },
       { path: '/admin/reviews', icon: '⭐', label: '评价管理' },
     ],
   },

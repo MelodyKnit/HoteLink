@@ -61,6 +61,9 @@ from apps.api.serializers import (
     ChangeUserStatusSerializer,
     CheckInSerializer,
     CheckOutSerializer,
+    ClaimCouponSerializer,
+    CouponTemplateCreateSerializer,
+    CouponTemplateSerializer,
     EmployeeCreateSerializer,
     FavoriteActionSerializer,
     FavoriteHotelSerializer,
@@ -80,6 +83,7 @@ from apps.api.serializers import (
     OrderStatusSerializer,
     OrderUpdateSerializer,
     PasswordChangeSerializer,
+    PointsLogSerializer,
     ProfileUpdateSerializer,
     RegisterSerializer,
     ReplyReviewSerializer,
@@ -98,7 +102,7 @@ from apps.api.serializers import (
     UserProfileSerializer,
 )
 from apps.bookings.models import BookingOrder
-from apps.crm.models import FavoriteHotel, InvoiceRequest, InvoiceTitle, Review, UserCoupon
+from apps.crm.models import CouponTemplate, FavoriteHotel, InvoiceRequest, InvoiceTitle, PointsLog, Review, UserCoupon
 from apps.hotels.models import Hotel, RoomInventory, RoomType
 from apps.operations.models import SystemNotice
 from apps.operations.services.ai_service import AIChatService
@@ -124,6 +128,32 @@ def ensure_profile(user: User) -> UserProfile:
     }
     profile, _ = UserProfile.objects.get_or_create(user=user, defaults=defaults)
     return profile
+
+
+def add_points(user, points: int, log_type: str, description: str, order=None):
+    """给用户增加积分并记录日志，自动触发会员升级。"""
+    if points == 0:
+        return
+    profile = ensure_profile(user)
+    profile.points = max(0, profile.points + points)
+    profile.save(update_fields=["points", "updated_at"])
+    PointsLog.objects.create(
+        user=user,
+        log_type=log_type,
+        points=points,
+        balance=profile.points,
+        description=description,
+        order=order,
+    )
+    old_level = profile.member_level
+    if profile.refresh_level() and old_level != profile.member_level:
+        level_name = dict(UserProfile.MEMBER_LEVEL_CHOICES).get(profile.member_level, profile.member_level)
+        SystemNotice.objects.create(
+            user=user,
+            notice_type=SystemNotice.TYPE_ACTIVITY,
+            title="会员升级啦！",
+            content=f"恭喜您升级为{level_name}，享受更多专属权益！",
+        )
 
 
 def get_page_params(request) -> tuple[int, int]:
@@ -372,6 +402,10 @@ class BaseLoginView(APIView):
                     "id": user.id,
                     "username": user.username,
                     "role": profile.role,
+                    "nickname": profile.nickname,
+                    "member_level": profile.member_level,
+                    "avatar": profile.avatar,
+                    "points": profile.points,
                 },
             }
         )
@@ -826,7 +860,7 @@ class UserOrdersDetailView(APIView):
 
 
 class UserOrdersCreateView(APIView):
-    """创建订单接口：校验房型与日期后生成订单并写入站内通知。"""
+    """创建订单接口：校验房型与日期后生成订单，应用会员折扣与优惠券。"""
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -844,8 +878,35 @@ class UserOrdersCreateView(APIView):
         if nights <= 0:
             return api_response(code=4001, message="离店日期必须大于入住日期", data=None, status_code=400)
         original_amount = room_type.base_price * nights
-        discount_amount = Decimal("50.00") if data.get("coupon_id") else Decimal("0.00")
-        pay_amount = max(original_amount - discount_amount, Decimal("0.00"))
+
+        # 1. 会员折扣
+        profile = ensure_profile(request.user)
+        member_discount_rate = Decimal(str(profile.discount_rate))
+        member_discounted = (original_amount * member_discount_rate).quantize(Decimal("0.01"))
+        member_discount_amount = original_amount - member_discounted
+
+        # 2. 优惠券
+        coupon_discount_amount = Decimal("0.00")
+        coupon_obj = None
+        coupon_id = data.get("coupon_id")
+        if coupon_id:
+            from django.utils import timezone as tz
+            today = tz.localdate()
+            coupon_obj = UserCoupon.objects.filter(
+                id=coupon_id, user=request.user, status=UserCoupon.STATUS_UNUSED,
+                valid_start__lte=today, valid_end__gte=today,
+            ).first()
+            if not coupon_obj:
+                return api_response(code=4001, message="优惠券不可用", data=None, status_code=400)
+            if coupon_obj.min_amount and member_discounted < coupon_obj.min_amount:
+                return api_response(code=4001, message=f"未满足优惠券最低消费 ¥{coupon_obj.min_amount}", data=None, status_code=400)
+            if coupon_obj.coupon_type == UserCoupon.TYPE_CASH:
+                coupon_discount_amount = min(coupon_obj.amount, member_discounted)
+            elif coupon_obj.coupon_type == UserCoupon.TYPE_DISCOUNT:
+                coupon_discount_amount = (member_discounted * (Decimal("1") - coupon_obj.discount / Decimal("10"))).quantize(Decimal("0.01"))
+
+        total_discount = member_discount_amount + coupon_discount_amount
+        pay_amount = max(original_amount - total_discount, Decimal("0.00"))
 
         order = BookingOrder.objects.create(
             user=request.user,
@@ -859,9 +920,19 @@ class UserOrdersCreateView(APIView):
             guest_count=data["guest_count"],
             remark=data.get("remark", ""),
             original_amount=original_amount,
-            discount_amount=discount_amount,
+            member_discount_amount=member_discount_amount,
+            coupon_discount_amount=coupon_discount_amount,
+            discount_amount=total_discount,
             pay_amount=pay_amount,
+            coupon=coupon_obj,
         )
+
+        # 核销优惠券
+        if coupon_obj:
+            coupon_obj.status = UserCoupon.STATUS_USED
+            coupon_obj.used_order = order
+            coupon_obj.used_at = timezone.now()
+            coupon_obj.save(update_fields=["status", "used_order", "used_at"])
 
         SystemNotice.objects.create(
             user=request.user,
@@ -877,6 +948,8 @@ class UserOrdersCreateView(APIView):
                 "status": order.status,
                 "payment_status": order.payment_status,
                 "original_amount": order.original_amount,
+                "member_discount_amount": order.member_discount_amount,
+                "coupon_discount_amount": order.coupon_discount_amount,
                 "discount_amount": order.discount_amount,
                 "pay_amount": order.pay_amount,
             }
@@ -928,6 +1001,20 @@ class UserOrdersPayView(APIView):
         order.payment_status = BookingOrder.PAYMENT_PAID
         order.status = BookingOrder.STATUS_PAID
         order.save(update_fields=["payment_status", "status", "updated_at"])
+
+        # 支付成功后奖励积分：每消费10元=1积分 × 会员倍率
+        profile = ensure_profile(request.user)
+        base_points = int(order.pay_amount / Decimal("10"))
+        earned_points = max(1, int(base_points * Decimal(str(profile.points_multiplier))))
+        if earned_points > 0:
+            order.points_earned = earned_points
+            order.save(update_fields=["points_earned"])
+            add_points(
+                request.user, earned_points, PointsLog.TYPE_CONSUME_REWARD,
+                f"订单 {order.order_no} 消费奖励（{profile.points_multiplier}x倍率）",
+                order=order,
+            )
+
         SystemNotice.objects.create(
             user=request.user,
             notice_type=SystemNotice.TYPE_PAYMENT,
@@ -979,29 +1066,25 @@ class UserReviewsCreateView(APIView):
             },
         )
         if created:
-            profile = ensure_profile(request.user)
-            profile.points += 10
-            profile.save(update_fields=["points", "updated_at"])
+            add_points(request.user, 10, PointsLog.TYPE_REVIEW_REWARD, f"评价订单 {order.order_no} 奖励", order=order)
         return api_response(data={"review_id": review.id, "score": review.score})
 
 
 class UserPointsLogsView(APIView):
-    """用户积分日志接口：返回当前积分及简要来源。"""
+    """用户积分日志接口：返回真实积分变动记录。"""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         profile = ensure_profile(request.user)
-        items = []
-        if profile.points:
-            items.append(
-                {
-                    "type": "review_reward",
-                    "points": profile.points,
-                    "description": "累计积分奖励",
-                    "created_at": timezone.localtime().strftime("%Y-%m-%d %H:%M:%S"),
-                }
-            )
-        return api_response(data={"current_points": profile.points, "items": items})
+        queryset = PointsLog.objects.filter(user=request.user)
+        page, page_size = get_page_params(request)
+        page_queryset, total = paginate_queryset(queryset, page, page_size)
+        return api_response(data={
+            "current_points": profile.points,
+            "member_level": profile.member_level,
+            "items": PointsLogSerializer(page_queryset, many=True).data,
+            "total": total,
+        })
 
 
 class UserNoticesView(APIView):
@@ -1021,14 +1104,120 @@ class UserNoticesView(APIView):
 
 
 class UserCouponsView(APIView):
-    """用户优惠券列表接口。"""
+    """用户优惠券列表接口，支持 status 筛选。"""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         queryset = UserCoupon.objects.filter(user=request.user)
+        status = request.query_params.get("status")
+        if status:
+            queryset = queryset.filter(status=status)
         page, page_size = get_page_params(request)
         page_queryset, total = paginate_queryset(queryset, page, page_size)
         return paginated_response(items=UserCouponSerializer(page_queryset, many=True).data, page=page, page_size=page_size, total=total)
+
+
+class UserAvailableCouponsView(APIView):
+    """可领取的优惠券模板列表。"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        today = timezone.localdate()
+        profile = ensure_profile(request.user)
+        queryset = CouponTemplate.objects.filter(
+            status=CouponTemplate.STATUS_ACTIVE,
+            valid_start__lte=today, valid_end__gte=today,
+        )
+        result = []
+        for tpl in queryset:
+            if tpl.remaining <= 0:
+                continue
+            if tpl.required_level:
+                thresholds = UserProfile.MEMBER_THRESHOLDS
+                user_threshold = thresholds.get(profile.member_level, 0)
+                required_threshold = thresholds.get(tpl.required_level, 0)
+                if user_threshold < required_threshold:
+                    continue
+            claimed = UserCoupon.objects.filter(user=request.user, template=tpl).count()
+            if claimed >= tpl.per_user_limit:
+                continue
+            result.append({
+                **CouponTemplateSerializer(tpl).data,
+                "already_claimed": claimed,
+            })
+        return api_response(data={"items": result})
+
+
+class UserClaimCouponView(APIView):
+    """用户领取优惠券接口（免费或积分兑换）。"""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = ClaimCouponSerializer(data=request.data)
+        if not serializer.is_valid():
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
+        tpl = CouponTemplate.objects.filter(id=serializer.validated_data["template_id"]).first()
+        if not tpl:
+            return api_response(code=4040, message="优惠券不存在", data=None, status_code=404)
+        today = timezone.localdate()
+        if tpl.status != CouponTemplate.STATUS_ACTIVE or today < tpl.valid_start or today > tpl.valid_end:
+            return api_response(code=4001, message="优惠券活动已结束", data=None, status_code=400)
+        if tpl.remaining <= 0:
+            return api_response(code=4001, message="优惠券已领完", data=None, status_code=400)
+        profile = ensure_profile(request.user)
+        if tpl.required_level:
+            thresholds = UserProfile.MEMBER_THRESHOLDS
+            if thresholds.get(profile.member_level, 0) < thresholds.get(tpl.required_level, 0):
+                level_name = dict(UserProfile.MEMBER_LEVEL_CHOICES).get(tpl.required_level, tpl.required_level)
+                return api_response(code=4001, message=f"需要达到{level_name}才能领取", data=None, status_code=400)
+        claimed = UserCoupon.objects.filter(user=request.user, template=tpl).count()
+        if claimed >= tpl.per_user_limit:
+            return api_response(code=4001, message="已达领取上限", data=None, status_code=400)
+        if tpl.points_cost > 0:
+            if profile.points < tpl.points_cost:
+                return api_response(code=4001, message=f"积分不足，需要 {tpl.points_cost} 积分", data=None, status_code=400)
+            add_points(request.user, -tpl.points_cost, PointsLog.TYPE_COUPON_EXCHANGE, f"兑换优惠券「{tpl.name}」")
+
+        valid_start = today
+        valid_end = today + timedelta(days=tpl.valid_days)
+        if valid_end > tpl.valid_end:
+            valid_end = tpl.valid_end
+        coupon = UserCoupon.objects.create(
+            user=request.user,
+            template=tpl,
+            name=tpl.name,
+            coupon_type=tpl.coupon_type,
+            amount=tpl.amount,
+            discount=tpl.discount,
+            min_amount=tpl.min_amount,
+            valid_start=valid_start,
+            valid_end=valid_end,
+        )
+        tpl.claimed_count += 1
+        tpl.save(update_fields=["claimed_count", "updated_at"])
+        return api_response(data=UserCouponSerializer(coupon).data)
+
+
+class UserOrderAvailableCouponsView(APIView):
+    """下单时查询可用优惠券列表。"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        today = timezone.localdate()
+        try:
+            order_amount = Decimal(request.query_params.get("amount", "0"))
+        except Exception:
+            order_amount = Decimal("0")
+        queryset = UserCoupon.objects.filter(
+            user=request.user, status=UserCoupon.STATUS_UNUSED,
+            valid_start__lte=today, valid_end__gte=today,
+        )
+        result = []
+        for c in queryset:
+            if c.min_amount and order_amount < c.min_amount:
+                continue
+            result.append(UserCouponSerializer(c).data)
+        return api_response(data={"items": result})
 
 
 class UserInvoicesView(APIView):
@@ -1784,6 +1973,70 @@ class AdminReportTasksView(APIView):
         )
 
 
+class AdminCouponTemplatesView(APIView):
+    """管理端优惠券模板列表/创建接口。"""
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def get(self, request):
+        queryset = CouponTemplate.objects.all()
+        status_filter = request.query_params.get("status")
+        if status_filter:
+            queryset = queryset.filter(status=status_filter)
+        page, page_size = get_page_params(request)
+        page_queryset, total = paginate_queryset(queryset, page, page_size)
+        return paginated_response(items=CouponTemplateSerializer(page_queryset, many=True).data, page=page, page_size=page_size, total=total)
+
+    def post(self, request):
+        serializer = CouponTemplateCreateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
+        tpl = CouponTemplate.objects.create(**serializer.validated_data)
+        return api_response(data=CouponTemplateSerializer(tpl).data)
+
+
+class AdminCouponTemplateUpdateView(APIView):
+    """管理端优惠券模板上/下架接口。"""
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def post(self, request):
+        tpl_id = request.data.get("template_id")
+        new_status = request.data.get("status")
+        if not tpl_id or new_status not in ("active", "inactive"):
+            return api_response(code=4001, message="参数错误", data=None, status_code=400)
+        tpl = CouponTemplate.objects.filter(id=tpl_id).first()
+        if not tpl:
+            return api_response(code=4040, message="模板不存在", data=None, status_code=404)
+        tpl.status = new_status
+        tpl.save(update_fields=["status", "updated_at"])
+        return api_response(data=CouponTemplateSerializer(tpl).data)
+
+
+class AdminMemberOverviewView(APIView):
+    """管理端会员概览接口：各等级人数统计。"""
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def get(self, request):
+        from django.db.models import Count
+        level_counts = dict(
+            UserProfile.objects.filter(role=UserProfile.ROLE_USER)
+            .values("member_level")
+            .annotate(cnt=Count("id"))
+            .values_list("member_level", "cnt")
+        )
+        levels = []
+        for code, label in UserProfile.MEMBER_LEVEL_CHOICES:
+            levels.append({
+                "level": code,
+                "label": label,
+                "count": level_counts.get(code, 0),
+                "threshold": UserProfile.MEMBER_THRESHOLDS.get(code, 0),
+                "discount_rate": UserProfile.MEMBER_DISCOUNT_RATE.get(code, 1.0),
+                "points_multiplier": UserProfile.MEMBER_POINTS_MULTIPLIER.get(code, 1.0),
+            })
+        total_users = UserProfile.objects.filter(role=UserProfile.ROLE_USER).count()
+        return api_response(data={"levels": levels, "total_users": total_users})
+
+
 class AdminSystemResetView(APIView):
     """系统重置接口：清除所有业务数据，恢复到初始状态。仅系统管理员可用。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
@@ -1800,7 +2053,7 @@ class AdminSystemResetView(APIView):
         # 按依赖顺序清除所有业务数据
         from apps.crm.models import (
             CustomerProfile, FavoriteHotel, InvoiceRequest, InvoiceTitle,
-            Review, UserCoupon,
+            PointsLog, Review, UserCoupon, CouponTemplate,
         )
         from apps.operations.models import AuditLog
         from config.ai import _get_runtime_config_path
@@ -1812,6 +2065,8 @@ class AdminSystemResetView(APIView):
         deleted_counts["reviews"] = Review.objects.all().delete()[0]
         deleted_counts["booking_orders"] = BookingOrder.objects.all().delete()[0]
         deleted_counts["user_coupons"] = UserCoupon.objects.all().delete()[0]
+        deleted_counts["coupon_templates"] = CouponTemplate.objects.all().delete()[0]
+        deleted_counts["points_logs"] = PointsLog.objects.all().delete()[0]
         deleted_counts["favorite_hotels"] = FavoriteHotel.objects.all().delete()[0]
         deleted_counts["customer_profiles"] = CustomerProfile.objects.all().delete()[0]
         deleted_counts["room_inventories"] = RoomInventory.objects.all().delete()[0]

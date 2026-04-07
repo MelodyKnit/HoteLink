@@ -15,7 +15,13 @@
         </template>
         <template #col-gender="{ value }">{{ value === 'male' ? '男' : value === 'female' ? '女' : '未知' }}</template>
         <template #col-role="{ value }">
-          <StatusBadge :label="value === 'admin' ? '管理员' : '普通用户'" :type="value === 'admin' ? 'info' : 'default'" />
+          <StatusBadge
+            :label="value === 'system_admin' ? '系统管理员' : value === 'hotel_admin' ? '酒店管理员' : '普通用户'"
+            :type="value === 'system_admin' ? 'info' : value === 'hotel_admin' ? 'info' : 'default'"
+          />
+        </template>
+        <template #col-member_level="{ value }">
+          {{ memberLevelMap[value] || value }}
         </template>
         <template #col-status="{ value }">
           <StatusBadge :label="value === 'active' ? '正常' : '禁用'" :type="value === 'active' ? 'success' : 'danger'" />
@@ -53,6 +59,10 @@ const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
 const keyword = ref('')
+
+const memberLevelMap: Record<string, string> = {
+  normal: '普通会员', silver: '银卡会员', gold: '金卡会员', platinum: '铂金会员', diamond: '钻石会员',
+}
 
 // 加载 List 相关数据。
 async function loadList() {

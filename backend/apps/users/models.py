@@ -28,12 +28,41 @@ class UserProfile(models.Model):
     MEMBER_SILVER = "silver"
     MEMBER_GOLD = "gold"
     MEMBER_PLATINUM = "platinum"
+    MEMBER_DIAMOND = "diamond"
     MEMBER_LEVEL_CHOICES = [
         (MEMBER_NORMAL, "普通会员"),
         (MEMBER_SILVER, "银卡会员"),
         (MEMBER_GOLD, "金卡会员"),
-        (MEMBER_PLATINUM, "白金会员"),
+        (MEMBER_PLATINUM, "铂金会员"),
+        (MEMBER_DIAMOND, "钻石会员"),
     ]
+
+    # 会员等级积分阈值（每消费10元=1积分）
+    MEMBER_THRESHOLDS = {
+        MEMBER_NORMAL: 0,
+        MEMBER_SILVER: 1000,
+        MEMBER_GOLD: 10000,
+        MEMBER_PLATINUM: 100000,
+        MEMBER_DIAMOND: 1000000,
+    }
+
+    # 会员折扣率（下单时自动折扣）
+    MEMBER_DISCOUNT_RATE = {
+        MEMBER_NORMAL: 1.00,
+        MEMBER_SILVER: 0.98,
+        MEMBER_GOLD: 0.95,
+        MEMBER_PLATINUM: 0.92,
+        MEMBER_DIAMOND: 0.88,
+    }
+
+    # 会员积分倍率（消费获取积分的倍率）
+    MEMBER_POINTS_MULTIPLIER = {
+        MEMBER_NORMAL: 1.0,
+        MEMBER_SILVER: 1.2,
+        MEMBER_GOLD: 1.5,
+        MEMBER_PLATINUM: 2.0,
+        MEMBER_DIAMOND: 3.0,
+    }
 
     GENDER_UNKNOWN = "unknown"
     GENDER_MALE = "male"
@@ -63,3 +92,28 @@ class UserProfile(models.Model):
 
     def __str__(self) -> str:
         return self.nickname or self.user.username
+
+    def compute_level(self) -> str:
+        """根据当前积分计算应有的会员等级。"""
+        level = self.MEMBER_NORMAL
+        for lv, threshold in sorted(self.MEMBER_THRESHOLDS.items(), key=lambda x: x[1]):
+            if self.points >= threshold:
+                level = lv
+        return level
+
+    def refresh_level(self) -> bool:
+        """根据积分刷新会员等级，返回是否发生了升级。"""
+        new_level = self.compute_level()
+        if new_level != self.member_level:
+            self.member_level = new_level
+            self.save(update_fields=["member_level", "updated_at"])
+            return True
+        return False
+
+    @property
+    def discount_rate(self) -> float:
+        return self.MEMBER_DISCOUNT_RATE.get(self.member_level, 1.0)
+
+    @property
+    def points_multiplier(self) -> float:
+        return self.MEMBER_POINTS_MULTIPLIER.get(self.member_level, 1.0)

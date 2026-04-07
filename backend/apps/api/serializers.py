@@ -6,7 +6,7 @@ from rest_framework import serializers
 from urllib.parse import quote, urlparse
 
 from apps.bookings.models import BookingOrder
-from apps.crm.models import FavoriteHotel, InvoiceRequest, InvoiceTitle, Review, UserCoupon
+from apps.crm.models import CouponTemplate, FavoriteHotel, InvoiceRequest, InvoiceTitle, PointsLog, Review, UserCoupon
 from apps.hotels.models import Hotel, RoomInventory, RoomType
 from apps.operations.models import SystemNotice
 from apps.payments.models import PaymentRecord
@@ -519,9 +519,58 @@ class InvoiceRequestSerializer(serializers.ModelSerializer):
 
 class UserCouponSerializer(serializers.ModelSerializer):
     """UserCoupon 序列化器：用于接口参数校验或响应数据转换。"""
+    condition = serializers.SerializerMethodField()
+
     class Meta:
         model = UserCoupon
-        fields = ["id", "name", "amount", "status", "valid_start", "valid_end", "created_at"]
+        fields = ["id", "name", "coupon_type", "amount", "discount", "min_amount", "condition", "status", "valid_start", "valid_end", "used_at", "created_at"]
+
+    def get_condition(self, obj):
+        if obj.min_amount and obj.min_amount > 0:
+            return f"满{int(obj.min_amount)}可用"
+        return "无门槛"
+
+
+class PointsLogSerializer(serializers.ModelSerializer):
+    """积分日志序列化器。"""
+    class Meta:
+        model = PointsLog
+        fields = ["id", "log_type", "points", "balance", "description", "created_at"]
+
+
+class CouponTemplateSerializer(serializers.ModelSerializer):
+    """优惠券模板序列化器。"""
+    remaining = serializers.ReadOnlyField()
+
+    class Meta:
+        model = CouponTemplate
+        fields = [
+            "id", "name", "coupon_type", "amount", "discount", "min_amount",
+            "total_count", "claimed_count", "remaining", "per_user_limit",
+            "required_level", "points_cost", "status",
+            "valid_days", "valid_start", "valid_end", "created_at",
+        ]
+
+
+class CouponTemplateCreateSerializer(serializers.Serializer):
+    """管理端创建优惠券模板参数。"""
+    name = serializers.CharField(max_length=100)
+    coupon_type = serializers.ChoiceField(choices=CouponTemplate.TYPE_CHOICES)
+    amount = serializers.DecimalField(max_digits=10, decimal_places=2, default=0)
+    discount = serializers.DecimalField(max_digits=3, decimal_places=1, default=10)
+    min_amount = serializers.DecimalField(max_digits=10, decimal_places=2, default=0)
+    total_count = serializers.IntegerField(min_value=1, default=100)
+    per_user_limit = serializers.IntegerField(min_value=1, default=1)
+    required_level = serializers.CharField(max_length=32, required=False, default="", allow_blank=True)
+    points_cost = serializers.IntegerField(min_value=0, default=0)
+    valid_days = serializers.IntegerField(min_value=1, default=30)
+    valid_start = serializers.DateField()
+    valid_end = serializers.DateField()
+
+
+class ClaimCouponSerializer(serializers.Serializer):
+    """用户领券参数。"""
+    template_id = serializers.IntegerField()
 
 
 class EmployeeCreateSerializer(serializers.Serializer):

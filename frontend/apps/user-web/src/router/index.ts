@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { getToken } from '@hotelink/api'
+import { useUserAuthStore } from '@hotelink/store'
 import MainLayout from '../layouts/MainLayout.vue'
 
 const router = createRouter({
@@ -41,13 +42,20 @@ const router = createRouter({
   ],
 })
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   const token = getToken()
   if (to.meta.auth && !token) {
     return { name: 'login', query: { redirect: to.fullPath } }
   }
   if (to.meta.guest && token) {
     return { name: 'home' }
+  }
+  // 页面刷新后 token 存在但 user 数据丢失，自动恢复
+  if (token) {
+    const auth = useUserAuthStore()
+    if (!auth.user) {
+      await auth.fetchMe()
+    }
   }
 })
 

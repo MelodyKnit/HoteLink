@@ -121,11 +121,33 @@ def run(command, *args, **options):
         },
     )
 
+    from apps.crm.models import CouponTemplate
+
+    welcome_tpl, _ = CouponTemplate.objects.get_or_create(
+        name="新客立减券",
+        defaults={
+            "coupon_type": CouponTemplate.TYPE_CASH,
+            "amount": Decimal("50.00"),
+            "discount": Decimal("10"),
+            "min_amount": Decimal("200.00"),
+            "total_count": 1000,
+            "per_user_limit": 1,
+            "points_cost": 0,
+            "status": CouponTemplate.STATUS_ACTIVE,
+            "valid_days": 30,
+            "valid_start": today,
+            "valid_end": today + timedelta(days=365),
+        },
+    )
+
     UserCoupon.objects.get_or_create(
         user=demo_user,
         name="新客立减券",
         defaults={
+            "template": welcome_tpl,
+            "coupon_type": "cash",
             "amount": Decimal("50.00"),
+            "min_amount": Decimal("200.00"),
             "status": UserCoupon.STATUS_UNUSED,
             "valid_start": today,
             "valid_end": today + timedelta(days=30),

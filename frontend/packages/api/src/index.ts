@@ -197,6 +197,18 @@ export const adminSystemApi = {
   reset: (confirm: string) => post<{ reset: boolean; deleted_counts: Record<string, number>; message: string }>('/admin/system/reset', { confirm }),
 }
 
+// ========== Admin Coupons ==========
+export const adminCouponApi = {
+  list: (params?: Record<string, unknown>) => get<PaginatedData>('/admin/coupons', params),
+  create: (data: Record<string, unknown>) => post('/admin/coupons/create', data),
+  update: (data: { template_id: number; status: string }) => post('/admin/coupons/update', data),
+}
+
+// ========== Admin Members ==========
+export const adminMemberApi = {
+  overview: () => get<{ levels: unknown[]; total_users: number }>('/admin/members/overview'),
+}
+
 // ========== AI ==========
 export const aiApi = {
   reportSummary: (data: Record<string, unknown>) => post('/admin/ai/report-summary', data),
@@ -296,6 +308,9 @@ export const userFavoriteApi = {
 // ========== User Coupons ==========
 export const userCouponApi = {
   list: (params?: Record<string, unknown>) => get<PaginatedData>('/user/coupons', params),
+  available: () => get<{ items: unknown[] }>('/user/coupons/available'),
+  claim: (template_id: number) => post('/user/coupons/claim', { template_id }),
+  forOrder: (amount: number) => get<{ items: unknown[] }>('/user/orders/available-coupons', { amount }),
 }
 
 // ========== User Invoices ==========

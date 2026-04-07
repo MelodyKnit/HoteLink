@@ -62,7 +62,14 @@ export const useUserAuthStore = defineStore('userAuth', () => {
     if (res.code === 0 && res.data) {
       token.value = res.data.access_token
       setTokens(res.data.access_token, res.data.refresh_token)
-      user.value = { id: res.data.user.id, username: res.data.user.username, role: res.data.user.role, nickname: res.data.user.nickname, member_level: res.data.user.member_level }
+      const u = res.data.user
+      user.value = {
+        id: u.id, username: u.username, role: u.role,
+        nickname: u.nickname, member_level: u.member_level,
+        avatar: u.avatar, points: u.points,
+      }
+      // 登录后立即拉取完整用户信息（含 mobile、email 等）
+      fetchMe().catch(() => {})
     }
     return res
   }

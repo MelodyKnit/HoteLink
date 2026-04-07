@@ -57,6 +57,84 @@ class Review(models.Model):
         return f"{self.hotel_id}-{self.score}"
 
 
+class PointsLog(models.Model):
+    """积分变动日志模型。"""
+    TYPE_CONSUME_REWARD = "consume_reward"
+    TYPE_REVIEW_REWARD = "review_reward"
+    TYPE_COUPON_EXCHANGE = "coupon_exchange"
+    TYPE_ADMIN_ADJUST = "admin_adjust"
+    TYPE_LEVEL_UP_GIFT = "level_up_gift"
+    TYPE_CHOICES = [
+        (TYPE_CONSUME_REWARD, "消费奖励"),
+        (TYPE_REVIEW_REWARD, "评价奖励"),
+        (TYPE_COUPON_EXCHANGE, "积分兑券"),
+        (TYPE_ADMIN_ADJUST, "管理员调整"),
+        (TYPE_LEVEL_UP_GIFT, "升级礼包"),
+    ]
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="points_logs")
+    log_type = models.CharField(max_length=30, choices=TYPE_CHOICES)
+    points = models.IntegerField(help_text="正值为获得，负值为消耗")
+    balance = models.PositiveIntegerField(help_text="变动后积分余额")
+    description = models.CharField(max_length=200)
+    order = models.ForeignKey("bookings.BookingOrder", on_delete=models.SET_NULL, null=True, blank=True, related_name="points_logs")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Points Log"
+        verbose_name_plural = "Points Logs"
+        ordering = ["-id"]
+
+    def __str__(self) -> str:
+        return f"{self.user_id} {self.points:+d} ({self.log_type})"
+
+
+class CouponTemplate(models.Model):
+    """优惠券模板，管理员创建，用户可领取。"""
+    TYPE_CASH = "cash"
+    TYPE_DISCOUNT = "discount"
+    TYPE_CHOICES = [
+        (TYPE_CASH, "满减券"),
+        (TYPE_DISCOUNT, "折扣券"),
+    ]
+
+    STATUS_ACTIVE = "active"
+    STATUS_INACTIVE = "inactive"
+    STATUS_CHOICES = [
+        (STATUS_ACTIVE, "有效"),
+        (STATUS_INACTIVE, "已下架"),
+    ]
+
+    name = models.CharField(max_length=100)
+    coupon_type = models.CharField(max_length=20, choices=TYPE_CHOICES, default=TYPE_CASH)
+    amount = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text="满减金额（cash类型时使用）")
+    discount = models.DecimalField(max_digits=3, decimal_places=1, default=10, help_text="折扣值如9.5表示95折（discount类型时使用）")
+    min_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text="最低消费门槛，0表示无门槛")
+    total_count = models.PositiveIntegerField(default=100, help_text="总发行量")
+    claimed_count = models.PositiveIntegerField(default=0, help_text="已领取数量")
+    per_user_limit = models.PositiveIntegerField(default=1, help_text="每人限领")
+    required_level = models.CharField(max_length=32, blank=True, default="", help_text="所需最低会员等级，空表示不限")
+    points_cost = models.PositiveIntegerField(default=0, help_text="积分兑换成本，0表示免费领取")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_ACTIVE)
+    valid_days = models.PositiveIntegerField(default=30, help_text="领取后有效天数")
+    valid_start = models.DateField(help_text="活动开始日期")
+    valid_end = models.DateField(help_text="活动结束日期")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Coupon Template"
+        verbose_name_plural = "Coupon Templates"
+        ordering = ["-id"]
+
+    def __str__(self) -> str:
+        return self.name
+
+    @property
+    def remaining(self) -> int:
+        return max(0, self.total_count - self.claimed_count)
+
+
 class UserCoupon(models.Model):
     """用户优惠券模型。"""
     STATUS_UNUSED = "unused"
@@ -68,12 +146,25 @@ class UserCoupon(models.Model):
         (STATUS_EXPIRED, "已过期"),
     ]
 
+    TYPE_CASH = "cash"
+    TYPE_DISCOUNT = "discount"
+    TYPE_CHOICES = [
+        (TYPE_CASH, "满减券"),
+        (TYPE_DISCOUNT, "折扣券"),
+    ]
+
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="coupons")
+    template = models.ForeignKey(CouponTemplate, on_delete=models.SET_NULL, null=True, blank=True, related_name="user_coupons")
     name = models.CharField(max_length=100)
-    amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    coupon_type = models.CharField(max_length=20, choices=TYPE_CHOICES, default=TYPE_CASH)
+    amount = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text="满减金额")
+    discount = models.DecimalField(max_digits=3, decimal_places=1, default=10, help_text="折扣值")
+    min_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text="最低消费门槛")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_UNUSED)
+    used_order = models.ForeignKey("bookings.BookingOrder", on_delete=models.SET_NULL, null=True, blank=True, related_name="used_coupons")
     valid_start = models.DateField()
     valid_end = models.DateField()
+    used_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

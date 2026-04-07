@@ -100,6 +100,37 @@
         <textarea v-model="form.remark" rows="2" placeholder="如有特殊需求请备注（选填）" class="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm outline-none focus:border-brand" />
       </div>
 
+      <!-- Coupon Selection -->
+      <div class="surface-card mt-4 rounded-2xl p-5">
+        <h4 class="mb-3 font-semibold text-gray-800">优惠券</h4>
+        <div v-if="availableCoupons.length === 0" class="text-sm text-gray-400">暂无可用优惠券</div>
+        <div v-else class="space-y-2">
+          <label class="flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-2.5 transition"
+            :class="selectedCouponId === null ? 'border-brand bg-brand/5' : 'border-gray-200 hover:bg-gray-50'"
+            @click="selectedCouponId = null">
+            <span class="flex h-5 w-5 items-center justify-center rounded-full border-2" :class="selectedCouponId === null ? 'border-brand bg-brand' : 'border-gray-300'">
+              <span v-if="selectedCouponId === null" class="h-2 w-2 rounded-full bg-white" />
+            </span>
+            <span class="text-sm text-gray-600">不使用优惠券</span>
+          </label>
+          <label v-for="c in availableCoupons" :key="c.id"
+            class="flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-2.5 transition"
+            :class="selectedCouponId === c.id ? 'border-brand bg-brand/5' : 'border-gray-200 hover:bg-gray-50'"
+            @click="selectedCouponId = c.id">
+            <span class="flex h-5 w-5 items-center justify-center rounded-full border-2" :class="selectedCouponId === c.id ? 'border-brand bg-brand' : 'border-gray-300'">
+              <span v-if="selectedCouponId === c.id" class="h-2 w-2 rounded-full bg-white" />
+            </span>
+            <span class="flex-1">
+              <span class="text-sm font-medium" :class="c.coupon_type === 'cash' ? 'text-brand' : 'text-orange-600'">
+                {{ c.coupon_type === 'cash' ? `¥${c.amount}` : `${c.discount}折` }}
+              </span>
+              <span class="ml-2 text-sm text-gray-600">{{ c.name }}</span>
+              <span class="ml-2 text-xs text-gray-400">{{ c.condition }}</span>
+            </span>
+          </label>
+        </div>
+      </div>
+
       <!-- Price Breakdown -->
       <div class="surface-card mt-4 rounded-2xl p-5">
         <h4 class="mb-3 font-semibold text-gray-800">费用明细</h4>
@@ -108,10 +139,18 @@
             <span>房费 (¥{{ unitPrice }} × {{ nights }}晚)</span>
             <span>¥{{ totalPrice }}</span>
           </div>
+          <div v-if="memberDiscountAmount > 0" class="flex justify-between text-green-600">
+            <span>{{ memberDiscountLabels[memberLevel] || '会员折扣' }}</span>
+            <span>-¥{{ memberDiscountAmount.toFixed(2) }}</span>
+          </div>
+          <div v-if="couponDiscountAmount > 0" class="flex justify-between text-orange-500">
+            <span>优惠券抵扣</span>
+            <span>-¥{{ couponDiscountAmount.toFixed(2) }}</span>
+          </div>
           <div class="border-t border-dashed border-gray-200 pt-2">
             <div class="flex justify-between font-semibold text-gray-900">
               <span>合计</span>
-              <span class="text-orange-600">¥{{ totalPrice }}</span>
+              <span class="text-orange-600">¥{{ finalPrice }}</span>
             </div>
           </div>
         </div>
@@ -135,9 +174,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { userOrderApi } from '@hotelink/api'
+import { userOrderApi, userCouponApi, userProfileApi } from '@hotelink/api'
 import { formatDate } from '@hotelink/utils'
 
 const GUEST_HISTORY_KEY = 'hotelink_guest_history'
@@ -167,6 +206,35 @@ const form = ref({
   guest_count: 2,
   remark: '',
 })
+
+// 会员折扣与优惠券
+const memberLevel = ref('normal')
+const memberDiscountRate = ref(1.0)
+const availableCoupons = ref<any[]>([])
+const selectedCouponId = ref<number | null>(null)
+
+const memberDiscountLabels: Record<string, string> = {
+  normal: '', silver: '银卡98折', gold: '金卡95折', platinum: '铂金92折', diamond: '钻石88折',
+}
+
+const selectedCoupon = computed(() => availableCoupons.value.find(c => c.id === selectedCouponId.value))
+
+const memberDiscountAmount = computed(() => {
+  const orig = unitPrice * nights.value
+  return +(orig * (1 - memberDiscountRate.value)).toFixed(2)
+})
+
+const couponDiscountAmount = computed(() => {
+  const c = selectedCoupon.value
+  if (!c) return 0
+  const afterMember = unitPrice * nights.value - memberDiscountAmount.value
+  if (c.coupon_type === 'cash') return Math.min(+c.amount, afterMember)
+  if (c.coupon_type === 'discount') return +(afterMember * (1 - c.discount / 10)).toFixed(2)
+  return 0
+})
+
+const totalDiscount = computed(() => memberDiscountAmount.value + couponDiscountAmount.value)
+const finalPrice = computed(() => Math.max(0, unitPrice * nights.value - totalDiscount.value).toFixed(2))
 
 const nights = computed(() => {
   const d1 = new Date(checkInDate.value)
@@ -323,6 +391,7 @@ async function handleSubmit() {
       guest_mobile: form.value.guest_mobile,
       guest_count: form.value.guest_count,
       remark: form.value.remark,
+      ...(selectedCouponId.value ? { coupon_id: selectedCouponId.value } : {}),
     })
     if (res.code === 0 && res.data) {
       rememberGuestHistory(form.value.guest_name.trim(), form.value.guest_mobile.trim())
@@ -349,7 +418,30 @@ async function handleSubmit() {
   }
 }
 
-onMounted(loadGuestHistory)
+onMounted(async () => {
+  loadGuestHistory()
+  try {
+    const profileRes = await userProfileApi.get()
+    if (profileRes.code === 0 && profileRes.data) {
+      const p = profileRes.data as any
+      memberLevel.value = p.member_level || 'normal'
+      const rates: Record<string, number> = { normal: 1.0, silver: 0.98, gold: 0.95, platinum: 0.92, diamond: 0.88 }
+      memberDiscountRate.value = rates[memberLevel.value] ?? 1.0
+    }
+  } catch { /* ignore */ }
+})
+
+// 当总价变化时重新加载可用优惠券
+watch(totalPrice, async (val) => {
+  if (+val > 0) {
+    try {
+      const couponRes = await userCouponApi.forOrder(+val)
+      if (couponRes.code === 0 && couponRes.data) {
+        availableCoupons.value = (couponRes.data as any).items || couponRes.data || []
+      }
+    } catch { /* ignore */ }
+  }
+}, { immediate: true })
 </script>
 
 <style scoped>

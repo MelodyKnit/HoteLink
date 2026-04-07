@@ -3,7 +3,13 @@
     <!-- Profile card -->
     <div class="rounded-2xl bg-gradient-to-r from-brand to-teal-500 p-6 text-white">
       <div class="flex items-center gap-4">
-        <div class="flex h-16 w-16 items-center justify-center rounded-full bg-white/20 text-2xl font-bold backdrop-blur">
+        <div v-if="auth.user?.avatar" class="h-16 w-16 overflow-hidden rounded-full bg-white/20 backdrop-blur">
+          <img :src="auth.user.avatar" class="h-full w-full object-cover" @error="avatarError = true" v-show="!avatarError" />
+          <div v-show="avatarError" class="flex h-full w-full items-center justify-center text-2xl font-bold">
+            {{ (auth.user?.nickname || auth.user?.username || 'U').charAt(0).toUpperCase() }}
+          </div>
+        </div>
+        <div v-else class="flex h-16 w-16 items-center justify-center rounded-full bg-white/20 text-2xl font-bold backdrop-blur">
           {{ (auth.user?.nickname || auth.user?.username || 'U').charAt(0).toUpperCase() }}
         </div>
         <div class="flex-1">
@@ -57,17 +63,20 @@
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserAuthStore } from '@hotelink/store'
 
 const auth = useUserAuthStore()
 const router = useRouter()
+const avatarError = ref(false)
 
 const memberLevelMap: Record<string, string> = {
   normal: '普通会员',
   silver: '银卡会员',
   gold: '金卡会员',
-  platinum: '白金会员',
+  platinum: '铂金会员',
+  diamond: '钻石会员',
 }
 
 const menuItems = [
