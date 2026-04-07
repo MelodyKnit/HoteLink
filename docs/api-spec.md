@@ -2,38 +2,38 @@
 
 ## 1. 文档目标
 
-本文件用于统一 HoteLink 酒店预订与管理平台的接口设计规则，服务于以下场景：
+本文件用于统一 HoteLink 酒店预订与管理平台的接口说明，服务于以下场景：
 
 - 前后端联调
 - 后端接口开发
 - 数据库与业务建模
 - 测试用例编写
-- WebSocket 实时消息设计
+- 已实现 HTTP 接口对齐
 - 毕业论文中的接口设计说明
 
-本接口文档遵循以下原则：
+本文档当前遵循以下原则：
 
 - 以论文主线功能为核心
 - 采用统一的请求头、参数格式、返回格式
-- 优先使用 `GET`、`POST`、`WS`
+- 当前以已实现的 `GET`、`POST` HTTP 接口为准
 - 描述尽量通俗易懂，方便前端、后端、测试共同理解
 - 枚举值统一管理，避免前后端口径不一致
-- 当前先做接口设计，不要求所有接口都已完成开发
+- 路由与行为以 `backend/apps/api/urls.py` 和 `backend/apps/api/views.py` 为准
+- 未实现能力必须明确标注为“规划中”，不能写成已交付
 
 ## 2. 接口总览
 
 ### 2.1 请求方式
 
-本项目主要使用三种方式：
+当前项目已实现的请求方式如下：
 
 - `GET`：查询、获取详情、获取列表、获取统计
 - `POST`：新增、修改、删除、状态流转、登录、提交表单、动作型操作
-- `WS`：实时通知、后台提醒、订单状态变化、系统消息
-
 说明：
 
 - 为保持论文和工程文档表述一致，更新和删除行为优先使用动作型 `POST`
 - 当前不强制使用 `PUT`、`PATCH`、`DELETE`
+- WebSocket 相关能力目前未在后端代码中落地，不作为已实现接口记录
 
 ### 2.2 接口分组
 
@@ -41,7 +41,6 @@
 - 通用基础接口：`/api/v1/common/`
 - 用户端接口：`/api/v1/user/`
 - 管理端接口：`/api/v1/admin/`
-- WebSocket：`/ws/`
 
 ### 2.3 角色权限
 
@@ -1694,96 +1693,16 @@ data: {"type":"done","content":"","done":true}
 - 此接口仅用于控制业务层配置，如是否启用某个 AI 场景
 - 不建议通过接口直接返回真实密钥
 
-## 15. WebSocket 设计
+## 15. WebSocket 状态
 
-### 15.1 连接地址
+当前仓库未提供 WebSocket 路由、消费者或实时推送实现，因此 WebSocket 不属于已交付能力。
 
-- 用户端：`WS /ws/user/notifications`
-- 管理端：`WS /ws/admin/notifications`
+如果后续新增实时通知，需要在代码落地后再补充：
 
-### 15.2 连接认证
-
-建议使用以下任一方式：
-
-```http
-Authorization: Bearer <access_token>
-```
-
-或：
-
-```text
-/ws/admin/notifications?token=<access_token>
-```
-
-### 15.3 WS 统一消息结构
-
-```json
-{
-  "event": "order_status_changed",
-  "data": {},
-  "timestamp": "2026-04-04 12:00:00"
-}
-```
-
-字段说明：
-
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `event` | string | 事件名称 |
-| `data` | object | 事件数据 |
-| `timestamp` | string | 推送时间 |
-
-### 15.4 用户端 WS 事件
-
-| 事件 | 含义 |
-|---|---|
-| `order_status_changed` | 订单状态变化 |
-| `payment_status_changed` | 支付状态变化 |
-| `coupon_received` | 收到优惠券 |
-| `system_notice` | 系统通知 |
-
-**消息示例**
-
-```json
-{
-  "event": "order_status_changed",
-  "data": {
-    "order_id": 3001,
-    "old_status": "pending_payment",
-    "new_status": "paid"
-  },
-  "timestamp": "2026-04-04 12:00:00"
-}
-```
-
-### 15.5 管理端 WS 事件
-
-| 事件 | 含义 |
-|---|---|
-| `new_order` | 新订单提醒 |
-| `room_status_changed` | 房态变化 |
-| `report_task_finished` | 报表任务完成 |
-| `review_created` | 新评价提醒 |
-| `system_notice` | 系统通知 |
-
-### 15.6 心跳消息
-
-客户端可每隔 30 秒发送一次：
-
-```json
-{
-  "event": "ping"
-}
-```
-
-服务端返回：
-
-```json
-{
-  "event": "pong",
-  "timestamp": "2026-04-04 12:00:00"
-}
-```
+- 连接地址
+- 鉴权方式
+- 事件模型
+- 心跳机制
 
 ## 16. 典型接口完整示例
 
@@ -2026,13 +1945,13 @@ Authorization: Bearer <access_token>
 - 本文档已覆盖论文批注中提到的“典型接口请求/响应示例”要求
 - 本文档是接口层主文档，字段、枚举、请求方式变更时优先维护这里
 - 若接口新增 AI 能力，应同步更新 `docs/ai-integration.md`
-- 若接口范围超出论文主线，应同步更新 `docs/thesis-alignment.md`
+- 若接口范围超出论文主线，应同步更新 [docs/thesis-alignment.md](D:\Nakamoto\Documents\Codes\Python\HoteLink\docs\thesis-alignment.md)
 
 ## 19. 文档维护要求
 
 - 新增接口时同步更新本文件
 - 新增字段时同步更新参数表与示例
 - 新增枚举时同步更新枚举表
-- 新增 WS 事件时同步更新 WS 章节
+- 新增 WebSocket 能力时，必须先在代码中落地后再补充本文档
 - 新增 AI 接口时同步更新 `docs/ai-integration.md`
-- 若接口范围与论文主线有关，同步更新 `docs/thesis-alignment.md`
+- 若接口范围与论文主线有关，同步更新 [docs/thesis-alignment.md](D:\Nakamoto\Documents\Codes\Python\HoteLink\docs\thesis-alignment.md)

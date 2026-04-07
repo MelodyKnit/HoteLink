@@ -9,13 +9,13 @@
     <!-- Filters -->
     <div class="mb-4 flex flex-wrap gap-3">
       <input v-model="filters.keyword" placeholder="搜索酒店名/地址" class="rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-teal-500" @keyup.enter="loadList" />
-      <select v-model="filters.status" class="rounded-lg border border-slate-200 px-3 py-2 text-sm" @change="loadList">
+      <SelectField v-model="filters.status" size="sm" @change="loadList">
         <option value="">全部状态</option>
         <option value="online">已上架</option>
         <option value="offline">已下架</option>
         <option value="draft">草稿</option>
-      </select>
-      <select v-model="filters.ordering" class="rounded-lg border border-slate-200 px-3 py-2 text-sm" @change="onSortChange">
+      </SelectField>
+      <SelectField v-model="filters.ordering" size="sm" @change="onSortChange">
         <option value="-id">ID 最新优先</option>
         <option value="id">ID 最旧优先</option>
         <option value="name">名称 A→Z</option>
@@ -24,12 +24,12 @@
         <option value="-star">星级从高到低</option>
         <option value="min_price">价格从低到高</option>
         <option value="-min_price">价格从高到低</option>
-      </select>
-      <select v-model="thumbnailMode" class="rounded-lg border border-slate-200 px-3 py-2 text-sm">
+      </SelectField>
+      <SelectField v-model="thumbnailMode" size="sm">
         <option value="compact">缩略图: 小图(更流畅)</option>
         <option value="standard">缩略图: 标准</option>
         <option value="hidden">缩略图: 隐藏(极速)</option>
-      </select>
+      </SelectField>
       <button class="rounded-lg bg-slate-100 px-3 py-2 text-sm hover:bg-slate-200" @click="loadList">搜索</button>
     </div>
 
@@ -79,12 +79,12 @@
           </div>
           <div>
             <label class="mb-1 block text-sm font-medium text-slate-700">星级</label>
-            <select v-model="form.star" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+            <SelectField v-model="form.star" class="w-full">
               <option :value="2">二星</option>
               <option :value="3">三星</option>
               <option :value="4">四星</option>
               <option :value="5">五星</option>
-            </select>
+            </SelectField>
           </div>
         </div>
         <div>
@@ -126,11 +126,11 @@
         </div>
         <div>
           <label class="mb-1 block text-sm font-medium text-slate-700">状态</label>
-          <select v-model="form.status" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+          <SelectField v-model="form.status" class="w-full">
             <option value="draft">草稿</option>
             <option value="online">上架</option>
             <option value="offline">下架</option>
-          </select>
+          </SelectField>
         </div>
       </form>
       <template #footer>
@@ -148,8 +148,8 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { hotelApi, commonApi } from '@hotelink/api'
-import { formatMoney, HOTEL_STATUS_MAP } from '@hotelink/utils'
-import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, Toast, useToast } from '@hotelink/ui'
+import { formatMoney, HOTEL_STATUS_MAP, extractApiError } from '@hotelink/utils'
+import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, Toast, useToast, SelectField } from '@hotelink/ui'
 
 const { toastVisible, toastMessage, toastType, showToast, closeToast } = useToast()
 
@@ -293,7 +293,7 @@ async function handleSave() {
       showModal.value = false
       loadList()
     } else {
-      showToast(res.message || '保存失败', 'error')
+      showToast(extractApiError(res, '保存失败'), 'error')
     }
   } catch {
     showToast('保存失败，请重试', 'error')
@@ -310,7 +310,7 @@ async function handleDelete(row: Record<string, unknown>) {
       showToast('酒店删除成功', 'success')
       loadList()
     } else {
-      showToast(res.message || '删除失败', 'error')
+      showToast(extractApiError(res, '删除失败'), 'error')
     }
   } catch {
     showToast('删除失败，请重试', 'error')

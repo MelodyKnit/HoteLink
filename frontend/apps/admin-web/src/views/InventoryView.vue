@@ -3,10 +3,10 @@
     <PageHeader title="价格库存管理" subtitle="按房型管理每日价格与库存" />
 
     <div class="mb-4 flex flex-wrap gap-3">
-      <select v-model="selectedRoomType" class="rounded-lg border border-slate-200 px-3 py-2 text-sm" @change="loadCalendar">
+      <SelectField v-model="selectedRoomType" size="sm" @change="loadCalendar">
         <option value="">选择房型</option>
         <option v-for="rt in roomTypes" :key="rt.id" :value="rt.id">{{ rt.hotel_name }} - {{ rt.name }}</option>
-      </select>
+      </SelectField>
       <input v-model="startDate" type="date" class="rounded-lg border border-slate-200 px-3 py-2 text-sm" />
       <input v-model="endDate" type="date" class="rounded-lg border border-slate-200 px-3 py-2 text-sm" />
       <button class="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700" @click="loadCalendar">查询</button>
@@ -45,10 +45,10 @@
         </div>
         <div>
           <label class="mb-1 block text-sm font-medium">状态</label>
-          <select v-model="editForm.status" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+          <SelectField v-model="editForm.status" class="w-full">
             <option value="available">可售</option>
             <option value="offline">不可售</option>
-          </select>
+          </SelectField>
         </div>
       </form>
       <template #footer>
@@ -66,8 +66,8 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { inventoryApi, roomTypeApi } from '@hotelink/api'
-import { formatMoney, formatDate, ROOM_STATUS_MAP } from '@hotelink/utils'
-import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, Toast, useToast } from '@hotelink/ui'
+import { formatMoney, formatDate, ROOM_STATUS_MAP, extractApiError } from '@hotelink/utils'
+import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, Toast, useToast, SelectField } from '@hotelink/ui'
 
 const { toastVisible, toastMessage, toastType, showToast, closeToast } = useToast()
 
@@ -159,7 +159,7 @@ async function handleSave() {
       showModal.value = false
       loadCalendar()
     } else {
-      showToast(res.message || '库存更新失败', 'error')
+      showToast(extractApiError(res, '库存更新失败'), 'error')
     }
   } catch {
     showToast('库存更新失败，请重试', 'error')

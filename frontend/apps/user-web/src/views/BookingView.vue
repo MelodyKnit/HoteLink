@@ -87,9 +87,9 @@
           </div>
           <div>
             <label class="mb-1 block text-xs text-gray-400">入住人数</label>
-            <select v-model.number="form.guest_count" class="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm outline-none focus:border-brand">
+            <SelectField v-model.number="form.guest_count" class="w-full">
               <option v-for="n in 4" :key="n" :value="n">{{ n }}人</option>
-            </select>
+            </SelectField>
           </div>
         </div>
       </div>
@@ -178,6 +178,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { userOrderApi, userCouponApi, userProfileApi } from '@hotelink/api'
 import { formatDate } from '@hotelink/utils'
+import { SelectField } from '@hotelink/ui'
 
 const GUEST_HISTORY_KEY = 'hotelink_guest_history'
 

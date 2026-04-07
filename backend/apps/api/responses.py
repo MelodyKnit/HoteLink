@@ -29,7 +29,7 @@ def api_response(*, data=None, message: str = "success", code: int = 0, status_c
     )
 
 
-def paginated_response(*, items, page: int, page_size: int, total: int, message: str = "success") -> Response:
+def paginated_response(*, items, page: int, page_size: int, total: int, message: str = "success", extra: dict | None = None) -> Response:
     """
     构造分页列表响应。
 
@@ -39,19 +39,23 @@ def paginated_response(*, items, page: int, page_size: int, total: int, message:
         page_size: 每页条数。
         total:     总条数。
         message:   可选的成功提示。
+        extra:     可选的额外字段，会合并进 data 中。
 
     Returns:
         包含 {items, page, page_size, total, total_pages} 分页信息的 api_response。
     """
     # 向上整除计算总页数
     total_pages = (total + page_size - 1) // page_size if page_size else 1
+    data = {
+        "items": items,
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+        "total_pages": total_pages,
+    }
+    if extra:
+        data.update(extra)
     return api_response(
-        data={
-            "items": items,
-            "page": page,
-            "page_size": page_size,
-            "total": total,
-            "total_pages": total_pages,
-        },
+        data=data,
         message=message,
     )

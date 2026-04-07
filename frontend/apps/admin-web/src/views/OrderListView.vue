@@ -4,7 +4,7 @@
 
     <div class="mb-4 flex flex-wrap gap-3">
       <input v-model="filters.keyword" placeholder="订单号/手机号/入住人" class="rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-teal-500" @keyup.enter="loadList" />
-      <select v-model="filters.status" class="rounded-lg border border-slate-200 px-3 py-2 text-sm" @change="loadList">
+      <SelectField v-model="filters.status" size="sm" @change="loadList">
         <option value="">全部状态</option>
         <option value="pending_payment">待支付</option>
         <option value="paid">已支付</option>
@@ -12,7 +12,7 @@
         <option value="checked_in">已入住</option>
         <option value="completed">已完成</option>
         <option value="cancelled">已取消</option>
-      </select>
+      </SelectField>
       <button class="rounded-lg bg-slate-100 px-3 py-2 text-sm hover:bg-slate-200" @click="loadList">搜索</button>
     </div>
 
@@ -88,8 +88,8 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { orderApi } from '@hotelink/api'
-import { formatMoney, ORDER_STATUS_MAP, PAYMENT_STATUS_MAP } from '@hotelink/utils'
-import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, Toast, useToast } from '@hotelink/ui'
+import { formatMoney, ORDER_STATUS_MAP, PAYMENT_STATUS_MAP, extractApiError } from '@hotelink/utils'
+import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, Toast, useToast, SelectField } from '@hotelink/ui'
 
 const { toastVisible, toastMessage, toastType, showToast, closeToast } = useToast()
 
@@ -156,7 +156,7 @@ async function confirmOrder(row: Record<string, unknown>) {
       showToast('订单已确认', 'success')
       loadList()
     } else {
-      showToast(res.message || '确认订单失败', 'error')
+      showToast(extractApiError(res, '确认订单失败'), 'error')
     }
   } catch {
     showToast('确认订单失败，请重试', 'error')
@@ -174,6 +174,10 @@ function openCheckIn(row: Record<string, unknown>) {
 
 // 处理 CheckIn 交互逻辑。
 async function handleCheckIn() {
+  if (!checkInForm.room_no.trim()) {
+    showToast('请填写房间号', 'error')
+    return
+  }
   try {
     const res = await orderApi.checkIn({
       order_id: checkInForm.order_id,
@@ -185,7 +189,7 @@ async function handleCheckIn() {
       showCheckIn.value = false
       loadList()
     } else {
-      showToast(res.message || '入住办理失败', 'error')
+      showToast(extractApiError(res, '入住办理失败'), 'error')
     }
   } catch {
     showToast('入住办理失败，请重试', 'error')
@@ -214,7 +218,7 @@ async function handleCheckOut() {
       showCheckOut.value = false
       loadList()
     } else {
-      showToast(res.message || '退房办理失败', 'error')
+      showToast(extractApiError(res, '退房办理失败'), 'error')
     }
   } catch {
     showToast('退房办理失败，请重试', 'error')

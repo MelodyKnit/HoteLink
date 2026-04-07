@@ -76,3 +76,47 @@ export const PAYMENT_STATUS_MAP: Record<string, string> = {
   failed: '支付失败',
   refunded: '已退款',
 }
+
+/**
+ * 从后端 API 响应中提取用户友好的错误消息。
+ * 当 res.data.errors 存在时，将字段校验错误拼成中文提示。
+ */
+export function extractApiError(res: { message?: string; data?: unknown }, fallback = '操作失败，请重试'): string {
+  const errors = (res.data as Record<string, unknown>)?.errors
+  if (errors && typeof errors === 'object') {
+    const fieldMap: Record<string, string> = {
+      room_no: '房间号',
+      order_id: '订单',
+      guest_name: '入住人姓名',
+      guest_mobile: '手机号',
+      check_in_date: '入住日期',
+      check_out_date: '离店日期',
+      guest_count: '入住人数',
+      payment_method: '支付方式',
+      score: '评分',
+      content: '内容',
+      name: '名称',
+      price: '价格',
+      amount: '金额',
+      username: '用户名',
+      password: '密码',
+      consume_amount: '消费金额',
+      target_status: '目标状态',
+    }
+    const parts: string[] = []
+    for (const [field, msgs] of Object.entries(errors as Record<string, string[]>)) {
+      const label = fieldMap[field] || field
+      const msg = Array.isArray(msgs) ? msgs[0] : String(msgs)
+      // 常见 DRF 英文错误翻译
+      const translated = msg
+        .replace('This field may not be blank.', '不能为空')
+        .replace('This field is required.', '为必填项')
+        .replace('This field may not be null.', '不能为空')
+        .replace(/Ensure this field has no more than (\d+) characters./, '不能超过 $1 个字符')
+        .replace(/Ensure this value is greater than or equal to (\d+)./, '不能小于 $1')
+      parts.push(`${label}${translated}`)
+    }
+    if (parts.length) return parts.join('；')
+  }
+  return res.message || fallback
+}

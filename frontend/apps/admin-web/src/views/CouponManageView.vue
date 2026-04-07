@@ -85,10 +85,10 @@
           <div class="grid grid-cols-2 gap-3">
             <div>
               <label class="mb-1 block text-xs text-gray-500">类型</label>
-              <select v-model="form.coupon_type" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand">
+              <SelectField v-model="form.coupon_type" class="w-full">
                 <option value="cash">满减券</option>
                 <option value="discount">折扣券</option>
-              </select>
+              </SelectField>
             </div>
             <div v-if="form.coupon_type === 'cash'">
               <label class="mb-1 block text-xs text-gray-500">减免金额(¥)</label>
@@ -116,13 +116,13 @@
             </div>
             <div>
               <label class="mb-1 block text-xs text-gray-500">会员等级要求</label>
-              <select v-model="form.required_level" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand">
+              <SelectField v-model="form.required_level" class="w-full">
                 <option value="">不限</option>
-                <option value="silver">银卡会员</option>
+                <option value="silver">銀卡会员</option>
                 <option value="gold">金卡会员</option>
                 <option value="platinum">铂金会员</option>
-                <option value="diamond">钻石会员</option>
-              </select>
+                <option value="diamond">钒石会员</option>
+              </SelectField>
             </div>
           </div>
           <div class="grid grid-cols-3 gap-3">
@@ -155,6 +155,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { adminCouponApi } from '@hotelink/api'
+import { SelectField } from '@hotelink/ui'
 
 const templates = ref<any[]>([])
 const showCreate = ref(false)

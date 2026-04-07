@@ -22,11 +22,11 @@
       <div class="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
         <div class="mb-4 flex items-center justify-between">
           <h3 class="text-base font-semibold text-slate-900">营收趋势</h3>
-          <select v-model="dateRange" class="rounded-lg border border-slate-200 px-3 py-1.5 text-sm" @change="loadCharts">
+          <SelectField v-model="dateRange" size="sm" @change="loadCharts">
             <option value="7">近7天</option>
             <option value="14">近14天</option>
             <option value="30">近30天</option>
-          </select>
+          </SelectField>
         </div>
         <div ref="revenueChartRef" class="h-72" />
       </div>
@@ -56,7 +56,7 @@ import { ref, reactive, onMounted, nextTick } from 'vue'
 import * as echarts from 'echarts'
 import { dashboardApi } from '@hotelink/api'
 import { formatMoney, formatDate } from '@hotelink/utils'
-import { StatCard, PageHeader } from '@hotelink/ui'
+import { StatCard, PageHeader, SelectField } from '@hotelink/ui'
 
 const overview = reactive({
   today_order_count: 0,

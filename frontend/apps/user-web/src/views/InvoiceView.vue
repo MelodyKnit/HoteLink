@@ -46,10 +46,10 @@
       <div class="mt-4 rounded-2xl bg-white p-4 shadow-sm">
         <h3 class="mb-3 font-semibold text-gray-800">申请开票</h3>
         <div class="space-y-3">
-          <select v-model.number="applyForm.invoice_title_id" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand">
-            <option :value="0">选择抬头</option>
+          <SelectField v-model.number="applyForm.invoice_title_id" class="w-full">
+            <option :value="0">选择抄头</option>
             <option v-for="t in titles" :key="t.id" :value="t.id">{{ t.title }}</option>
-          </select>
+          </SelectField>
           <input v-model.number="applyForm.order_id" placeholder="订单号" type="number" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
           <button @click="handleApply" :disabled="applying"
             class="w-full rounded-xl bg-brand py-2.5 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-50">
@@ -86,6 +86,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { userInvoiceApi } from '@hotelink/api'
+import { SelectField } from '@hotelink/ui'
 
 const titles = ref<any[]>([])
 const invoices = ref<any[]>([])

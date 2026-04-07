@@ -45,18 +45,18 @@
       <form class="space-y-4" @submit.prevent="handleCreate">
         <div>
           <label class="mb-1 block text-sm font-medium">报表类型</label>
-          <select v-model="form.report_type" required class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+          <SelectField v-model="form.report_type" required class="w-full">
             <option value="revenue">营收报表</option>
             <option value="occupancy">入住率报表</option>
             <option value="review">评价报表</option>
-          </select>
+          </SelectField>
         </div>
         <div>
           <label class="mb-1 block text-sm font-medium">酒店（可选）</label>
-          <select v-model="form.hotel_id" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+          <SelectField v-model="form.hotel_id" class="w-full">
             <option value="">全部酒店</option>
             <option v-for="h in hotels" :key="h.id" :value="h.id">{{ h.name }}</option>
-          </select>
+          </SelectField>
         </div>
         <div class="grid grid-cols-2 gap-4">
           <div>
@@ -81,7 +81,7 @@
 import { ref, reactive, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import * as echarts from 'echarts'
 import { dashboardApi, reportApi, hotelApi } from '@hotelink/api'
-import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination } from '@hotelink/ui'
+import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, SelectField } from '@hotelink/ui'
 
 interface HotelOption {
   id: number

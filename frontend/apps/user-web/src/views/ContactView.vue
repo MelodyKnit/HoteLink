@@ -56,13 +56,13 @@
         <h3 class="font-semibold text-gray-800">意见反馈</h3>
         <p class="mt-1 text-xs text-gray-400">您的反馈是我们前进的动力</p>
         <div class="mt-4 space-y-3">
-          <select v-model="feedback.type" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand">
+          <SelectField v-model="feedback.type" class="w-full">
             <option value="">请选择反馈类型</option>
             <option value="suggestion">功能建议</option>
             <option value="bug">问题反馈</option>
             <option value="complaint">投诉</option>
             <option value="praise">表扬</option>
-          </select>
+          </SelectField>
           <textarea v-model="feedback.content" rows="4" placeholder="请详细描述您的反馈内容..."
             class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
           <input v-model="feedback.contact" placeholder="联系方式（手机/邮箱，选填）"
@@ -98,6 +98,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
+import { SelectField } from '@hotelink/ui'
 
 const feedback = ref({ type: '', content: '', contact: '' })
 const submitting = ref(false)

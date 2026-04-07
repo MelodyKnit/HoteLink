@@ -127,6 +127,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { aiApi } from '@hotelink/api'
+import { extractApiError } from '@hotelink/utils'
 import { PageHeader, StatusBadge, Toast, useToast } from '@hotelink/ui'
 
 const { toastVisible, toastMessage, toastType, showToast, closeToast } = useToast()
@@ -234,7 +235,7 @@ async function saveProvider() {
     await loadSettings()
     showToast('保存成功', 'success')
   } else {
-    showToast(res.message || '保存失败，请检查填写内容', 'error')
+    showToast(extractApiError(res, '保存失败，请检查填写内容'), 'error')
   }
 }
 

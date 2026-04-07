@@ -32,6 +32,7 @@ const router = createRouter({
     { path: '/my/favorites', name: 'favorites', component: () => import('../views/FavoriteListView.vue'), meta: { auth: true } },
     { path: '/my/reviews', name: 'reviews', component: () => import('../views/ReviewListView.vue'), meta: { auth: true } },
     { path: '/my/invoices', name: 'invoices', component: () => import('../views/InvoiceView.vue'), meta: { auth: true } },
+    { path: '/my/notifications', name: 'notifications', component: () => import('../views/NotificationView.vue'), meta: { auth: true } },
     { path: '/help', name: 'help', component: () => import('../views/HelpView.vue') },
     { path: '/ai-chat', name: 'ai-chat', component: () => import('../views/AIChatView.vue'), meta: { auth: true } },
     { path: '/ai-booking', name: 'ai-booking', component: () => import('../views/AIChatView.vue'), meta: { auth: true } },

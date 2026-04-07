@@ -101,6 +101,11 @@ async function post<T = unknown>(url: string, data?: Record<string, unknown>): P
   return resp.data
 }
 
+async function del<T = unknown>(url: string, data?: Record<string, unknown>): Promise<ApiResult<T>> {
+  const resp = await http.delete<ApiResult<T>>(url, { data })
+  return resp.data
+}
+
 // ========== System Init ==========
 export const systemApi = {
   initCheck: () => get<{ initialized: boolean }>('/system/init-check'),
@@ -329,6 +334,9 @@ export const userPointsApi = {
 // ========== User Notices ==========
 export const userNoticeApi = {
   list: (params?: Record<string, unknown>) => get<PaginatedData>('/user/notices', params),
+  markRead: (ids?: number[]) => post<{ unread_count: number }>('/user/notices', ids ? { ids } : {}),
+  unreadCount: () => get<{ unread_count: number }>('/user/notices/unread-count'),
+  deleteNotices: (ids?: number[]) => del<{ deleted: number; unread_count: number }>('/user/notices', ids ? { ids } : {}),
 }
 
 // ========== User AI Chat ==========

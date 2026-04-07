@@ -3,10 +3,10 @@
     <PageHeader title="评价管理" subtitle="查看并回复用户评价" />
 
     <div class="mb-4 flex flex-wrap gap-3">
-      <select v-model="hotelId" class="rounded-lg border border-slate-200 px-3 py-2 text-sm" @change="loadList">
+      <SelectField v-model="hotelId" size="sm" @change="loadList">
         <option value="">全部酒店</option>
         <option v-for="h in hotels" :key="h.id" :value="h.id">{{ h.name }}</option>
-      </select>
+      </SelectField>
     </div>
 
     <div class="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
@@ -58,7 +58,8 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { reviewApi, hotelApi, aiApi } from '@hotelink/api'
-import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, Toast, useToast } from '@hotelink/ui'
+import { extractApiError } from '@hotelink/utils'
+import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, Toast, useToast, SelectField } from '@hotelink/ui'
 
 const { toastVisible, toastMessage, toastType, showToast, closeToast } = useToast()
 
@@ -157,7 +158,7 @@ async function submitReply() {
       showReply.value = false
       loadList()
     } else {
-      showToast(res.message || '回复提交失败', 'error')
+      showToast(extractApiError(res, '回复提交失败'), 'error')
     }
   } catch {
     showToast('回复提交失败，请重试', 'error')

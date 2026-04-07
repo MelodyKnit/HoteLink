@@ -17,17 +17,17 @@
 
       <!-- Filters row -->
       <div class="mt-3 flex flex-wrap items-center gap-2">
-        <select v-model="filters.star" class="rounded-lg border border-gray-200 px-3 py-1.5 text-xs outline-none focus:border-brand">
-          <option value="">全部星级</option>
-          <option v-for="s in [5,4,3,2]" :key="s" :value="s">{{ s }}星</option>
-        </select>
-        <select v-model="filters.sort" class="rounded-lg border border-gray-200 px-3 py-1.5 text-xs outline-none focus:border-brand">
-          <option value="default">默认排序</option>
-          <option value="price_asc">价格低→高</option>
-          <option value="price_desc">价格高→低</option>
-          <option value="rating_desc">评分优先</option>
-          <option value="popular_desc">人气优先</option>
-        </select>
+          <SelectField v-model="filters.star" size="sm">
+            <option value="">全部星级</option>
+            <option v-for="s in [5,4,3,2]" :key="s" :value="s">{{ s }}星</option>
+          </SelectField>
+          <SelectField v-model="filters.sort" size="sm">
+            <option value="default">默认排序</option>
+            <option value="price_asc">价格低→高</option>
+            <option value="price_desc">价格高→低</option>
+            <option value="rating_desc">评分优先</option>
+            <option value="popular_desc">人气优先</option>
+          </SelectField>
         <div class="flex gap-2">
           <input v-model.number="filters.min_price" type="number" placeholder="最低价" class="w-20 rounded-lg border border-gray-200 px-2 py-1.5 text-xs outline-none focus:border-brand" />
           <span class="text-gray-300">-</span>
@@ -92,6 +92,7 @@
 import { ref, reactive, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { publicApi } from '@hotelink/api'
+import { SelectField } from '@hotelink/ui'
 
 const route = useRoute()
 const router = useRouter()

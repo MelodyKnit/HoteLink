@@ -150,7 +150,7 @@ def add_points(user, points: int, log_type: str, description: str, order=None):
         level_name = dict(UserProfile.MEMBER_LEVEL_CHOICES).get(profile.member_level, profile.member_level)
         SystemNotice.objects.create(
             user=user,
-            notice_type=SystemNotice.TYPE_ACTIVITY,
+            notice_type=SystemNotice.TYPE_MEMBER,
             title="会员升级啦！",
             content=f"恭喜您升级为{level_name}，享受更多专属权益！",
         )
@@ -302,7 +302,7 @@ class UserRegisterView(APIView):
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
         if not serializer.is_valid():
-            return api_response(code=4001, message="invalid parameters", data={"errors": serializer.errors}, status_code=400)
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
 
         data = serializer.validated_data
         user = User.objects.create_user(
@@ -380,7 +380,7 @@ class BaseLoginView(APIView):
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
         if not serializer.is_valid():
-            return api_response(code=4001, message="invalid parameters", data={"errors": serializer.errors}, status_code=400)
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
 
         user = authenticate(
             request=request,
@@ -392,7 +392,7 @@ class BaseLoginView(APIView):
 
         profile = ensure_profile(user)
         if self.required_roles and profile.role not in self.required_roles and not user.is_superuser:
-            return api_response(code=4030, message="permission denied", data=None, status_code=403)
+            return api_response(code=4030, message="权限不足", data=None, status_code=403)
 
         tokens = build_tokens_for_user(user)
         return api_response(
@@ -491,7 +491,7 @@ class CommonUploadView(APIView):
     def post(self, request):
         serializer = UploadSerializer(data=request.data)
         if not serializer.is_valid():
-            return api_response(code=4001, message="invalid parameters", data={"errors": serializer.errors}, status_code=400)
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         file_obj = serializer.validated_data["file"]
         scene = serializer.validated_data["scene"]
         path = default_storage.save(f"uploads/{scene}/{file_obj.name}", file_obj)
@@ -507,15 +507,15 @@ class CommonImageThumbView(APIView):
         url = request.query_params.get("url", "")
         width, height = parse_thumb_params(request)
         if not url:
-            return api_response(code=4001, message="url is required", data=None, status_code=400)
+            return api_response(code=4001, message="缺少图片URL", data=None, status_code=400)
         if not str(url).startswith(settings.MEDIA_URL):
-            return api_response(code=4001, message="only media url is supported", data=None, status_code=400)
+            return api_response(code=4001, message="仅支持站内媒体URL", data=None, status_code=400)
 
         rel_path = str(url)[len(settings.MEDIA_URL):].lstrip("/")
         media_root = Path(settings.MEDIA_ROOT).resolve()
         source_path = (media_root / rel_path).resolve()
         if not str(source_path).startswith(str(media_root)):
-            return api_response(code=4001, message="invalid media path", data=None, status_code=400)
+            return api_response(code=4001, message="无效的媒体路径", data=None, status_code=400)
         if not source_path.exists() or not source_path.is_file():
             return api_response(code=4040, message="image not found", data=None, status_code=404)
 
@@ -709,7 +709,7 @@ class UserProfileView(APIView):
     def post(self, request):
         serializer = ProfileUpdateSerializer(data=request.data)
         if not serializer.is_valid():
-            return api_response(code=4001, message="invalid parameters", data={"errors": serializer.errors}, status_code=400)
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         profile = ensure_profile(request.user)
         validated = serializer.validated_data
         for field in ["nickname", "mobile", "gender", "birthday"]:
@@ -745,7 +745,7 @@ class UserPasswordChangeView(APIView):
     def post(self, request):
         serializer = PasswordChangeSerializer(data=request.data)
         if not serializer.is_valid():
-            return api_response(code=4001, message="invalid parameters", data={"errors": serializer.errors}, status_code=400)
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         data = serializer.validated_data
         if not request.user.check_password(data["old_password"]):
             return api_response(code=4001, message="旧密码不正确", data=None, status_code=400)
@@ -772,7 +772,7 @@ class UserFavoritesView(APIView):
     def post(self, request):
         serializer = FavoriteActionSerializer(data=request.data)
         if not serializer.is_valid():
-            return api_response(code=4001, message="invalid parameters", data={"errors": serializer.errors}, status_code=400)
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         hotel = Hotel.objects.filter(pk=serializer.validated_data["hotel_id"]).first()
         if not hotel:
             return api_response(code=4040, message="酒店不存在", data=None, status_code=404)
@@ -866,7 +866,7 @@ class UserOrdersCreateView(APIView):
     def post(self, request):
         serializer = OrderCreateSerializer(data=request.data)
         if not serializer.is_valid():
-            return api_response(code=4001, message="invalid parameters", data={"errors": serializer.errors}, status_code=400)
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
 
         data = serializer.validated_data
         hotel = Hotel.objects.filter(pk=data["hotel_id"]).first()
@@ -963,7 +963,7 @@ class UserOrdersUpdateView(APIView):
     def post(self, request):
         serializer = OrderUpdateSerializer(data=request.data)
         if not serializer.is_valid():
-            return api_response(code=4001, message="invalid parameters", data={"errors": serializer.errors}, status_code=400)
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         data = serializer.validated_data
         order = BookingOrder.objects.filter(id=data["order_id"], user=request.user).first()
         if not order:
@@ -982,7 +982,7 @@ class UserOrdersPayView(APIView):
     def post(self, request):
         serializer = OrderPaySerializer(data=request.data)
         if not serializer.is_valid():
-            return api_response(code=4001, message="invalid parameters", data={"errors": serializer.errors}, status_code=400)
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         data = serializer.validated_data
         order = BookingOrder.objects.filter(id=data["order_id"], user=request.user).first()
         if not order:
@@ -1031,7 +1031,7 @@ class UserOrdersCancelView(APIView):
     def post(self, request):
         serializer = OrderCancelSerializer(data=request.data)
         if not serializer.is_valid():
-            return api_response(code=4001, message="invalid parameters", data={"errors": serializer.errors}, status_code=400)
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         data = serializer.validated_data
         order = BookingOrder.objects.filter(id=data["order_id"], user=request.user).first()
         if not order:
@@ -1051,7 +1051,7 @@ class UserReviewsCreateView(APIView):
     def post(self, request):
         serializer = ReviewCreateSerializer(data=request.data)
         if not serializer.is_valid():
-            return api_response(code=4001, message="invalid parameters", data={"errors": serializer.errors}, status_code=400)
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         data = serializer.validated_data
         order = BookingOrder.objects.filter(id=data["order_id"], user=request.user).select_related("hotel").first()
         if not order:
@@ -1088,19 +1088,50 @@ class UserPointsLogsView(APIView):
 
 
 class UserNoticesView(APIView):
-    """用户站内通知列表接口。"""
+    """用户站内通知列表接口，支持标记已读。"""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         page, page_size = get_page_params(request)
         queryset = SystemNotice.objects.filter(user=request.user)
         page_queryset, total = paginate_queryset(queryset, page, page_size)
+        unread_count = SystemNotice.objects.filter(user=request.user, is_read=False).count()
         return paginated_response(
             items=SystemNoticeSerializer(page_queryset, many=True).data,
             page=page,
             page_size=page_size,
             total=total,
+            extra={"unread_count": unread_count},
         )
+
+    def post(self, request):
+        """标记通知已读：ids=[] 标记指定，ids=null/不传 标记全部已读。"""
+        ids = request.data.get("ids")
+        queryset = SystemNotice.objects.filter(user=request.user, is_read=False)
+        if ids:
+            queryset = queryset.filter(id__in=ids)
+        queryset.update(is_read=True)
+        unread_count = SystemNotice.objects.filter(user=request.user, is_read=False).count()
+        return api_response(data={"unread_count": unread_count})
+
+    def delete(self, request):
+        """删除通知：ids=[1,2,3] 删除指定，不传 ids 则删除全部。"""
+        ids = request.data.get("ids")
+        queryset = SystemNotice.objects.filter(user=request.user)
+        if ids:
+            queryset = queryset.filter(id__in=ids)
+        deleted_count, _ = queryset.delete()
+        unread_count = SystemNotice.objects.filter(user=request.user, is_read=False).count()
+        return api_response(data={"deleted": deleted_count, "unread_count": unread_count})
+
+
+class UserNoticeUnreadCountView(APIView):
+    """用户未读通知数量接口。"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        count = SystemNotice.objects.filter(user=request.user, is_read=False).count()
+        return api_response(data={"unread_count": count})
 
 
 class UserCouponsView(APIView):
@@ -1195,6 +1226,13 @@ class UserClaimCouponView(APIView):
         )
         tpl.claimed_count += 1
         tpl.save(update_fields=["claimed_count", "updated_at"])
+        coupon_type_name = "折扣券" if tpl.coupon_type == CouponTemplate.TYPE_DISCOUNT else "满减券"
+        SystemNotice.objects.create(
+            user=request.user,
+            notice_type=SystemNotice.TYPE_COUPON,
+            title=f"优惠券已到账",
+            content=f"您已成功领取「{tpl.name}」{coupon_type_name}，有效期至 {valid_end.strftime('%Y-%m-%d')}，快去使用吧！",
+        )
         return api_response(data=UserCouponSerializer(coupon).data)
 
 
@@ -1238,7 +1276,7 @@ class UserInvoiceTitleCreateView(APIView):
     def post(self, request):
         serializer = InvoiceTitleCreateSerializer(data=request.data)
         if not serializer.is_valid():
-            return api_response(code=4001, message="invalid parameters", data={"errors": serializer.errors}, status_code=400)
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         title = serializer.save(user=request.user)
         return api_response(data=InvoiceTitleSerializer(title).data)
 
@@ -1250,7 +1288,7 @@ class UserInvoiceApplyView(APIView):
     def post(self, request):
         serializer = InvoiceApplySerializer(data=request.data)
         if not serializer.is_valid():
-            return api_response(code=4001, message="invalid parameters", data={"errors": serializer.errors}, status_code=400)
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         data = serializer.validated_data
         order = BookingOrder.objects.filter(id=data["order_id"], user=request.user).first()
         title = InvoiceTitle.objects.filter(id=data["invoice_title_id"], user=request.user).first()
@@ -1267,7 +1305,7 @@ class UserAIChatView(APIView):
     def post(self, request):
         serializer = AIChatSerializer(data=request.data)
         if not serializer.is_valid():
-            return api_response(code=4001, message="invalid parameters", data={"errors": serializer.errors}, status_code=400)
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         data = serializer.validated_data
         service = AIChatService()
         try:
@@ -1302,7 +1340,7 @@ class UserAIChatStreamView(APIView):
 
         serializer = AIChatSerializer(data=request.data)
         if not serializer.is_valid():
-            return api_response(code=4001, message="invalid parameters", data={"errors": serializer.errors}, status_code=400)
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         data = serializer.validated_data
         service = AIChatService()
         try:
@@ -1450,13 +1488,13 @@ class AdminHotelsView(APIView):
         if request.path.endswith("/create"):
             serializer = HotelCreateSerializer(data=request.data)
             if not serializer.is_valid():
-                return api_response(code=4001, message="invalid parameters", data={"errors": serializer.errors}, status_code=400)
+                return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
             hotel = serializer.save()
             return api_response(data=HotelSimpleSerializer(hotel).data)
         if request.path.endswith("/update"):
             serializer = HotelUpdateSerializer(data=request.data)
             if not serializer.is_valid():
-                return api_response(code=4001, message="invalid parameters", data={"errors": serializer.errors}, status_code=400)
+                return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
             hotel = Hotel.objects.filter(pk=serializer.validated_data["hotel_id"]).first()
             if not hotel:
                 return api_response(code=4040, message="酒店不存在", data=None, status_code=404)
@@ -1506,13 +1544,13 @@ class AdminRoomTypesView(APIView):
         if request.path.endswith("/create"):
             serializer = RoomTypeCreateSerializer(data=request.data)
             if not serializer.is_valid():
-                return api_response(code=4001, message="invalid parameters", data={"errors": serializer.errors}, status_code=400)
+                return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
             room_type = serializer.save()
             return api_response(data=RoomTypeSerializer(room_type).data)
         if request.path.endswith("/update"):
             serializer = RoomTypeUpdateSerializer(data=request.data)
             if not serializer.is_valid():
-                return api_response(code=4001, message="invalid parameters", data={"errors": serializer.errors}, status_code=400)
+                return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
             room_type = RoomType.objects.filter(pk=serializer.validated_data["room_type_id"]).first()
             if not room_type:
                 return api_response(code=4040, message="房型不存在", data=None, status_code=404)
@@ -1574,7 +1612,7 @@ class AdminInventoryView(APIView):
     def post(self, request):
         serializer = InventoryUpdateSerializer(data=request.data)
         if not serializer.is_valid():
-            return api_response(code=4001, message="invalid parameters", data={"errors": serializer.errors}, status_code=400)
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         data = serializer.validated_data
         inventory, _ = RoomInventory.objects.update_or_create(
             room_type_id=data["room_type_id"],
@@ -1628,12 +1666,32 @@ class AdminOrdersChangeStatusView(APIView):
     def post(self, request):
         serializer = OrderStatusSerializer(data=request.data)
         if not serializer.is_valid():
-            return api_response(code=4001, message="invalid parameters", data={"errors": serializer.errors}, status_code=400)
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         order = BookingOrder.objects.filter(id=serializer.validated_data["order_id"]).first()
         if not order:
             return api_response(code=4040, message="订单不存在", data=None, status_code=404)
-        order.status = serializer.validated_data["target_status"]
+        target_status = serializer.validated_data["target_status"]
+        order.status = target_status
         order.save(update_fields=["status", "updated_at"])
+        # 发送订单状态变更通知
+        _notice_map = {
+            BookingOrder.STATUS_CONFIRMED: (
+                "订单已确认",
+                f"您的订单 {order.order_no} 已由酒店确认，请按时入住。",
+            ),
+            BookingOrder.STATUS_CANCELLED: (
+                "订单已取消",
+                f"您的订单 {order.order_no} 已被取消，如有疑问请联系客服。",
+            ),
+        }
+        if target_status in _notice_map:
+            title, content = _notice_map[target_status]
+            SystemNotice.objects.create(
+                user=order.user,
+                notice_type=SystemNotice.TYPE_ORDER,
+                title=title,
+                content=content,
+            )
         return api_response(data={"order_id": order.id, "status": order.status})
 
 
@@ -1644,15 +1702,21 @@ class AdminOrdersCheckInView(APIView):
     def post(self, request):
         serializer = CheckInSerializer(data=request.data)
         if not serializer.is_valid():
-            return api_response(code=4001, message="invalid parameters", data={"errors": serializer.errors}, status_code=400)
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         data = serializer.validated_data
-        order = BookingOrder.objects.filter(id=data["order_id"]).first()
+        order = BookingOrder.objects.filter(id=data["order_id"]).select_related("user").first()
         if not order:
             return api_response(code=4040, message="订单不存在", data=None, status_code=404)
         order.status = BookingOrder.STATUS_CHECKED_IN
         order.room_no = data["room_no"]
         order.operator_remark = data.get("operator_remark", "")
         order.save(update_fields=["status", "room_no", "operator_remark", "updated_at"])
+        SystemNotice.objects.create(
+            user=order.user,
+            notice_type=SystemNotice.TYPE_ORDER,
+            title="已确认入住",
+            content=f"订单 {order.order_no} 已办理入住，您的房间号为 {order.room_no}，祝您入住愉快！",
+        )
         return api_response(data={"order_id": order.id, "status": order.status, "room_no": order.room_no})
 
 
@@ -1663,14 +1727,22 @@ class AdminOrdersCheckOutView(APIView):
     def post(self, request):
         serializer = CheckOutSerializer(data=request.data)
         if not serializer.is_valid():
-            return api_response(code=4001, message="invalid parameters", data={"errors": serializer.errors}, status_code=400)
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         data = serializer.validated_data
-        order = BookingOrder.objects.filter(id=data["order_id"]).first()
+        order = BookingOrder.objects.filter(id=data["order_id"]).select_related("user").first()
         if not order:
             return api_response(code=4040, message="订单不存在", data=None, status_code=404)
         order.status = BookingOrder.STATUS_COMPLETED
         order.operator_remark = data.get("operator_remark", "")
         order.save(update_fields=["status", "operator_remark", "updated_at"])
+        SystemNotice.objects.create(
+            user=order.user,
+            notice_type=SystemNotice.TYPE_ORDER,
+            title="退房完成",
+            content=f"订单 {order.order_no} 已办理退房，感谢您的入住，期待再次欢迎您！",
+        )
+        # 退房完成后奖励积分
+        add_points(order.user, 20, PointsLog.TYPE_CONSUME_REWARD, f"订单 {order.order_no} 入住奖励", order=order)
         return api_response(data={"order_id": order.id, "status": order.status})
 
 
@@ -1695,7 +1767,7 @@ class AdminReviewsReplyView(APIView):
     def post(self, request):
         serializer = ReplyReviewSerializer(data=request.data)
         if not serializer.is_valid():
-            return api_response(code=4001, message="invalid parameters", data={"errors": serializer.errors}, status_code=400)
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         review = Review.objects.filter(id=serializer.validated_data["review_id"]).first()
         if not review:
             return api_response(code=4040, message="评价不存在", data=None, status_code=404)
@@ -1725,7 +1797,7 @@ class AdminUsersChangeStatusView(APIView):
     def post(self, request):
         serializer = ChangeUserStatusSerializer(data=request.data)
         if not serializer.is_valid():
-            return api_response(code=4001, message="invalid parameters", data={"errors": serializer.errors}, status_code=400)
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         profile = UserProfile.objects.filter(user_id=serializer.validated_data["user_id"]).first()
         if not profile:
             return api_response(code=4040, message="用户不存在", data=None, status_code=404)
@@ -1747,7 +1819,7 @@ class AdminEmployeesView(APIView):
     def post(self, request):
         serializer = EmployeeCreateSerializer(data=request.data)
         if not serializer.is_valid():
-            return api_response(code=4001, message="invalid parameters", data={"errors": serializer.errors}, status_code=400)
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         data = serializer.validated_data
         if User.objects.filter(username=data["username"]).exists():
             return api_response(code=4090, message="用户名已存在", data=None, status_code=409)
@@ -1778,7 +1850,7 @@ class AdminSettingsView(APIView):
     def post(self, request):
         serializer = SettingsUpdateSerializer(data=request.data)
         if not serializer.is_valid():
-            return api_response(code=4001, message="invalid parameters", data={"errors": serializer.errors}, status_code=400)
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         return api_response(data=serializer.validated_data)
 
 
@@ -1802,7 +1874,7 @@ class AdminAISettingsView(APIView):
     def post(self, request):
         serializer = AISettingsUpdateSerializer(data=request.data)
         if not serializer.is_valid():
-            return api_response(code=4001, message="invalid parameters", data={"errors": serializer.errors}, status_code=400)
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         data = serializer.validated_data
         new_settings = update_ai_settings(
             enabled=data.get("ai_enabled"),
@@ -1823,7 +1895,7 @@ class AdminAIProviderAddView(APIView):
     def post(self, request):
         serializer = AIProviderCreateSerializer(data=request.data)
         if not serializer.is_valid():
-            return api_response(code=4001, message="invalid parameters", data={"errors": serializer.errors}, status_code=400)
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         data = serializer.validated_data
         new_settings = update_ai_settings(provider_configs=[data])
         return api_response(data={
@@ -1838,7 +1910,7 @@ class AdminAIProviderSwitchView(APIView):
     def post(self, request):
         serializer = AIProviderSwitchSerializer(data=request.data)
         if not serializer.is_valid():
-            return api_response(code=4001, message="invalid parameters", data={"errors": serializer.errors}, status_code=400)
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         provider_name = serializer.validated_data["provider_name"]
         ai_settings = load_ai_settings()
         if provider_name not in ai_settings.providers:
@@ -1857,7 +1929,7 @@ class AdminAIProviderDeleteView(APIView):
     def post(self, request):
         serializer = AIProviderDeleteSerializer(data=request.data)
         if not serializer.is_valid():
-            return api_response(code=4001, message="invalid parameters", data={"errors": serializer.errors}, status_code=400)
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         provider_name = serializer.validated_data["provider_name"]
         ai_settings = load_ai_settings()
         if provider_name == ai_settings.active_provider:
@@ -1879,7 +1951,7 @@ class AdminAIReportSummaryView(APIView):
     def post(self, request):
         serializer = AIReportSummarySerializer(data=request.data)
         if not serializer.is_valid():
-            return api_response(code=4001, message="invalid parameters", data={"errors": serializer.errors}, status_code=400)
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         data = serializer.validated_data
         orders = BookingOrder.objects.filter(check_in_date__gte=data["start_date"], check_out_date__lte=data["end_date"])
         if data.get("hotel_id"):
@@ -1897,7 +1969,7 @@ class AdminAIReviewSummaryView(APIView):
     def post(self, request):
         serializer = AIReviewSummarySerializer(data=request.data)
         if not serializer.is_valid():
-            return api_response(code=4001, message="invalid parameters", data={"errors": serializer.errors}, status_code=400)
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         data = serializer.validated_data
         reviews = Review.objects.filter(created_at__date__gte=data["start_date"], created_at__date__lte=data["end_date"])
         if data.get("hotel_id"):
@@ -1914,7 +1986,7 @@ class AdminAIReplySuggestionView(APIView):
     def post(self, request):
         serializer = AIReplySuggestionSerializer(data=request.data)
         if not serializer.is_valid():
-            return api_response(code=4001, message="invalid parameters", data={"errors": serializer.errors}, status_code=400)
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         review = Review.objects.filter(id=serializer.validated_data["review_id"]).first()
         if not review:
             return api_response(code=4040, message="评价不存在", data=None, status_code=404)
@@ -1953,7 +2025,7 @@ class AdminReportTasksView(APIView):
     def post(self, request):
         serializer = ReportTaskCreateSimpleSerializer(data=request.data)
         if not serializer.is_valid():
-            return api_response(code=4001, message="invalid parameters", data={"errors": serializer.errors}, status_code=400)
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         data = serializer.validated_data
         task = ReportTask.objects.create(
             hotel_id=data.get("hotel_id"),
@@ -2094,3 +2166,4 @@ class AdminSystemResetView(APIView):
             "deleted_counts": deleted_counts,
             "message": "系统已重置为初始状态，管理员账号已保留。",
         })
+

@@ -38,10 +38,10 @@
         </div>
         <div>
           <label class="mb-1 block text-sm font-medium">角色</label>
-          <select v-model="form.role" required class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+          <SelectField v-model="form.role" required class="w-full">
             <option value="hotel_admin">酒店管理员</option>
             <option value="system_admin">系统管理员</option>
-          </select>
+          </SelectField>
         </div>
       </form>
       <template #footer>
@@ -55,7 +55,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { employeeApi } from '@hotelink/api'
-import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination } from '@hotelink/ui'
+import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, SelectField } from '@hotelink/ui'
 
 const columns = [
   { key: 'id', label: 'ID' },

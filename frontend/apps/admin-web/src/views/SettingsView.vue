@@ -58,6 +58,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { settingsApi, adminSystemApi } from '@hotelink/api'
+import { extractApiError } from '@hotelink/utils'
 import { PageHeader, Toast, useToast } from '@hotelink/ui'
 
 const { toastVisible, toastMessage, toastType, showToast, closeToast } = useToast()
@@ -103,7 +104,7 @@ async function handleSave() {
       showToast('设置保存成功', 'success')
       setTimeout(() => { saved.value = false }, 2000)
     } else {
-      showToast(res.message || '保存设置失败', 'error')
+      showToast(extractApiError(res, '保存设置失败'), 'error')
     }
   } catch {
     showToast('保存设置失败，请重试', 'error')

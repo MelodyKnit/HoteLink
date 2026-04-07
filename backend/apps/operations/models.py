@@ -28,12 +28,16 @@ class SystemNotice(models.Model):
     TYPE_ACTIVITY = "activity"
     TYPE_SYSTEM = "system"
     TYPE_REVIEW = "review"
+    TYPE_MEMBER = "member"
+    TYPE_COUPON = "coupon"
     TYPE_CHOICES = [
         (TYPE_ORDER, "订单通知"),
         (TYPE_PAYMENT, "支付通知"),
         (TYPE_ACTIVITY, "活动通知"),
         (TYPE_SYSTEM, "系统通知"),
         (TYPE_REVIEW, "评价通知"),
+        (TYPE_MEMBER, "会员通知"),
+        (TYPE_COUPON, "优惠券通知"),
     ]
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="system_notices")

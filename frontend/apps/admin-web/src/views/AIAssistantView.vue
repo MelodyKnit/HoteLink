@@ -9,10 +9,10 @@
         <form class="space-y-4" @submit.prevent="getReportSummary">
           <div>
             <label class="mb-1 block text-sm font-medium">酒店（可选）</label>
-            <select v-model="reportForm.hotel_id" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+            <SelectField v-model="reportForm.hotel_id" class="w-full">
               <option value="">全部酒店</option>
               <option v-for="h in hotels" :key="h.id" :value="h.id">{{ h.name }}</option>
-            </select>
+            </SelectField>
           </div>
           <div class="grid grid-cols-2 gap-4">
             <div>
@@ -37,10 +37,10 @@
         <form class="space-y-4" @submit.prevent="getReviewSummary">
           <div>
             <label class="mb-1 block text-sm font-medium">酒店（可选）</label>
-            <select v-model="reviewForm.hotel_id" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+            <SelectField v-model="reviewForm.hotel_id" class="w-full">
               <option value="">全部酒店</option>
               <option v-for="h in hotels" :key="h.id" :value="h.id">{{ h.name }}</option>
-            </select>
+            </SelectField>
           </div>
           <div class="grid grid-cols-2 gap-4">
             <div>
@@ -65,7 +65,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { aiApi, hotelApi } from '@hotelink/api'
-import { PageHeader } from '@hotelink/ui'
+import { PageHeader, SelectField } from '@hotelink/ui'
 
 interface HotelOption {
   id: number
