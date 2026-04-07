@@ -15,15 +15,40 @@
         <option value="offline">已下架</option>
         <option value="draft">草稿</option>
       </select>
+      <select v-model="filters.ordering" class="rounded-lg border border-slate-200 px-3 py-2 text-sm" @change="onSortChange">
+        <option value="-id">ID 最新优先</option>
+        <option value="id">ID 最旧优先</option>
+        <option value="name">名称 A→Z</option>
+        <option value="-name">名称 Z→A</option>
+        <option value="star">星级从低到高</option>
+        <option value="-star">星级从高到低</option>
+        <option value="min_price">价格从低到高</option>
+        <option value="-min_price">价格从高到低</option>
+      </select>
+      <select v-model="thumbnailMode" class="rounded-lg border border-slate-200 px-3 py-2 text-sm">
+        <option value="compact">缩略图: 小图(更流畅)</option>
+        <option value="standard">缩略图: 标准</option>
+        <option value="hidden">缩略图: 隐藏(极速)</option>
+      </select>
       <button class="rounded-lg bg-slate-100 px-3 py-2 text-sm hover:bg-slate-200" @click="loadList">搜索</button>
     </div>
 
     <!-- Table -->
     <div class="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
       <DataTable :columns="columns" :rows="list" :loading="loading">
-        <template #col-cover_image="{ value }">
-          <img v-if="value" :src="String(value)" alt="封面" class="h-10 w-14 rounded object-cover" />
-          <span v-else class="text-xs text-slate-400">暂无图片</span>
+        <template #col-cover_image="{ value, row }">
+          <img
+            v-if="value && thumbnailMode !== 'hidden'"
+            :src="String((row as Record<string, unknown>).cover_thumb || value)"
+            alt="封面"
+            loading="lazy"
+            decoding="async"
+            @error="onThumbError($event, String(value))"
+            :width="thumbnailWidth"
+            :height="thumbnailHeight"
+            :class="[thumbnailClass, 'rounded object-cover']"
+          />
+          <span v-else class="text-xs text-slate-400">{{ thumbnailMode === 'hidden' ? '已隐藏' : '暂无图片' }}</span>
         </template>
         <template #col-status="{ value }">
           <StatusBadge :label="HOTEL_STATUS_MAP[value as string] || String(value)" :type="value === 'online' ? 'success' : value === 'offline' ? 'danger' : 'default'" />
@@ -121,7 +146,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { hotelApi, commonApi } from '@hotelink/api'
 import { formatMoney, HOTEL_STATUS_MAP } from '@hotelink/utils'
 import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, Toast, useToast } from '@hotelink/ui'
@@ -141,10 +166,15 @@ const columns = [
 const list = ref<Record<string, unknown>[]>([])
 const loading = ref(false)
 const page = ref(1)
-const pageSize = ref(20)
+const pageSize = ref(10)
 const total = ref(0)
-const filters = reactive({ keyword: '', status: '' })
+const thumbnailMode = ref<'compact' | 'standard' | 'hidden'>('compact')
+const filters = reactive({ keyword: '', status: '', ordering: '-id' })
 const uploading = ref(false)
+
+const thumbnailClass = computed(() => (thumbnailMode.value === 'compact' ? 'h-8 w-12' : 'h-10 w-14'))
+const thumbnailWidth = computed(() => (thumbnailMode.value === 'compact' ? 48 : 56))
+const thumbnailHeight = computed(() => (thumbnailMode.value === 'compact' ? 32 : 40))
 
 const showModal = ref(false)
 const editingId = ref<number | null>(null)
@@ -159,6 +189,17 @@ function resetForm() {
   form.phone = ''; form.description = ''; form.status = 'draft'
   form.cover_image = ''; form.images = []
   editingId.value = null
+}
+
+function onSortChange() {
+  page.value = 1
+  loadList()
+}
+
+function onThumbError(event: Event, fallbackSrc: string) {
+  const el = event.target as HTMLImageElement
+  if (!el || !fallbackSrc || el.src === fallbackSrc) return
+  el.src = fallbackSrc
 }
 
 function openCreate() {
@@ -220,7 +261,7 @@ function removeImage(idx: number) {
 async function loadList() {
   loading.value = true
   try {
-    const params: Record<string, unknown> = { page: page.value, page_size: pageSize.value }
+    const params: Record<string, unknown> = { page: page.value, page_size: pageSize.value, ordering: filters.ordering, thumb_mode: thumbnailMode.value }
     if (filters.keyword) params.keyword = filters.keyword
     if (filters.status) params.status = filters.status
     const res = await hotelApi.list(params)

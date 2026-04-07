@@ -44,6 +44,20 @@ python manage.py check
 
 建议在每次合并前执行一次“文档差异复核”，确认实现、接口、示例、枚举值一致。
 
+## 本地伪数据脚本约定
+
+为避免将伪数据/临时生成逻辑提交到正式代码区，项目约定如下：
+
+- `backend` 内只保留管理命令桥接壳，不存放具体伪数据实现。
+- 真实伪数据脚本统一放在以下任一目录：
+  - `backend/private/local-dev/seed_commands/`（Docker 容器默认可见）
+  - `private/local-dev/seed_commands/`（仓库根目录本地私有）
+  以上目录均被 `.gitignore` 忽略，不参与提交。
+- 目前已桥接的命令：
+  - `python manage.py seed_demo_data`
+  - `python manage.py import_hotels_from_dist_images`
+- 若本地缺少对应脚本，命令会直接报错提示，不会影响生产代码。
+
 ## 已确定技术方向
 
 ### 后端

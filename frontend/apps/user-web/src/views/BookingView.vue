@@ -1,13 +1,13 @@
 <template>
-  <div class="min-h-screen bg-gray-50">
-    <header class="sticky top-0 z-40 flex h-14 items-center border-b border-gray-100 bg-white/95 px-4 backdrop-blur">
+  <div class="booking-page min-h-screen">
+    <header class="site-header sticky top-0 z-40 flex h-14 items-center px-4">
       <button @click="$router.back()" class="mr-3 rounded-lg p-1 text-gray-600 hover:bg-gray-100">← 返回</button>
       <h1 class="text-sm font-semibold text-gray-800">填写订单</h1>
     </header>
 
     <div class="mx-auto max-w-2xl px-4 py-6">
       <!-- Room Summary -->
-      <div class="rounded-2xl bg-white p-5 shadow-sm">
+      <div class="surface-card rounded-2xl p-5">
         <h3 class="font-semibold text-gray-800">{{ hotelName }}</h3>
         <p class="mt-1 text-sm text-gray-500">{{ roomName }}</p>
         <div class="mt-3 flex items-center gap-4 text-sm text-gray-600">
@@ -28,7 +28,7 @@
       </div>
 
       <!-- Dates -->
-      <div class="mt-4 rounded-2xl bg-white p-5 shadow-sm">
+      <div class="surface-card mt-4 rounded-2xl p-5">
         <h4 class="mb-3 font-semibold text-gray-800">入住日期</h4>
         <div class="grid grid-cols-2 gap-3">
           <div>
@@ -43,16 +43,31 @@
       </div>
 
       <!-- Guest Info -->
-      <div class="mt-4 rounded-2xl bg-white p-5 shadow-sm">
+      <div class="surface-card mt-4 rounded-2xl p-5">
         <h4 class="mb-3 font-semibold text-gray-800">入住人信息</h4>
         <div class="space-y-3">
           <div>
             <label class="mb-1 block text-xs text-gray-400">入住人姓名 *</label>
-            <input v-model="form.guest_name" type="text" placeholder="请输入入住人真实姓名" class="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm outline-none focus:border-brand" />
+            <input
+              v-model="form.guest_name"
+              type="text"
+              placeholder="请输入入住人真实姓名"
+              class="w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition"
+              :class="fieldErrors.guest_name ? 'border-red-400 bg-red-50/60 focus:border-red-500' : 'border-gray-200 focus:border-brand'"
+            />
+            <p v-if="fieldErrors.guest_name" class="mt-1 text-xs text-red-500">{{ fieldErrors.guest_name }}</p>
           </div>
           <div>
             <label class="mb-1 block text-xs text-gray-400">手机号码 *</label>
-            <input v-model="form.guest_mobile" type="tel" placeholder="请输入手机号" maxlength="11" class="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm outline-none focus:border-brand" />
+            <input
+              v-model="form.guest_mobile"
+              type="tel"
+              placeholder="请输入手机号"
+              maxlength="11"
+              class="w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition"
+              :class="fieldErrors.guest_mobile ? 'border-red-400 bg-red-50/60 focus:border-red-500' : 'border-gray-200 focus:border-brand'"
+            />
+            <p v-if="fieldErrors.guest_mobile" class="mt-1 text-xs text-red-500">{{ fieldErrors.guest_mobile }}</p>
           </div>
           <div>
             <label class="mb-1 block text-xs text-gray-400">入住人数</label>
@@ -64,13 +79,13 @@
       </div>
 
       <!-- Remark -->
-      <div class="mt-4 rounded-2xl bg-white p-5 shadow-sm">
+      <div class="surface-card mt-4 rounded-2xl p-5">
         <h4 class="mb-3 font-semibold text-gray-800">备注</h4>
         <textarea v-model="form.remark" rows="2" placeholder="如有特殊需求请备注（选填）" class="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm outline-none focus:border-brand" />
       </div>
 
       <!-- Price Breakdown -->
-      <div class="mt-4 rounded-2xl bg-white p-5 shadow-sm">
+      <div class="surface-card mt-4 rounded-2xl p-5">
         <h4 class="mb-3 font-semibold text-gray-800">费用明细</h4>
         <div class="space-y-2 text-sm">
           <div class="flex justify-between text-gray-600">
@@ -87,13 +102,18 @@
       </div>
 
       <!-- Submit -->
-      <div class="sticky bottom-16 mt-6 md:bottom-0">
+      <div class="sticky bottom-16 z-30 mt-6 space-y-3 md:bottom-0">
+        <div v-if="error" class="feedback-error-card flex items-start gap-2 rounded-xl px-3 py-2.5 text-sm text-red-700">
+          <span class="mt-0.5 text-base">⚠</span>
+          <div>
+            <p class="font-semibold">提交失败</p>
+            <p class="text-xs text-red-600">{{ error }}</p>
+          </div>
+        </div>
         <button @click="handleSubmit" :disabled="submitting" class="w-full rounded-2xl bg-brand py-3.5 text-center text-sm font-semibold text-white transition hover:bg-brand-dark disabled:opacity-50">
           {{ submitting ? '提交中...' : '提交订单' }}
         </button>
       </div>
-
-      <p v-if="error" class="mt-3 text-center text-sm text-red-500">{{ error }}</p>
     </div>
   </div>
 </template>
@@ -118,6 +138,7 @@ const checkInDate = ref(today)
 const checkOutDate = ref(formatDate(tomorrow))
 const submitting = ref(false)
 const error = ref('')
+const fieldErrors = ref<{ guest_name?: string; guest_mobile?: string }>({})
 
 const form = ref({
   guest_name: '',
@@ -135,10 +156,31 @@ const nights = computed(() => {
 
 const totalPrice = computed(() => (unitPrice * nights.value).toFixed(2))
 
+function validateForm(): boolean {
+  const nextErrors: { guest_name?: string; guest_mobile?: string } = {}
+  if (!form.value.guest_name.trim()) {
+    nextErrors.guest_name = '请输入入住人姓名'
+  }
+  if (!form.value.guest_mobile.trim()) {
+    nextErrors.guest_mobile = '请输入手机号'
+  } else if (!/^1\d{10}$/.test(form.value.guest_mobile.trim())) {
+    nextErrors.guest_mobile = '手机号格式不正确'
+  }
+  fieldErrors.value = nextErrors
+  if (nextErrors.guest_name) {
+    error.value = nextErrors.guest_name
+    return false
+  }
+  if (nextErrors.guest_mobile) {
+    error.value = nextErrors.guest_mobile
+    return false
+  }
+  return true
+}
+
 // 处理 Submit 交互逻辑。
 async function handleSubmit() {
-  if (!form.value.guest_name.trim()) { error.value = '请输入入住人姓名'; return }
-  if (!form.value.guest_mobile.trim()) { error.value = '请输入手机号'; return }
+  if (!validateForm()) return
   error.value = ''
   submitting.value = true
   try {
@@ -164,3 +206,9 @@ async function handleSubmit() {
   }
 }
 </script>
+
+<style scoped>
+.booking-page {
+  background: radial-gradient(120% 40% at 50% -5%, rgba(20, 184, 166, 0.12), rgba(255, 255, 255, 0));
+}
+</style>

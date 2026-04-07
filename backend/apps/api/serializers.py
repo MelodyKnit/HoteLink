@@ -1,7 +1,9 @@
 """apps/api/serializers.py —— API 请求与响应序列化定义。"""
 
 from django.contrib.auth.models import User
+from django.conf import settings
 from rest_framework import serializers
+from urllib.parse import quote, urlparse
 
 from apps.bookings.models import BookingOrder
 from apps.crm.models import FavoriteHotel, InvoiceRequest, InvoiceTitle, Review, UserCoupon
@@ -10,6 +12,18 @@ from apps.operations.models import SystemNotice
 from apps.payments.models import PaymentRecord
 from apps.reports.models import ReportTask
 from apps.users.models import UserProfile
+
+
+def build_thumb_proxy_url(url: str | None, width: int = 56, height: int = 40) -> str:
+    if not url:
+        return ""
+    raw = str(url)
+    media_path = raw
+    if raw.startswith("http://") or raw.startswith("https://"):
+        media_path = urlparse(raw).path or ""
+    if not media_path.startswith(settings.MEDIA_URL):
+        return raw
+    return f"/api/v1/common/image-thumb?url={quote(media_path, safe='')}&w={width}&h={height}"
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
@@ -37,6 +51,13 @@ class UserProfileSerializer(serializers.ModelSerializer):
 
 class HotelSimpleSerializer(serializers.ModelSerializer):
     """HotelSimple 序列化器：用于接口参数校验或响应数据转换。"""
+    cover_thumb = serializers.SerializerMethodField()
+
+    def get_cover_thumb(self, obj):
+        width = int(self.context.get("thumb_width", 56))
+        height = int(self.context.get("thumb_height", 40))
+        return build_thumb_proxy_url(getattr(obj, "cover_image", ""), width=width, height=height)
+
     class Meta:
         model = Hotel
         fields = [
@@ -47,6 +68,7 @@ class HotelSimpleSerializer(serializers.ModelSerializer):
             "star",
             "phone",
             "cover_image",
+            "cover_thumb",
             "images",
             "rating",
             "min_price",
@@ -58,6 +80,12 @@ class HotelSimpleSerializer(serializers.ModelSerializer):
 class RoomTypeSerializer(serializers.ModelSerializer):
     """RoomType 序列化器：用于接口参数校验或响应数据转换。"""
     hotel_name = serializers.CharField(source="hotel.name", read_only=True)
+    image_thumb = serializers.SerializerMethodField()
+
+    def get_image_thumb(self, obj):
+        width = int(self.context.get("thumb_width", 56))
+        height = int(self.context.get("thumb_height", 40))
+        return build_thumb_proxy_url(getattr(obj, "image", ""), width=width, height=height)
 
     class Meta:
         model = RoomType
@@ -74,6 +102,7 @@ class RoomTypeSerializer(serializers.ModelSerializer):
             "stock",
             "status",
             "image",
+            "image_thumb",
             "description",
         ]
 

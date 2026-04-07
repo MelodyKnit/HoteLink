@@ -27,14 +27,19 @@ from __future__ import annotations
 
 from datetime import timedelta
 from decimal import Decimal
+from io import BytesIO
+from pathlib import Path
+import hashlib
 
 from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model
 from django.core.files.storage import default_storage
+from django.http import HttpResponse
 from django.db.models import Avg, Q, Sum
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 from django.utils.crypto import get_random_string
+from PIL import Image, UnidentifiedImageError
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.views import APIView
@@ -149,6 +154,26 @@ def paginate_queryset(queryset, page: int, page_size: int):
     start = (page - 1) * page_size
     end = start + page_size
     return queryset[start:end], total
+
+
+def parse_thumb_params(request) -> tuple[int, int]:
+    try:
+        width = int(request.query_params.get("w", 56))
+    except (TypeError, ValueError):
+        width = 56
+    try:
+        height = int(request.query_params.get("h", 40))
+    except (TypeError, ValueError):
+        height = 40
+    return min(max(width, 16), 512), min(max(height, 16), 512)
+
+
+def get_thumb_size_by_mode(mode: str | None) -> tuple[int, int]:
+    if mode == "compact":
+        return 48, 32
+    if mode == "standard":
+        return 56, 40
+    return 56, 40
 
 
 def build_tokens_for_user(user: User) -> dict:
@@ -431,6 +456,53 @@ class CommonUploadView(APIView):
         path = default_storage.save(f"uploads/{scene}/{file_obj.name}", file_obj)
         file_url = request.build_absolute_uri(f"/media/{path}")
         return api_response(data={"file_name": file_obj.name, "file_url": file_url, "scene": scene})
+
+
+class CommonImageThumbView(APIView):
+    """图片缩略图接口：将 /media 下图片按指定尺寸缩放并缓存后返回。"""
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        url = request.query_params.get("url", "")
+        width, height = parse_thumb_params(request)
+        if not url:
+            return api_response(code=4001, message="url is required", data=None, status_code=400)
+        if not str(url).startswith(settings.MEDIA_URL):
+            return api_response(code=4001, message="only media url is supported", data=None, status_code=400)
+
+        rel_path = str(url)[len(settings.MEDIA_URL):].lstrip("/")
+        media_root = Path(settings.MEDIA_ROOT).resolve()
+        source_path = (media_root / rel_path).resolve()
+        if not str(source_path).startswith(str(media_root)):
+            return api_response(code=4001, message="invalid media path", data=None, status_code=400)
+        if not source_path.exists() or not source_path.is_file():
+            return api_response(code=4040, message="image not found", data=None, status_code=404)
+
+        cache_root = media_root / ".thumb_cache"
+        cache_root.mkdir(parents=True, exist_ok=True)
+        cache_key = hashlib.md5(f"{source_path}:{source_path.stat().st_mtime_ns}:{width}x{height}".encode("utf-8")).hexdigest()
+        cache_path = cache_root / f"{cache_key}.jpg"
+
+        if cache_path.exists():
+            content = cache_path.read_bytes()
+            resp = HttpResponse(content, content_type="image/jpeg")
+            resp["Cache-Control"] = "public, max-age=604800, immutable"
+            return resp
+
+        try:
+            with Image.open(source_path) as img:
+                img = img.convert("RGB")
+                img.thumbnail((width, height), Image.Resampling.LANCZOS)
+                buf = BytesIO()
+                img.save(buf, format="JPEG", quality=72, optimize=True)
+                content = buf.getvalue()
+        except (UnidentifiedImageError, OSError):
+            return api_response(code=4001, message="invalid image", data=None, status_code=400)
+
+        cache_path.write_bytes(content)
+        resp = HttpResponse(content, content_type="image/jpeg")
+        resp["Cache-Control"] = "public, max-age=604800, immutable"
+        return resp
 
 
 class PublicHomeView(APIView):
@@ -1107,17 +1179,34 @@ class AdminHotelsView(APIView):
     """酒店管理接口：列表查询、创建、更新与删除。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
 
+    _HOTEL_ORDERING_WHITELIST = {"id", "-id", "name", "-name", "city", "-city", "star", "-star", "min_price", "-min_price"}
+
     def get(self, request):
         queryset = Hotel.objects.all()
         keyword = request.query_params.get("keyword")
         status = request.query_params.get("status")
+        thumb_mode = request.query_params.get("thumb_mode")
+        thumb_width, thumb_height = get_thumb_size_by_mode(thumb_mode)
+        ordering = request.query_params.get("ordering", "-id")
         if keyword:
             queryset = queryset.filter(Q(name__icontains=keyword) | Q(address__icontains=keyword))
         if status:
             queryset = queryset.filter(status=status)
+        if ordering not in self._HOTEL_ORDERING_WHITELIST:
+            ordering = "-id"
+        queryset = queryset.order_by(ordering)
         page, page_size = get_page_params(request)
         page_queryset, total = paginate_queryset(queryset, page, page_size)
-        return paginated_response(items=HotelSimpleSerializer(page_queryset, many=True).data, page=page, page_size=page_size, total=total)
+        return paginated_response(
+            items=HotelSimpleSerializer(
+                page_queryset,
+                many=True,
+                context={"thumb_width": thumb_width, "thumb_height": thumb_height},
+            ).data,
+            page=page,
+            page_size=page_size,
+            total=total,
+        )
 
     def post(self, request):
         if request.path.endswith("/create"):
@@ -1149,14 +1238,31 @@ class AdminRoomTypesView(APIView):
     """房型管理接口：列表查询、创建、更新与删除。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
 
+    _ROOM_ORDERING_WHITELIST = {"id", "-id", "name", "-name", "base_price", "-base_price", "bed_type", "-bed_type"}
+
     def get(self, request):
         queryset = RoomType.objects.select_related("hotel")
         hotel_id = request.query_params.get("hotel_id")
+        thumb_mode = request.query_params.get("thumb_mode")
+        thumb_width, thumb_height = get_thumb_size_by_mode(thumb_mode)
+        ordering = request.query_params.get("ordering", "-id")
         if hotel_id:
             queryset = queryset.filter(hotel_id=hotel_id)
+        if ordering not in self._ROOM_ORDERING_WHITELIST:
+            ordering = "-id"
+        queryset = queryset.order_by(ordering)
         page, page_size = get_page_params(request)
         page_queryset, total = paginate_queryset(queryset, page, page_size)
-        return paginated_response(items=RoomTypeSerializer(page_queryset, many=True).data, page=page, page_size=page_size, total=total)
+        return paginated_response(
+            items=RoomTypeSerializer(
+                page_queryset,
+                many=True,
+                context={"thumb_width": thumb_width, "thumb_height": thumb_height},
+            ).data,
+            page=page,
+            page_size=page_size,
+            total=total,
+        )
 
     def post(self, request):
         if request.path.endswith("/create"):
@@ -1192,6 +1298,29 @@ class AdminInventoryView(APIView):
         room_type_id = request.query_params.get("room_type_id")
         start_date = parse_date(request.query_params.get("start_date", ""))
         end_date = parse_date(request.query_params.get("end_date", ""))
+        if room_type_id and start_date and end_date and start_date <= end_date:
+            existing = RoomInventory.objects.filter(
+                room_type_id=room_type_id,
+                date__gte=start_date,
+                date__lte=end_date,
+            ).exists()
+            if not existing:
+                room_type = RoomType.objects.filter(pk=room_type_id).first()
+                if room_type:
+                    to_create = []
+                    current = start_date
+                    while current <= end_date:
+                        to_create.append(
+                            RoomInventory(
+                                room_type_id=room_type.id,
+                                date=current,
+                                price=room_type.base_price,
+                                stock=room_type.stock,
+                                status=RoomInventory.STATUS_AVAILABLE,
+                            )
+                        )
+                        current += timedelta(days=1)
+                    RoomInventory.objects.bulk_create(to_create, ignore_conflicts=True)
         queryset = RoomInventory.objects.all()
         if room_type_id:
             queryset = queryset.filter(room_type_id=room_type_id)

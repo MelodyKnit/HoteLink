@@ -1,4 +1,4 @@
-"""seed_demo_data 命令：桥接本地私有伪数据脚本。"""
+from __future__ import annotations
 
 from importlib.util import module_from_spec, spec_from_file_location
 import os
@@ -13,9 +13,9 @@ def candidate_paths() -> list[Path]:
     env_dir = os.getenv("HOTELINK_LOCAL_SEED_DIR", "").strip()
     candidates = []
     if env_dir:
-        candidates.append(Path(env_dir) / "seed_demo_data.py")
-    candidates.append(Path(settings.BASE_DIR) / "private" / "local-dev" / "seed_commands" / "seed_demo_data.py")
-    candidates.append(Path(settings.BASE_DIR).parent / "private" / "local-dev" / "seed_commands" / "seed_demo_data.py")
+        candidates.append(Path(env_dir) / "import_hotels_from_dist_images.py")
+    candidates.append(Path(settings.BASE_DIR) / "private" / "local-dev" / "seed_commands" / "import_hotels_from_dist_images.py")
+    candidates.append(Path(settings.BASE_DIR).parent / "private" / "local-dev" / "seed_commands" / "import_hotels_from_dist_images.py")
     return candidates
 
 
@@ -27,7 +27,7 @@ def resolve_local_impl_path() -> Path | None:
 
 
 def load_local_module(path: Path):
-    spec = spec_from_file_location("local_seed_demo_data", path)
+    spec = spec_from_file_location("local_import_hotels_from_dist_images", path)
     if not spec or not spec.loader:
         raise CommandError(f"无法加载本地脚本: {path}")
     module = module_from_spec(spec)
@@ -37,13 +37,22 @@ def load_local_module(path: Path):
 
 
 class Command(BaseCommand):
-    help = "初始化 HoteLink 开发演示数据（逻辑位于 private/local-dev/seed_commands）"
+    help = "导入酒店伪数据（逻辑位于 private/local-dev/seed_commands）"
+
+    def add_arguments(self, parser):
+        local_path = resolve_local_impl_path()
+        if not local_path:
+            return
+        module = load_local_module(local_path)
+        add_arguments = getattr(module, "add_arguments", None)
+        if callable(add_arguments):
+            add_arguments(parser)
 
     def handle(self, *args, **options):
         local_path = resolve_local_impl_path()
         if not local_path:
             raise CommandError(
-                "未找到本地伪数据脚本，请在 backend/private/local-dev/seed_commands/seed_demo_data.py 或 private/local-dev/seed_commands/seed_demo_data.py 中实现 run(command, *args, **options)"
+                "未找到本地伪数据脚本，请在 backend/private/local-dev/seed_commands/import_hotels_from_dist_images.py 或 private/local-dev/seed_commands/import_hotels_from_dist_images.py 中实现 run(command, *args, **options)"
             )
         module = load_local_module(local_path)
         run = getattr(module, "run", None)

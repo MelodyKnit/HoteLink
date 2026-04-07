@@ -61,6 +61,8 @@ backend/.ai_providers.json
 **/.ai_providers.json
 private/*
 !private/.gitkeep
+backend/private/*
+!backend/private/.gitkeep
 *.pem
 *.key
 *.crt

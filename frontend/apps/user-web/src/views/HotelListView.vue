@@ -12,7 +12,7 @@
           <input v-model="filters.check_in_date" type="date" class="rounded-lg border border-gray-200 px-3 py-2.5 text-sm outline-none focus:border-brand" />
           <input v-model="filters.check_out_date" type="date" class="rounded-lg border border-gray-200 px-3 py-2.5 text-sm outline-none focus:border-brand" />
         </div>
-        <button @click="fetchList" class="rounded-xl bg-brand px-6 py-2.5 text-sm font-medium text-white transition hover:bg-brand-dark">搜索</button>
+        <button type="button" @click="onSearch" class="rounded-xl bg-brand px-6 py-2.5 text-sm font-medium text-white transition hover:bg-brand-dark">搜索</button>
       </div>
 
       <!-- Filters row -->
@@ -67,7 +67,7 @@
           </div>
           <div class="mt-2 flex items-end justify-between">
             <div class="flex items-center gap-2">
-              <span class="rounded bg-brand/10 px-1.5 py-0.5 text-xs font-semibold text-brand">{{ hotel.rating?.toFixed(1) || '暂无' }}</span>
+              <span class="rounded bg-brand/10 px-1.5 py-0.5 text-xs font-semibold text-brand">{{ formatRating(hotel.rating) }}</span>
               <span class="text-xs text-gray-400">{{ hotel.review_count || 0 }}条评价</span>
             </div>
             <div class="text-right">
@@ -81,19 +81,20 @@
 
     <!-- Pagination -->
     <div v-if="total > pageSize" class="mt-6 flex justify-center gap-2">
-      <button :disabled="page <= 1" @click="page--; fetchList()" class="rounded-lg border px-3 py-1.5 text-sm disabled:opacity-40">上一页</button>
+      <button :disabled="page <= 1" @click="changePage(page - 1)" class="rounded-lg border px-3 py-1.5 text-sm disabled:opacity-40">上一页</button>
       <span class="flex items-center px-3 text-sm text-gray-500">{{ page }} / {{ Math.ceil(total / pageSize) }}</span>
-      <button :disabled="page >= Math.ceil(total / pageSize)" @click="page++; fetchList()" class="rounded-lg border px-3 py-1.5 text-sm disabled:opacity-40">下一页</button>
+      <button :disabled="page >= Math.ceil(total / pageSize)" @click="changePage(page + 1)" class="rounded-lg border px-3 py-1.5 text-sm disabled:opacity-40">下一页</button>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { ref, reactive, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { publicApi } from '@hotelink/api'
 
 const route = useRoute()
+const router = useRouter()
 const loading = ref(true)
 const hotels = ref<any[]>([])
 const error = ref('')
@@ -105,15 +106,28 @@ const filters = reactive({
   keyword: (route.query.keyword as string) || '',
   check_in_date: (route.query.check_in_date as string) || '',
   check_out_date: (route.query.check_out_date as string) || '',
-  star: '' as string | number,
-  sort: 'default',
-  min_price: undefined as number | undefined,
-  max_price: undefined as number | undefined,
+  star: (route.query.star as string) || '',
+  sort: (route.query.sort as string) || 'default',
+  min_price: route.query.min_price ? Number(route.query.min_price) : undefined as number | undefined,
+  max_price: route.query.max_price ? Number(route.query.max_price) : undefined as number | undefined,
 })
 
 // 加载 fetchList 相关数据。
+function formatRating(value: unknown): string {
+  const n = Number(value)
+  return Number.isFinite(n) ? n.toFixed(1) : '暂无'
+}
+
+function mapHotel(item: any) {
+  return {
+    ...item,
+    image_url: item?.image_url || item?.cover_image || '',
+  }
+}
+
 async function fetchList() {
   loading.value = true
+  error.value = ''
   try {
     const params: Record<string, unknown> = { page: page.value, page_size: pageSize }
     if (filters.keyword) params.keyword = filters.keyword
@@ -125,8 +139,12 @@ async function fetchList() {
     if (filters.max_price) params.max_price = filters.max_price
     const res = await publicApi.hotels(params)
     if (res.code === 0 && res.data) {
-      hotels.value = (res.data as any).items || []
+      hotels.value = ((res.data as any).items || []).map(mapHotel)
       total.value = (res.data as any).total || 0
+    } else {
+      hotels.value = []
+      total.value = 0
+      error.value = res.message || '酒店列表加载失败'
     }
   } catch {
     hotels.value = []
@@ -137,5 +155,47 @@ async function fetchList() {
   }
 }
 
-onMounted(fetchList)
+function syncFiltersFromRoute() {
+  filters.keyword = (route.query.keyword as string) || ''
+  filters.check_in_date = (route.query.check_in_date as string) || ''
+  filters.check_out_date = (route.query.check_out_date as string) || ''
+  filters.star = (route.query.star as string) || ''
+  filters.sort = (route.query.sort as string) || 'default'
+  filters.min_price = route.query.min_price ? Number(route.query.min_price) : undefined
+  filters.max_price = route.query.max_price ? Number(route.query.max_price) : undefined
+}
+
+function onSearch() {
+  page.value = 1
+  router.push({
+    path: '/hotels',
+    query: {
+      ...(filters.keyword ? { keyword: filters.keyword } : {}),
+      ...(filters.check_in_date ? { check_in_date: filters.check_in_date } : {}),
+      ...(filters.check_out_date ? { check_out_date: filters.check_out_date } : {}),
+      ...(filters.star ? { star: String(filters.star) } : {}),
+      ...(filters.sort !== 'default' ? { sort: filters.sort } : {}),
+      ...(filters.min_price ? { min_price: String(filters.min_price) } : {}),
+      ...(filters.max_price ? { max_price: String(filters.max_price) } : {}),
+    },
+  })
+}
+
+function changePage(nextPage: number) {
+  page.value = nextPage
+  fetchList()
+}
+
+watch(
+  () => route.query,
+  () => {
+    syncFiltersFromRoute()
+    fetchList()
+  }
+)
+
+onMounted(() => {
+  syncFiltersFromRoute()
+  fetchList()
+})
 </script>

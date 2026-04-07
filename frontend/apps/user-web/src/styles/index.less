@@ -1,12 +1,64 @@
 body {
   margin: 0;
   font-family: var(--font-family-base);
+  color: #0f172a;
+  background:
+    radial-gradient(120% 60% at 50% -15%, rgba(20, 184, 166, 0.14), rgba(255, 255, 255, 0) 60%),
+    linear-gradient(180deg, #f8fafc 0%, #f3f4f6 100%);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
 #app {
   min-height: 100vh;
+  background: transparent;
+}
+
+.app-shell {
+  background: transparent;
+}
+
+.site-header {
+  border-bottom: 1px solid rgba(226, 232, 240, 0.9);
+  background: rgba(255, 255, 255, 0.86);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
+}
+
+.surface-card {
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(226, 232, 240, 0.85);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+}
+
+.mobile-tabbar {
+  border-top: 1px solid rgba(226, 232, 240, 0.85);
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.06);
+}
+
+.mobile-tab-item {
+  position: relative;
+  font-weight: 500;
+}
+
+.mobile-tab-item.is-active::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 28px;
+  height: 3px;
+  transform: translateX(-50%);
+  border-radius: 99px;
+  background: var(--color-brand);
+}
+
+.feedback-error-card {
+  border: 1px solid #fecaca;
+  background: linear-gradient(180deg, #fff1f2 0%, #ffe4e6 100%);
+  box-shadow: 0 10px 24px rgba(239, 68, 68, 0.15);
 }
 
 /* Mobile-first safe area */

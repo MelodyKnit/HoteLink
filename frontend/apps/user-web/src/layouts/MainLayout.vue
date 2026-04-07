@@ -1,17 +1,17 @@
 <template>
-  <div class="flex min-h-screen flex-col bg-gray-50">
+  <div class="app-shell flex min-h-screen flex-col">
     <!-- Top navigation bar -->
-    <header class="sticky top-0 z-40 border-b border-gray-100 bg-white/95 backdrop-blur">
+    <header class="site-header sticky top-0 z-40">
       <div class="mx-auto flex h-14 max-w-5xl items-center justify-between px-4">
         <router-link to="/" class="flex items-center gap-2">
-          <span class="text-xl font-bold text-brand">HoteLink</span>
+          <span class="rounded-lg bg-brand/10 px-2 py-0.5 text-xl font-bold tracking-wide text-brand">HoteLink</span>
         </router-link>
         <!-- PC nav links -->
         <nav class="hidden items-center gap-6 md:flex">
-          <router-link to="/" class="text-sm font-medium text-gray-600 transition hover:text-brand">首页</router-link>
-          <router-link to="/hotels" class="text-sm font-medium text-gray-600 transition hover:text-brand">酒店</router-link>
-          <router-link to="/about" class="text-sm font-medium text-gray-600 transition hover:text-brand">关于</router-link>
-          <router-link to="/help" class="text-sm font-medium text-gray-600 transition hover:text-brand">帮助</router-link>
+          <router-link to="/" class="text-sm font-medium transition" :class="isNavActive('/') ? 'text-brand' : 'text-gray-600 hover:text-brand'">首页</router-link>
+          <router-link to="/hotels" class="text-sm font-medium transition" :class="isNavActive('/hotels') ? 'text-brand' : 'text-gray-600 hover:text-brand'">酒店</router-link>
+          <router-link to="/about" class="text-sm font-medium transition" :class="isNavActive('/about') ? 'text-brand' : 'text-gray-600 hover:text-brand'">关于</router-link>
+          <router-link to="/help" class="text-sm font-medium transition" :class="isNavActive('/help') ? 'text-brand' : 'text-gray-600 hover:text-brand'">帮助</router-link>
         </nav>
         <div class="flex items-center gap-3">
           <template v-if="auth.isLoggedIn">
@@ -32,11 +32,11 @@
     </main>
 
     <!-- Bottom tab bar (mobile only) -->
-    <nav class="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white md:hidden">
+    <nav class="mobile-tabbar fixed inset-x-0 bottom-0 z-40 md:hidden">
       <div class="flex h-16 items-stretch">
         <router-link v-for="tab in tabs" :key="tab.path" :to="tab.path"
-          class="flex flex-1 flex-col items-center justify-center gap-0.5 text-xs transition"
-          :class="isTabActive(tab.path) ? 'text-brand' : 'text-gray-400'"
+          class="mobile-tab-item flex flex-1 flex-col items-center justify-center gap-0.5 text-xs transition"
+          :class="isTabActive(tab.path) ? 'is-active text-brand' : 'text-gray-500'"
         >
           <span class="text-lg">{{ tab.icon }}</span>
           <span>{{ tab.label }}</span>
@@ -84,6 +84,11 @@ const tabs = [
 
 // 判断TabActive条件是否成立。
 function isTabActive(path: string): boolean {
+  if (path === '/') return route.path === '/'
+  return route.path.startsWith(path)
+}
+
+function isNavActive(path: string): boolean {
   if (path === '/') return route.path === '/'
   return route.path.startsWith(path)
 }

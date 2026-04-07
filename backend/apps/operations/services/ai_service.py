@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 from collections.abc import Iterator
 from typing import Any
 
@@ -22,9 +24,13 @@ class AIChatService:
 
     BOOKING_INTENT_KEYWORDS = (
         "订酒店",
+        "想订",
+        "选酒店",
+        "找酒店",
         "预订",
         "订房",
         "订个房",
+        "订",
         "住酒店",
         "入住",
         "房型",
@@ -32,7 +38,8 @@ class AIChatService:
         "开房",
         "住哪",
     )
-    BOOKING_RESET_KEYWORDS = ("重新订", "重选", "换个城市", "重新开始", "重新选", "换一家")
+    BOOKING_RESET_KEYWORDS = ("重新订", "重选", "换个城市", "重新开始", "重新选", "重来")
+    BOOKING_SWITCH_HOTEL_KEYWORDS = ("换一家", "换个酒店", "换酒店", "不要这个", "别家", "换别的酒店")
 
     def __init__(self, provider_name: str | None = None) -> None:
         self.settings = load_ai_settings()
@@ -66,6 +73,7 @@ class AIChatService:
         booking_assistant = self._build_booking_assistant_response(
             user=user,
             question=question,
+            requested_scene=scene,
             hotel_id=hotel_id,
             booking_context=booking_context,
         )
@@ -321,23 +329,46 @@ class AIChatService:
         *,
         user: Any,
         question: str,
+        requested_scene: str,
         hotel_id: int | None,
         booking_context: dict[str, Any] | None,
     ) -> dict[str, Any] | None:
         context = self._normalize_booking_context(booking_context)
+        cities = self._list_available_cities()
+        llm_slots = self._extract_booking_slots_with_llm(question=question, cities=cities)
+
         if self._should_reset_booking_context(question):
             context = {"intent": "hotel_booking", "selected_city": None, "selected_hotel_id": None}
+        elif llm_slots.get("reset"):
+            context = {"intent": "hotel_booking", "selected_city": None, "selected_hotel_id": None}
+        elif self._should_clear_selected_hotel(question):
+            context["selected_hotel_id"] = None
+        elif llm_slots.get("switch_hotel"):
+            context["selected_hotel_id"] = None
 
-        if not self._should_enter_booking_flow(question, hotel_id=hotel_id, booking_context=context):
+        if not self._should_enter_booking_flow(
+            question,
+            hotel_id=hotel_id,
+            booking_context=context,
+            force_booking_flow=requested_scene == "booking_assistant",
+        ):
             return None
 
-        cities = self._list_available_cities()
-        selected_city = context.get("selected_city") or self._extract_city_from_question(question, cities)
+        selected_city_from_question = self._extract_city_from_question(question, cities)
+        if not selected_city_from_question and llm_slots.get("selected_city"):
+            selected_city_from_question = self._extract_city_from_question(str(llm_slots["selected_city"]), cities)
+        selected_city = context.get("selected_city")
+        if selected_city_from_question:
+            selected_city = selected_city_from_question
+            context["selected_city"] = selected_city_from_question
+            if context.get("selected_hotel_id"):
+                context["selected_hotel_id"] = None
         matched_hotel = self._resolve_hotel_from_booking_context(
             question=question,
             hotel_id=hotel_id,
             selected_city=selected_city,
             booking_context=context,
+            hotel_keyword=str(llm_slots.get("hotel_keyword") or ""),
         )
 
         if isinstance(matched_hotel, list):
@@ -422,7 +453,10 @@ class AIChatService:
         *,
         hotel_id: int | None,
         booking_context: dict[str, Any],
+        force_booking_flow: bool = False,
     ) -> bool:
+        if force_booking_flow:
+            return True
         if hotel_id or booking_context.get("selected_hotel_id") or booking_context.get("selected_city"):
             return True
         if booking_context.get("intent") == "hotel_booking":
@@ -433,6 +467,9 @@ class AIChatService:
 
     def _should_reset_booking_context(self, question: str) -> bool:
         return any(keyword in question for keyword in self.BOOKING_RESET_KEYWORDS)
+
+    def _should_clear_selected_hotel(self, question: str) -> bool:
+        return any(keyword in question for keyword in self.BOOKING_SWITCH_HOTEL_KEYWORDS)
 
     def _normalize_booking_context(self, booking_context: dict[str, Any] | None) -> dict[str, Any]:
         if not isinstance(booking_context, dict):
@@ -465,20 +502,27 @@ class AIChatService:
         hotel_id: int | None,
         selected_city: str | None,
         booking_context: dict[str, Any],
+        hotel_keyword: str = "",
     ) -> Hotel | list[Hotel] | None:
-        target_hotel_id = hotel_id or booking_context.get("selected_hotel_id")
-        if target_hotel_id:
-            return Hotel.objects.filter(id=target_hotel_id, status=Hotel.STATUS_ONLINE).first()
-
         queryset = Hotel.objects.filter(status=Hotel.STATUS_ONLINE)
         if selected_city:
             queryset = queryset.filter(city=selected_city)
         candidates = list(queryset.order_by("-is_recommended", "-rating", "min_price", "id")[:20])
-        matched = [hotel for hotel in candidates if hotel.name and hotel.name in question]
+        matched = [
+            hotel
+            for hotel in candidates
+            if self._hotel_matches_question(hotel=hotel, question=question, hotel_keyword=hotel_keyword)
+        ]
         if len(matched) == 1:
             return matched[0]
         if len(matched) > 1:
             return matched
+
+        target_hotel_id = hotel_id or booking_context.get("selected_hotel_id")
+        if target_hotel_id:
+            target_hotel = Hotel.objects.filter(id=target_hotel_id, status=Hotel.STATUS_ONLINE).first()
+            if target_hotel and (not selected_city or target_hotel.city == selected_city):
+                return target_hotel
         return None
 
     def _question_mentions_known_hotel(self, question: str) -> bool:
@@ -486,6 +530,95 @@ class AIChatService:
             return False
         hotels = Hotel.objects.filter(status=Hotel.STATUS_ONLINE).values_list("name", flat=True)[:50]
         return any(name and name in question for name in hotels)
+
+    def _hotel_matches_question(self, *, hotel: Hotel, question: str, hotel_keyword: str = "") -> bool:
+        hotel_name = (hotel.name or "").strip()
+        if not hotel_name:
+            return False
+
+        if hotel_name in question:
+            return True
+
+        normalized_question = self._normalize_match_text(question)
+        normalized_hotel = self._normalize_match_text(hotel_name)
+        normalized_keyword = self._normalize_match_text(hotel_keyword)
+        if normalized_hotel and normalized_hotel in normalized_question:
+            return True
+
+        simplified_hotel = self._strip_hotel_suffix(normalized_hotel)
+        if simplified_hotel and simplified_hotel in normalized_question:
+            return True
+
+        if normalized_keyword:
+            if normalized_keyword in normalized_hotel:
+                return True
+            if normalized_keyword in self._strip_hotel_suffix(normalized_hotel):
+                return True
+
+        question_tokens = self._extract_match_tokens(question)
+        hotel_tokens = self._extract_match_tokens(hotel_name)
+        overlap = question_tokens.intersection(hotel_tokens)
+        if len(overlap) >= 2:
+            return True
+
+        return False
+
+    def _normalize_match_text(self, value: str) -> str:
+        lowered = value.lower()
+        lowered = re.sub(r"\s+", "", lowered)
+        lowered = re.sub(r"[^\w\u4e00-\u9fff]", "", lowered)
+        return lowered
+
+    def _strip_hotel_suffix(self, value: str) -> str:
+        return re.sub(r"(酒店|宾馆|旅馆|饭店|店)$", "", value)
+
+    def _extract_match_tokens(self, value: str) -> set[str]:
+        lowered = value.lower()
+        tokens = set(re.findall(r"[a-z0-9]{3,}|[\u4e00-\u9fff]{2,}", lowered))
+        stop_words = {"hotel", "hotellink", "酒店"}
+        return {token for token in tokens if token not in stop_words}
+
+    def _extract_booking_slots_with_llm(self, *, question: str, cities: list[str]) -> dict[str, Any]:
+        if not self.is_available():
+            return {}
+
+        system_prompt = (
+            "你是酒店预订意图解析器。请从用户输入中提取订房结构化字段，并且只输出 JSON。"
+            "字段: selected_city(字符串或null), hotel_keyword(字符串或null), reset(布尔), switch_hotel(布尔)。"
+            "reset 用于表达‘重新开始/重选城市’，switch_hotel 用于表达‘换一家/不要这个酒店’。"
+        )
+        user_prompt = (
+            f"可选城市: {', '.join(cities)}\n"
+            f"用户输入: {question}\n"
+            "只返回 JSON，不要解释。"
+        )
+        try:
+            result = self.create_chat_completion(
+                [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0,
+            )
+            content = (result.get("content") or "").strip()
+            if not content:
+                return {}
+
+            if "```" in content:
+                content = re.sub(r"^```(?:json)?\s*", "", content)
+                content = re.sub(r"\s*```$", "", content)
+            payload = json.loads(content)
+            if not isinstance(payload, dict):
+                return {}
+
+            return {
+                "selected_city": payload.get("selected_city") or None,
+                "hotel_keyword": payload.get("hotel_keyword") or None,
+                "reset": bool(payload.get("reset", False)),
+                "switch_hotel": bool(payload.get("switch_hotel", False)),
+            }
+        except Exception:
+            return {}
 
     def _build_city_option(self, city: str) -> dict[str, Any]:
         return {

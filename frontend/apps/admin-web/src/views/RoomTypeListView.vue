@@ -11,14 +11,39 @@
         <option value="">全部酒店</option>
         <option v-for="h in hotels" :key="h.id" :value="h.id">{{ h.name }}</option>
       </select>
+      <select v-model="filters.ordering" class="rounded-lg border border-slate-200 px-3 py-2 text-sm" @change="onSortChange">
+        <option value="-id">ID 最新优先</option>
+        <option value="id">ID 最旧优先</option>
+        <option value="name">名称 A→Z</option>
+        <option value="-name">名称 Z→A</option>
+        <option value="base_price">价格从低到高</option>
+        <option value="-base_price">价格从高到低</option>
+        <option value="bed_type">床型排序</option>
+        <option value="-bed_type">床型逆序</option>
+      </select>
+      <select v-model="thumbnailMode" class="rounded-lg border border-slate-200 px-3 py-2 text-sm">
+        <option value="compact">缩略图: 小图(更流畅)</option>
+        <option value="standard">缩略图: 标准</option>
+        <option value="hidden">缩略图: 隐藏(极速)</option>
+      </select>
       <button class="rounded-lg bg-slate-100 px-3 py-2 text-sm hover:bg-slate-200" @click="loadList">刷新</button>
     </div>
 
     <div class="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
       <DataTable :columns="columns" :rows="list" :loading="loading">
-        <template #col-image="{ value }">
-          <img v-if="value" :src="String(value)" alt="房型图" class="h-10 w-14 rounded object-cover" />
-          <span v-else class="text-xs text-slate-400">暂无</span>
+        <template #col-image="{ value, row }">
+          <img
+            v-if="value && thumbnailMode !== 'hidden'"
+            :src="String((row as Record<string, unknown>).image_thumb || value)"
+            alt="房型图"
+            loading="lazy"
+            decoding="async"
+            @error="onThumbError($event, String(value))"
+            :width="thumbnailWidth"
+            :height="thumbnailHeight"
+            :class="[thumbnailClass, 'rounded object-cover']"
+          />
+          <span v-else class="text-xs text-slate-400">{{ thumbnailMode === 'hidden' ? '已隐藏' : '暂无' }}</span>
         </template>
         <template #col-bed_type="{ value }">{{ BED_TYPE_MAP[value as string] || value }}</template>
         <template #col-base_price="{ value }">¥{{ formatMoney(value as number) }}</template>
@@ -106,7 +131,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { roomTypeApi, hotelApi, commonApi } from '@hotelink/api'
 import { formatMoney, BED_TYPE_MAP } from '@hotelink/utils'
 import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, Toast, useToast } from '@hotelink/ui'
@@ -129,10 +154,15 @@ const list = ref<Record<string, unknown>[]>([])
 const hotels = ref<{ id: number; name: string }[]>([])
 const loading = ref(false)
 const page = ref(1)
-const pageSize = ref(20)
+const pageSize = ref(10)
 const total = ref(0)
-const filters = reactive({ hotel_id: '' })
+const thumbnailMode = ref<'compact' | 'standard' | 'hidden'>('compact')
+const filters = reactive({ hotel_id: '', ordering: '-id' })
 const uploading = ref(false)
+
+const thumbnailClass = computed(() => (thumbnailMode.value === 'compact' ? 'h-8 w-12' : 'h-10 w-14'))
+const thumbnailWidth = computed(() => (thumbnailMode.value === 'compact' ? 48 : 56))
+const thumbnailHeight = computed(() => (thumbnailMode.value === 'compact' ? 32 : 40))
 
 const showModal = ref(false)
 const editingId = ref<number | null>(null)
@@ -147,6 +177,17 @@ function resetForm() {
   form.area = 30; form.base_price = 399; form.breakfast_count = 0
   form.max_guest_count = 2; form.status = 'online'; form.image = ''
   editingId.value = null
+}
+
+function onSortChange() {
+  page.value = 1
+  loadList()
+}
+
+function onThumbError(event: Event, fallbackSrc: string) {
+  const el = event.target as HTMLImageElement
+  if (!el || !fallbackSrc || el.src === fallbackSrc) return
+  el.src = fallbackSrc
 }
 
 function openCreate() { resetForm(); showModal.value = true }
@@ -200,7 +241,7 @@ async function loadHotels() {
 async function loadList() {
   loading.value = true
   try {
-    const params: Record<string, unknown> = { page: page.value, page_size: pageSize.value }
+    const params: Record<string, unknown> = { page: page.value, page_size: pageSize.value, ordering: filters.ordering, thumb_mode: thumbnailMode.value }
     if (filters.hotel_id) params.hotel_id = filters.hotel_id
     const res = await roomTypeApi.list(params)
     if (res.code === 0 && res.data) {

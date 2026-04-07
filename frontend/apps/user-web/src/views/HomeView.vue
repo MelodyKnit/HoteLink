@@ -24,7 +24,7 @@
               <input v-model="checkOut" type="date" :min="checkIn || today" class="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm text-gray-800 outline-none focus:border-brand" />
             </div>
           </div>
-          <button @click="handleSearch" class="mt-4 w-full rounded-xl bg-brand px-8 py-3 text-sm font-semibold text-white transition hover:bg-brand-dark md:mt-0 md:w-auto">搜索</button>
+          <button type="button" @click="handleSearch" class="mt-4 w-full rounded-xl bg-brand px-8 py-3 text-sm font-semibold text-white transition hover:bg-brand-dark md:mt-0 md:w-auto">搜索</button>
         </div>
       </div>
     </section>
@@ -101,7 +101,7 @@
             </div>
             <p class="mt-1 text-xs text-gray-400 line-clamp-1">📍 {{ hotel.city }} · {{ hotel.address }}</p>
             <div class="mt-3 flex items-center gap-2">
-              <span class="rounded bg-brand/10 px-1.5 py-0.5 text-xs font-semibold text-brand">{{ hotel.rating?.toFixed(1) || '暂无' }}</span>
+              <span class="rounded bg-brand/10 px-1.5 py-0.5 text-xs font-semibold text-brand">{{ formatRating(hotel.rating) }}</span>
               <span class="text-xs text-gray-400">{{ hotel.review_count || 0 }}条评价</span>
             </div>
             <div v-if="hotel.tags?.length" class="mt-2 flex flex-wrap gap-1">
@@ -172,6 +172,18 @@ const checkOut = ref(formatDate(tomorrow))
 
 const recommendedHotels = ref<any[]>([])
 
+function formatRating(value: unknown): string {
+  const n = Number(value)
+  return Number.isFinite(n) ? n.toFixed(1) : '暂无'
+}
+
+function mapHotel(item: any) {
+  return {
+    ...item,
+    image_url: item?.image_url || item?.cover_image || '',
+  }
+}
+
 const features = [
   { icon: '🏆', title: '品质精选', desc: '严格筛选优质酒店' },
   { icon: '💰', title: '价格透明', desc: '无隐藏费用' },
@@ -207,7 +219,7 @@ onMounted(async () => {
   try {
     const res = await publicApi.home()
     if (res.code === 0 && res.data) {
-      recommendedHotels.value = res.data.recommended_hotels || []
+      recommendedHotels.value = (res.data.recommended_hotels || []).map(mapHotel)
       if (res.data.promotions?.length) {
         promotions.value = res.data.promotions.map((p: any) => ({ ...p, desc: '' }))
       }

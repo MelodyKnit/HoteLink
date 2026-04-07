@@ -37,7 +37,7 @@
               <span class="text-xs text-yellow-500">{{ '★'.repeat(hotel.star || 0) }}</span>
             </div>
             <div class="text-right">
-              <span class="rounded bg-brand/10 px-2 py-1 text-sm font-bold text-brand">{{ hotel.rating?.toFixed(1) || '暂无' }}</span>
+              <span class="rounded bg-brand/10 px-2 py-1 text-sm font-bold text-brand">{{ formatRating(hotel.rating) }}</span>
               <p class="mt-1 text-xs text-gray-400">{{ hotel.review_count || 0 }}条评价</p>
             </div>
           </div>
@@ -124,14 +124,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { publicApi, userFavoriteApi, getToken } from '@hotelink/api'
 import { BED_TYPE_MAP } from '@hotelink/utils'
 
 const route = useRoute()
 const router = useRouter()
-const hotelId = Number(route.params.id)
 const loading = ref(true)
 const hotel = ref<any>({})
 const reviews = ref<any[]>([])
@@ -140,9 +139,45 @@ const isFav = ref(false)
 const error = ref('')
 const bedTypeMap = BED_TYPE_MAP
 
+function formatRating(value: unknown): string {
+  const n = Number(value)
+  return Number.isFinite(n) ? n.toFixed(1) : '暂无'
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs = 12000): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('timeout')), timeoutMs)
+    promise
+      .then((result) => {
+        clearTimeout(timer)
+        resolve(result)
+      })
+      .catch((err) => {
+        clearTimeout(timer)
+        reject(err)
+      })
+  })
+}
+
+function normalizeHotelData(data: any) {
+  const cover = data?.cover_image || ''
+  const images = Array.isArray(data?.images) && data.images.length ? data.images : (cover ? [cover] : [])
+  const roomTypes = Array.isArray(data?.room_types) ? data.room_types : []
+  return {
+    ...data,
+    images,
+    room_types: roomTypes.map((room: any) => ({
+      ...room,
+      image_url: room?.image_url || room?.image || cover || '',
+    })),
+  }
+}
+
 // 切换Fav显示状态。
 async function toggleFav() {
+  const hotelId = Number(route.params.id)
   if (!getToken()) { router.push({ name: 'login', query: { redirect: route.fullPath } }); return }
+  if (!Number.isFinite(hotelId) || hotelId <= 0) return
   try {
     if (isFav.value) {
       await userFavoriteApi.remove(hotelId)
@@ -156,18 +191,46 @@ async function toggleFav() {
 
 // 处理 Book 交互逻辑。
 function handleBook(room: any) {
+  const hotelId = Number(route.params.id)
   if (!getToken()) { router.push({ name: 'login', query: { redirect: route.fullPath } }); return }
+  if (!Number.isFinite(hotelId) || hotelId <= 0) return
   router.push({ path: '/booking', query: { hotel_id: String(hotelId), room_type_id: String(room.id), room_name: room.name, price: String(room.base_price), hotel_name: hotel.value.name } })
 }
 
-onMounted(async () => {
+async function loadHotelDetail() {
+  const hotelId = Number(route.params.id)
+  if (!Number.isFinite(hotelId) || hotelId <= 0) {
+    error.value = '酒店参数无效，请返回列表重新选择'
+    loading.value = false
+    return
+  }
+  loading.value = true
+  error.value = ''
   try {
-    const [hotelRes, reviewRes] = await Promise.all([
-      publicApi.hotelDetail(hotelId),
-      publicApi.hotelReviews({ hotel_id: hotelId, page: 1, page_size: 5 }),
+    const [hotelResult, reviewResult] = await Promise.allSettled([
+      withTimeout(publicApi.hotelDetail(hotelId)),
+      withTimeout(publicApi.hotelReviews({ hotel_id: hotelId, page: 1, page_size: 5 })),
     ])
-    if (hotelRes.code === 0 && hotelRes.data) hotel.value = hotelRes.data
-    if (reviewRes.code === 0 && reviewRes.data) reviews.value = (reviewRes.data as any).items || []
+
+    if (hotelResult.status === 'fulfilled') {
+      const hotelRes = hotelResult.value
+      if (hotelRes.code === 0 && hotelRes.data) {
+        hotel.value = normalizeHotelData(hotelRes.data)
+      } else {
+        hotel.value = {}
+        error.value = hotelRes.message || '酒店详情加载失败'
+      }
+    } else {
+      hotel.value = {}
+      error.value = '酒店详情加载超时，请稍后重试'
+    }
+
+    if (reviewResult.status === 'fulfilled') {
+      const reviewRes = reviewResult.value
+      reviews.value = (reviewRes.code === 0 && reviewRes.data) ? ((reviewRes.data as any).items || []) : []
+    } else {
+      reviews.value = []
+    }
   } catch {
     hotel.value = {}
     reviews.value = []
@@ -175,5 +238,17 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
-})
+}
+
+watch(
+  () => route.params.id,
+  () => {
+    const parsed = Number(route.params.id)
+    if (Number.isFinite(parsed)) {
+      currentImg.value = 0
+      loadHotelDetail()
+    }
+  },
+  { immediate: true }
+)
 </script>

@@ -33,6 +33,7 @@ from apps.api.views import (
     ApiRootView,
     CommonCitiesView,
     CommonDictsView,
+    CommonImageThumbView,
     CommonUploadView,
     PublicHomeView,
     PublicHotelDetailView,
@@ -73,6 +74,7 @@ urlpatterns = [
     path("system/init-check", SystemInitCheckView.as_view(), name="system-init-check"),
     path("system/init-setup", SystemInitSetupView.as_view(), name="system-init-setup"),
     path("common/upload", CommonUploadView.as_view(), name="common-upload"),
+    path("common/image-thumb", CommonImageThumbView.as_view(), name="common-image-thumb"),
     path("common/cities", CommonCitiesView.as_view(), name="common-cities"),
     path("common/dicts", CommonDictsView.as_view(), name="common-dicts"),
     # 公共查询接口

@@ -592,7 +592,30 @@ Authorization: Bearer <access_token>
 }
 ```
 
-### 9.2 城市列表
+### 9.2 图片缩略图
+
+**接口**
+
+`GET /api/v1/common/image-thumb`
+
+**权限**
+
+- 公开接口（`AllowAny`）
+
+**查询参数**
+
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `url` | string | 是 | 原图 URL（仅支持 `/media/...`） |
+| `w` | int | 否 | 缩略图宽度，默认 `56`，范围 `16-512` |
+| `h` | int | 否 | 缩略图高度，默认 `40`，范围 `16-512` |
+
+**说明**
+
+- 服务端会将原图缩放后返回 JPEG 小图并写入本地缓存目录（`media/.thumb_cache`）
+- 建议管理端列表优先使用该接口返回的小图 URL，降低带宽与解码开销
+
+### 9.3 城市列表
 
 **接口**
 
@@ -602,7 +625,7 @@ Authorization: Bearer <access_token>
 
 - 用于前端酒店筛选、地址表单、管理端酒店编辑
 
-### 9.3 字典数据
+### 9.4 字典数据
 
 **接口**
 
@@ -1193,8 +1216,15 @@ Authorization: Bearer <access_token>
 |---|---|---|---|
 | `keyword` | string | 否 | 酒店名、地址关键词 |
 | `status` | string | 否 | 酒店状态 |
+| `ordering` | string | 否 | 排序字段，支持：`id`、`-id`、`name`、`-name`、`city`、`-city`、`star`、`-star`、`min_price`、`-min_price` |
+| `thumb_mode` | string | 否 | 缩略图模式：`compact`（48x32）、`standard`（56x40） |
 | `page` | int | 否 | 页码 |
 | `page_size` | int | 否 | 每页数量 |
+
+**返回字段补充**
+
+- `cover_image`：原图 URL
+- `cover_thumb`：缩略图 URL（管理端列表可优先使用）
 
 ### 13.4 新增酒店
 
@@ -1252,6 +1282,21 @@ Authorization: Bearer <access_token>
 ### 13.7 房型列表
 
 `GET /api/v1/admin/room-types`
+
+**查询参数**
+
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `hotel_id` | int | 否 | 按酒店筛选 |
+| `ordering` | string | 否 | 排序字段，支持：`id`、`-id`、`name`、`-name`、`base_price`、`-base_price`、`bed_type`、`-bed_type` |
+| `thumb_mode` | string | 否 | 缩略图模式：`compact`（48x32）、`standard`（56x40） |
+| `page` | int | 否 | 页码 |
+| `page_size` | int | 否 | 每页数量 |
+
+**返回字段补充**
+
+- `image`：原图 URL
+- `image_thumb`：缩略图 URL（管理端列表可优先使用）
 
 ### 13.8 新增房型
 

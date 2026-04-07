@@ -306,6 +306,84 @@ class UserApiTests(ApiBaseTestCase):
         self.assertIn('"type": "chunk"', payload)
         self.assertIn('"type": "done"', payload)
 
+    def test_user_ai_chat_switch_city_overrides_previous_context(self):
+        """验证用户改选城市时，订房助手会覆盖历史上下文并返回新城市酒店。"""
+        self.login_user()
+        shanghai_hotel = Hotel.objects.create(
+            name="HoteLink 上海陆家嘴店",
+            city="上海",
+            address="上海市浦东新区示例路 9 号",
+            star=5,
+            phone="021-66669999",
+            description="陆家嘴商务酒店",
+            rating=Decimal("4.8"),
+            min_price=Decimal("899.00"),
+            is_recommended=True,
+            status=Hotel.STATUS_ONLINE,
+        )
+
+        response = self.client.post(
+            "/api/v1/user/ai/chat",
+            {
+                "scene": "general",
+                "question": "还是选北京吧",
+                "booking_context": {
+                    "intent": "hotel_booking",
+                    "selected_city": "上海",
+                    "selected_hotel_id": shanghai_hotel.id,
+                },
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]["booking_assistant"]
+        self.assertEqual(data["phase"], "select_hotel")
+        self.assertEqual(data["context"]["selected_city"], "北京")
+        self.assertIsNone(data["context"]["selected_hotel_id"])
+        self.assertTrue(any(option["label"] == self.hotel.name for option in data["options"]))
+
+    def test_user_ai_chat_hotel_keyword_should_not_fallback_to_city_selection(self):
+        """验证用户明确说出酒店关键词时，订房助手应直接进入酒店/房型选择。"""
+        self.login_user()
+        target_hotel = Hotel.objects.create(
+            name="HoteLink 深圳湾景店",
+            city="深圳",
+            address="深圳市南山区示例路 21 号",
+            star=5,
+            phone="0755-66668888",
+            description="湾景商务酒店",
+            rating=Decimal("4.8"),
+            min_price=Decimal("799.00"),
+            is_recommended=True,
+            status=Hotel.STATUS_ONLINE,
+        )
+        RoomType.objects.create(
+            hotel=target_hotel,
+            name="湾景大床房",
+            bed_type=RoomType.BED_QUEEN,
+            area=38,
+            breakfast_count=2,
+            base_price=Decimal("799.00"),
+            max_guest_count=2,
+            stock=6,
+            status=RoomType.STATUS_ONLINE,
+        )
+
+        response = self.client.post(
+            "/api/v1/user/ai/chat",
+            {
+                "scene": "general",
+                "question": "我想订深圳湾景店",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]["booking_assistant"]
+        self.assertIn(data["phase"], ["select_hotel", "select_room_type"])
+        self.assertEqual(data["context"]["selected_city"], "深圳")
+        if data["phase"] == "select_hotel":
+            self.assertTrue(any(option["label"] == target_hotel.name for option in data["options"]))
+
 
 class AdminApiTests(ApiBaseTestCase):
     """管理端接口测试集合。"""

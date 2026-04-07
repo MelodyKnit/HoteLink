@@ -1,11 +1,11 @@
 <template>
-  <div class="min-h-screen bg-slate-100 text-slate-900">
+  <div class="h-screen overflow-hidden bg-slate-100 text-slate-900">
     <!-- Mobile overlay -->
     <Transition name="fade">
       <div v-if="sidebarOpen" class="fixed inset-0 z-40 bg-black/40 lg:hidden" @click="sidebarOpen = false" />
     </Transition>
 
-    <div class="flex min-h-screen">
+    <div class="flex h-full">
       <!-- Sidebar -->
       <aside
         class="fixed inset-y-0 left-0 z-50 flex w-64 flex-col bg-slate-900 text-white transition-transform duration-200 lg:static lg:translate-x-0"
@@ -47,7 +47,7 @@
       </aside>
 
       <!-- Main content -->
-      <div class="flex flex-1 flex-col">
+      <div class="flex min-h-0 flex-1 flex-col overflow-y-auto scroll-smooth" style="will-change: scroll-position;">
         <!-- Top bar -->
         <header class="sticky top-0 z-30 flex h-16 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 lg:px-8">
           <button class="rounded-lg p-2 text-slate-600 hover:bg-slate-100 lg:hidden" @click="sidebarOpen = !sidebarOpen">
