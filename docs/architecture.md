@@ -82,8 +82,8 @@
 
 前端公共逻辑抽到 `packages`：
 
-- `packages/ui`
-- `packages/api`
+- `packages/ui`（11 个共享组件：ConfirmDialog、DataTable、EmptyState、ModalDialog、OrderStepBar、PageHeader、Pagination、SelectField、StatCard、StatusBadge、Toast）
+- `packages/api`（28 个 API 模块，120+ 接口方法）
 - `packages/utils`
 - `packages/store`
 - `packages/styles`
@@ -147,8 +147,8 @@ HoteLink/
 负责：
 
 - 统一路由注册（`urls.py`）
-- 所有 REST 视图（`views.py`，当前 60+ 个 View）
-- 序列化器（`serializers.py`，当前 42+ 个 Serializer）
+- 所有 REST 视图（`views.py`，当前 89 个 View）
+- 序列化器（`serializers.py`，当前 71 个 Serializer）
 - 权限类（`permissions.py`：`IsAdminRole`、`IsSystemAdminRole`）
 - 统一响应格式（`responses.py`：`ApiResponse`、分页辅助）
 
@@ -156,7 +156,7 @@ HoteLink/
 
 - 本项目将所有接口层集中在 `apps/api` 中，其他 app 仅定义 Model 和 Service
 - 这种架构避免了 View 分散在多个 app 中导致的路由管理复杂性
-- 当前 URL 路由约 71 条，分为 `system/`、`common/`、`public/`、`user/`、`admin/` 五大域
+- 当前 URL 路由约 87 条，分为 `system/`、`common/`、`public/`、`user/`、`admin/` 五大域
 
 ### 6.2 users
 
@@ -202,10 +202,15 @@ HoteLink/
 - 订单状态流转
 - 入住 / 退房操作（管理端）
 - 订单取消
+- 未支付订单自动取消（Celery 异步任务）
 
 已实现模型：
 
 - **BookingOrder**：user（FK）、hotel（FK PROTECT）、room_type（FK PROTECT）、order_no（唯一）、status（pending_payment/paid/confirmed/checked_in/completed/cancelled/refunding/refunded）、payment_status（unpaid/paid/failed/refunded）、check_in_date、check_out_date、guest_name、guest_mobile、guest_count、room_no、remark、operator_remark、original_amount、member_discount_amount、coupon_discount_amount、discount_amount、pay_amount、coupon（FK）、points_earned
+
+已实现 Celery 任务：
+
+- **auto_cancel_unpaid_order**（`bookings/tasks.py`）：创建订单时通过 `apply_async(countdown=N分钟)` 触发，到期后检查订单是否仍为 `pending_payment` 状态，若是则自动取消、恢复优惠券、发送系统通知。取消时间可通过 `PlatformConfig.order_auto_cancel_minutes` 配置。
 
 规划中模型：
 
@@ -267,11 +272,15 @@ HoteLink/
 - 站内通知
 - 审计日志
 - AI 服务编排
+- 平台配置
+- AI 调用日志
 
 已实现模型：
 
 - **AuditLog**：user（FK 可选）、action、target、detail（JSON）
 - **SystemNotice**：user（FK）、notice_type（order/payment/activity/system/review/member/coupon）、title、content、is_read
+- **PlatformConfig**（单例模型，pk=1）：platform_name、admin_name、support_phone、order_auto_cancel_minutes；通过 `PlatformConfig.load()` 获取或创建实例
+- **AICallLog**：user（FK 可选）、scene、provider、model、input_tokens、output_tokens、total_tokens、cost_estimate、latency_ms、status（success/failed/timeout/quota_exceeded）、error_message
 
 ### 6.9 ai（当前归属 operations + config）
 
@@ -297,7 +306,16 @@ HoteLink/
 - 客服上下文绑定：用户订单、关联酒店/房型、系统通知、系统字典、推荐酒店
 - 智能订房编排：命中订房意图时，服务端按城市→酒店→房型阶段输出结构化动作
 - 接口层能力：`/api/v1/user/ai/chat`（普通）与 `/api/v1/user/ai/chat/stream`（SSE 流式）
-- **当前未真正调用 LLM 的管理端视图**：`AdminAIReportSummaryView`、`AdminAIReviewSummaryView`、`AdminAIReplySuggestionView`（仅返回 fallback 文案）
+- **管理端 AI 视图**（共 13 个）：均调用 `AIChatService` 对应方法，不可用时降级为 fallback 数据
+  - 基础 AI：报表摘要、评价摘要、回复建议
+  - 扩展 AI：定价建议、经营报告（含流式）、评价情感分析（持久化到 Review 模型）、营销文案、内容生成、异常报告、订单异常摘要
+  - 数据视图（无需 AI 调用）：AI 调用日志、AI 用量统计
+- **用户端 AI 视图**（共 6 个）：
+  - 客服对话（普通 + SSE 流式）
+  - AI 推荐酒店（不可用时降级为热门酒店排序）
+  - AI 酒店对比
+  - 会话列表、会话消息历史
+- **AI 配置管理视图**：AI 设置（读取供应商列表）、添加/切换/删除供应商（纯配置操作）
 
 ### 6.10 system-ops
 

@@ -472,6 +472,7 @@ X-App-Version: 1.0.0
 | `silver` | 银卡会员 |
 | `gold` | 金卡会员 |
 | `platinum` | 白金会员 |
+| `diamond` | 钻石会员 |
 
 ### 7.13 优惠券状态 `coupon_status`
 
@@ -513,6 +514,8 @@ X-App-Version: 1.0.0
 | `activity` | 活动通知 |
 | `system` | 系统通知 |
 | `review` | 评价通知 |
+| `member` | 会员通知（升级、积分） |
+| `coupon` | 优惠券通知 |
 
 ### 7.18 AI 场景 `ai_scene`
 
@@ -526,7 +529,7 @@ X-App-Version: 1.0.0
 - 当前 `ai_scene` 仅用于用户端客服问答接口
 - 管理端报表总结、评价总结、回复建议使用独立接口，不通过 `ai_scene` 传值
 
-### 7.19 AI 情感标签 `sentiment_label`（规划中）
+### 7.19 AI 情感标签 `sentiment_label`
 
 | 值 | 含义 |
 |---|---|
@@ -1327,6 +1330,92 @@ Authorization: Bearer <access_token>
 
 `GET /api/v1/user/coupons`
 
+**查询参数**
+
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `status` | string | 否 | 优惠券状态：`unused` / `used` / `expired` |
+| `page` | int | 否 | 页码 |
+| `page_size` | int | 否 | 每页数量 |
+
+### 12.16.1 可领取优惠券列表
+
+`GET /api/v1/user/coupons/available`
+
+**说明**
+
+- 返回当前可领取的优惠券模板列表
+- 自动过滤已下架、已领完、不满足会员等级的模板
+- 每条模板附带 `already_claimed` 字段表示当前用户已领取数量
+
+### 12.16.2 领取优惠券
+
+`POST /api/v1/user/coupons/claim`
+
+**请求体**
+
+```json
+{
+  "template_id": 1
+}
+```
+
+**参数说明**
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `template_id` | int | 是 | 优惠券模板 ID |
+
+**成功返回**
+
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "id": 100,
+    "name": "新用户满200减30",
+    "coupon_type": "cash",
+    "amount": 30.00,
+    "discount": null,
+    "min_amount": 200.00,
+    "valid_start": "2026-04-08",
+    "valid_end": "2026-05-08",
+    "status": "unused"
+  }
+}
+```
+
+**错误码**
+
+| code | 说明 |
+|---|---|
+| `4000` | 模板不存在或已下架 |
+| `4000` | 已达到每人限领数量 |
+| `4000` | 优惠券已领完 |
+| `4000` | 会员等级不足 |
+| `4000` | 积分不足（积分兑换场景） |
+
+说明：
+
+- 若模板 `points_cost > 0`，领取时会扣除用户积分并记录积分日志
+- 领取成功后会发送 `coupon` 类型站内通知
+
+### 12.16.3 下单可用优惠券列表
+
+`GET /api/v1/user/orders/available-coupons`
+
+**查询参数**
+
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `amount` | number | 否 | 订单金额，用于过滤满足门槛的优惠券 |
+
+**说明**
+
+- 返回当前用户状态为 `unused`、在有效期内且满足最低金额门槛的优惠券列表
+- 用于预订填写页的优惠券选择器
+
 ### 12.17 发票列表
 
 `GET /api/v1/user/invoices`
@@ -1794,11 +1883,150 @@ Authorization: Bearer <access_token>
 
 `GET /api/v1/admin/settings`
 
+**权限**
+
+- `hotel_admin` / `system_admin`
+
+**返回示例**
+
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "platform_name": "HoteLink 酒店管理系统",
+    "admin_name": "HoteLink 管理端",
+    "support_phone": "400-000-0000",
+    "order_auto_cancel_minutes": 30
+  }
+}
+```
+
 ### 13.27 系统配置更新
 
 `POST /api/v1/admin/settings/update`
 
-### 13.28 会员等级概览
+**权限**
+
+- 仅 `system_admin`
+
+**请求体**
+
+```json
+{
+  "platform_name": "HoteLink 酒店管理系统",
+  "admin_name": "HoteLink 管理端",
+  "support_phone": "400-000-0000",
+  "order_auto_cancel_minutes": 30
+}
+```
+
+**参数说明**
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `platform_name` | string | 否 | 平台名称，最长 100 字符 |
+| `admin_name` | string | 否 | 管理端名称，最长 100 字符 |
+| `support_phone` | string | 否 | 客服电话，最长 30 字符 |
+| `order_auto_cancel_minutes` | int | 否 | 订单自动取消时间（分钟），最小 1 |
+
+说明：
+
+- 配置存储在 `PlatformConfig` 单例模型中
+- `order_auto_cancel_minutes` 用于控制未支付订单的自动取消倒计时，创建订单时会自动下发 Celery 延时任务
+
+### 13.28 系统运行状态
+
+`GET /api/v1/admin/system/status`
+
+**权限**
+
+- `hotel_admin` / `system_admin`
+
+**返回示例**
+
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "system": {
+      "os": "Linux 5.15.0",
+      "machine": "x86_64",
+      "python": "3.12.13",
+      "django": "6.0.3",
+      "uptime_seconds": 125400
+    },
+    "disk": {
+      "total_gb": 100.0,
+      "used_gb": 45.3,
+      "free_gb": 54.7,
+      "usage_percent": 45.3
+    },
+    "memory": {
+      "total_mb": 16384,
+      "used_mb": 8192,
+      "available_mb": 8192,
+      "usage_percent": 50.0
+    },
+    "cpu_load": {
+      "1min": 0.5,
+      "5min": 0.8,
+      "15min": 0.6,
+      "cores": 8
+    },
+    "database": {
+      "engine": "mysql",
+      "name": "hotelink",
+      "host": "127.0.0.1",
+      "port": "3306",
+      "size_mb": 45.6,
+      "table_count": 28
+    },
+    "services": {
+      "redis": {
+        "status": "connected",
+        "version": "7.0.15",
+        "url": "redis://127.0.0.1:6379/1"
+      },
+      "celery": {
+        "status": "connected",
+        "workers": 2
+      }
+    },
+    "business": {
+      "users": 256,
+      "orders": 1200,
+      "hotels": 8,
+      "room_types": 24,
+      "reviews": 350,
+      "notices": 800,
+      "ai_calls": 3200
+    },
+    "query_ms": 12
+  }
+}
+```
+
+**返回字段**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `system.os` | string | 操作系统名称与版本 |
+| `system.machine` | string | CPU 架构 |
+| `system.python` | string | Python 版本 |
+| `system.django` | string | Django 版本 |
+| `system.uptime_seconds` | int | 系统运行时长（秒） |
+| `disk.*` | object | 磁盘使用情况（GB / 百分比） |
+| `memory.*` | object | 内存使用情况（MB / 百分比），仅 Linux 可用 |
+| `cpu_load.*` | object | CPU 负载均值（1/5/15 分钟）与核心数，仅类 Unix 可用 |
+| `database.*` | object | 数据库连接信息与大小（MySQL 可查询） |
+| `services.redis.*` | object | Redis 连接状态与版本 |
+| `services.celery.*` | object | Celery Worker 连接状态与数量 |
+| `business.*` | object | 业务数据统计（用户/订单/酒店/房型/评价/通知/AI 调用） |
+| `query_ms` | int | 本次接口查询耗时（毫秒） |
+
+### 13.29 会员等级概览
 
 `GET /api/v1/admin/members/overview`
 
@@ -1848,7 +2076,7 @@ Authorization: Bearer <access_token>
 | `levels[].discount_rate` | float | 折扣率（1.0 表示无折扣） |
 | `levels[].points_multiplier` | float | 积分倍率 |
 
-### 13.29 优惠券模板列表
+### 13.30 优惠券模板列表
 
 `GET /api/v1/admin/coupons`
 
@@ -1886,7 +2114,7 @@ Authorization: Bearer <access_token>
 | `valid_end` | string | 有效期结束日期 |
 | `created_at` | string | 创建时间 |
 
-### 13.30 创建优惠券模板
+### 13.31 创建优惠券模板
 
 `POST /api/v1/admin/coupons/create`
 
@@ -1913,7 +2141,7 @@ Authorization: Bearer <access_token>
 }
 ```
 
-### 13.31 更新优惠券模板状态
+### 13.32 更新优惠券模板状态
 
 `POST /api/v1/admin/coupons/update`
 
@@ -1931,7 +2159,7 @@ Authorization: Bearer <access_token>
 | `template_id` | int | 是 | 模板 ID |
 | `status` | string | 是 | 目标状态：`active`（上架）/ `inactive`（下架） |
 
-### 13.32 系统重置
+### 13.33 系统重置
 
 详见 [§8.2 系统重置](#82-系统重置)。
 
@@ -1939,7 +2167,7 @@ Authorization: Bearer <access_token>
 - 权限：仅 `system_admin`
 - 需发送 `{"confirm": "RESET"}` 确认
 
-### 13.33 AI 供应商管理
+### 13.34 AI 供应商管理
 
 详见 [§8.1 AI 多供应商管理](#81-ai-多供应商管理)。
 
@@ -2107,9 +2335,9 @@ data: {"type":"done","content":"","done":true}
 - 此接口仅用于控制业务层配置，如是否启用某个 AI 场景
 - 不建议通过接口直接返回真实密钥
 
-## 15. 规划中 — AI 功能增强接口
+## 15. AI 功能增强接口
 
-> 以下接口均为**规划中**，标注为未来增强方向。实现后应去除标注并补充完整示例。
+> 以下接口已完成**视图与路由注册**，调用 AI 服务层（`AIChatService`）生成结果。若 AI 服务不可用，接口会返回空结果或兜底文案，不会抛出异常。
 
 ### 15.1 AI 智能定价建议
 
@@ -2301,7 +2529,7 @@ data: {"type":"done","content":"","done":true}
 
 ---
 
-### 15.5 AI 评价情感批量分析
+### 15.5 AI 评价情感批量分析（规划中）
 
 **接口**
 
@@ -2346,7 +2574,7 @@ data: {"type":"done","content":"","done":true}
 
 ---
 
-### 15.6 AI 评价情感统计概览
+### 15.6 AI 评价情感统计概览（规划中）
 
 **接口**
 
@@ -2717,18 +2945,14 @@ data: {"type":"done","content":"","done":true}
 
 **权限**
 
-- `system_admin`
+- `hotel_admin` / `system_admin`
 
 **查询参数**
 
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `scene` | string | 否 | AI 场景筛选 |
-| `provider` | string | 否 | 供应商筛选 |
 | `status` | string | 否 | 调用状态筛选 |
-| `user_id` | int | 否 | 用户 ID |
-| `start_date` | string | 否 | 开始日期 |
-| `end_date` | string | 否 | 结束日期 |
 | `page` | int | 否 | 页码 |
 | `page_size` | int | 否 | 每页数量 |
 
@@ -2772,7 +2996,7 @@ data: {"type":"done","content":"","done":true}
 
 **权限**
 
-- `system_admin`
+- `hotel_admin` / `system_admin`
 
 **查询参数**
 
@@ -2788,30 +3012,24 @@ data: {"type":"done","content":"","done":true}
   "code": 0,
   "message": "success",
   "data": {
-    "period": {"start_date": "2026-04-01", "end_date": "2026-04-08"},
     "total_calls": 3200,
+    "success_calls": 3100,
+    "failed_calls": 100,
     "total_tokens": 4800000,
-    "total_cost_estimate": 7.20,
-    "avg_latency_ms": 1800,
-    "success_rate": 98.5,
-    "by_scene": [
-      {"scene": "customer_service", "calls": 2500, "tokens": 3500000},
-      {"scene": "report_summary", "calls": 200, "tokens": 800000},
-      {"scene": "review_analysis", "calls": 500, "tokens": 500000}
-    ],
-    "by_provider": [
-      {"provider": "deepseek", "calls": 3000, "tokens": 4500000},
-      {"provider": "openai", "calls": 200, "tokens": 300000}
-    ],
-    "daily_trend": [
-      {"date": "2026-04-01", "calls": 380, "tokens": 550000},
-      {"date": "2026-04-02", "calls": 420, "tokens": 620000}
-    ]
+    "total_cost": 7.20,
+    "by_scene": {
+      "customer_service": 2500,
+      "report_summary": 200
+    },
+    "by_provider": {
+      "deepseek": 3000,
+      "openai": 200
+    }
   }
 }
 ```
 
-#### 15.11.3 AI 配额配置查询
+#### 15.11.3 AI 配额配置查询（规划中）
 
 **接口**
 
@@ -2836,7 +3054,7 @@ data: {"type":"done","content":"","done":true}
 }
 ```
 
-#### 15.11.4 AI 配额配置更新
+#### 15.11.4 AI 配额配置更新（规划中）
 
 **接口**
 
@@ -2857,7 +3075,7 @@ data: {"type":"done","content":"","done":true}
 
 ---
 
-### 15.12 AI 客户画像
+### 15.12 AI 客户画像（规划中）
 
 #### 15.12.1 查询客户 AI 画像
 

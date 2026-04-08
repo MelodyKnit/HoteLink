@@ -162,7 +162,7 @@ flowchart TD
 
 ## 7. 用户端界面设计清单
 
-> **用户端页面实现总览（24 路由 / 23 视图）**
+> **用户端页面实现总览（25 路由 / 24 视图）**
 >
 > | # | 设计页面 | 路由 | 视图文件 | 状态 |
 > |---|---------|------|---------|------|
@@ -188,6 +188,7 @@ flowchart TD
 > | 20 | 品牌故事页 | `/about` | `AboutView.vue` | ✅ 已实现 |
 > | 21 | 活动专题页 | — | — | 📐 设计中 |
 > | 22 | 联系我们页 | `/contact` | `ContactView.vue` | ✅ 已实现 |
+> | 23 | AI 酒店对比页 | `/hotel-compare` | `HotelCompareView.vue` | ✅ 已实现 |
 > | — | 通知中心 | `/my/notifications` | `NotificationView.vue` | ✅ 已实现（文档未列设计） |
 > | — | 404 页 | `/404` | `NotFoundView.vue` | ✅ 已实现 |
 
@@ -475,9 +476,22 @@ flowchart TD
 - 地图
 - 邮箱
 
+#### 23. AI 酒店对比页
+
+核心模块：
+
+- 选择多家酒店进行对比
+- AI 生成对比分析（价格、位置、评分、设施等维度）
+- 对比结果可视化展示
+
+设计要求：
+
+- AI 不可用时降级为纯数据对比
+- 对比维度要清晰、可快速辅助决策
+
 ## 8. 管理端界面设计清单
 
-> **管理端页面实现总览（19 路由 / 18 视图）**
+> **管理端页面实现总览（20 路由 / 19 视图）**
 >
 > | # | 设计页面 | 路由 | 视图文件 | 状态 |
 > |---|---------|------|---------|------|
@@ -513,8 +527,9 @@ flowchart TD
 > | 29 | 审计日志页 | — | — | 📐 设计中 |
 > | 30 | AI 助手工作台 | `/admin/ai` | `AIAssistantView.vue` | ✅ 已实现 |
 > | 31 | AI 配置页 | `/admin/ai-settings` | `AISettingsView.vue` | ✅ 已实现 |
-> | 32 | AI 经营分析页 | — | — | 📐 设计中（部分在报表页内） |
-> | 33 | AI 客服辅助页 | — | — | 📐 设计中 |
+> | 32 | AI 调用日志页 | `/admin/ai-logs` | `AICallLogsView.vue` | ✅ 已实现 |
+> | 33 | AI 经营分析页 | — | — | 📐 设计中（部分在报表页内） |
+> | 34 | AI 客服辅助页 | — | — | 📐 设计中 |
 > | — | 初始化设置页 | `/admin/setup` | `InitSetupView.vue` | ✅ 已实现（文档未列设计） |
 > | — | 404 页 | `/admin/404` | `NotFoundView.vue` | ✅ 已实现 |
 
@@ -819,11 +834,12 @@ flowchart TD
 
 核心模块：
 
-- 酒店基础配置
+- 酒店基础配置（平台名称、管理员姓名、客服电话、订单自动取消时间）
 - 支付配置
 - 发票配置
 - 消息配置
 - API 配置
+- 系统状态监控（Tab 切换：CPU / 内存 / 磁盘环形仪表、数据库 / Redis / Celery 服务状态、业务概览统计）
 
 #### 27.1 系统重置区（高危）
 
@@ -885,7 +901,20 @@ flowchart TD
 
 - 页面上只显示配置状态，不应回显真实密钥
 
-#### 32. AI 经营分析页
+#### 32. AI 调用日志页
+
+核心模块：
+
+- AI 调用记录列表（时间、场景、供应商、模型、令牌数、耗时、状态）
+- 按场景 / 供应商 / 状态筛选
+- 分页浏览
+
+设计要求：
+
+- 信息密度高，适合排查 AI 服务异常
+- 失败记录需明显标示错误原因
+
+#### 33. AI 经营分析页
 
 核心模块：
 
@@ -894,7 +923,7 @@ flowchart TD
 - 差评摘要
 - 渠道变化说明
 
-#### 33. AI 客服辅助页
+#### 34. AI 客服辅助页
 
 核心模块：
 
@@ -1074,6 +1103,7 @@ const { toastVisible, toastMessage, toastType, showToast, closeToast } = useToas
 | `Toast.vue` | 消息提示 |
 | `SelectField.vue` | 下拉选择 |
 | `ConfirmDialog.vue` | 确认对话框（危险操作二次确认） |
+| `OrderStepBar.vue` | 订单状态步骤条（展示订单状态流转进度） |
 
 Composable：
 
@@ -1086,7 +1116,7 @@ Composable：
 
 `packages/api` 统一封装所有前后端交互，按业务域划分模块：
 
-- **管理端**：`systemApi`、`authApi`、`dashboardApi`、`hotelApi`、`roomTypeApi`、`inventoryApi`、`orderApi`、`reviewApi`、`userApi`、`employeeApi`、`reportApi`、`settingsApi`、`adminSystemApi`、`adminCouponApi`、`adminMemberApi`、`aiApi`、`commonApi`
+- **管理端**：`systemApi`、`authApi`、`dashboardApi`、`hotelApi`、`roomTypeApi`、`inventoryApi`、`orderApi`、`reviewApi`、`userApi`、`employeeApi`、`reportApi`、`settingsApi`、`adminSystemApi`（含 `status()` 系统状态监控）、`adminCouponApi`、`adminMemberApi`、`aiApi`、`commonApi`
 - **用户端**：`publicApi`、`userAuthApi`、`userProfileApi`、`userOrderApi`、`userReviewApi`、`userFavoriteApi`、`userCouponApi`、`userInvoiceApi`、`userPointsApi`、`userNoticeApi`、`userAiApi`
 - **工具**：`getToken`、`setTokens`、`clearTokens`、`getRefreshToken`、`configureApi`
 
@@ -1102,7 +1132,7 @@ Composable：
 
 ### 14.1 已完成
 
-用户端已实现 21/22 个设计页面（路由 24 条），管理端已实现 14/33 个设计页面（路由 19 条）。
+用户端已实现 22/23 个设计页面（路由 25 条），管理端已实现 15/34 个设计页面（路由 20 条）。
 
 核心闭环（浏览 → 预订 → 支付 → 订单管理 → 评价）已全部落地。
 

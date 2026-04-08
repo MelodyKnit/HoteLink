@@ -13,6 +13,12 @@
         </template>
       </PageHeader>
 
+      <!-- 订单状态流转 -->
+      <div class="mb-6 rounded-2xl bg-white px-6 py-5 shadow-sm ring-1 ring-slate-200">
+        <p class="mb-4 text-xs font-semibold uppercase tracking-wide text-slate-400">订单进度</p>
+        <OrderStepBar :status="order.status as string" :timestamps="orderTimestamps" />
+      </div>
+
       <div class="grid gap-6 lg:grid-cols-2">
         <!-- 订单基本信息 -->
         <div class="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
@@ -95,11 +101,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { orderApi } from '@hotelink/api'
 import { formatMoney, formatDateTime, ORDER_STATUS_MAP, PAYMENT_STATUS_MAP, PAYMENT_METHOD_MAP } from '@hotelink/utils'
-import { PageHeader, StatusBadge, ModalDialog, useToast, useConfirm } from '@hotelink/ui'
+import { PageHeader, StatusBadge, ModalDialog, OrderStepBar, useToast, useConfirm } from '@hotelink/ui'
 
 const { showToast } = useToast()
 const { confirm: confirmDialog } = useConfirm()
@@ -121,6 +127,16 @@ const checkInRoomNo = ref('')
 const loading = ref(true)
 const order = ref<Record<string, unknown> | null>(null)
 const payments = ref<PaymentItem[]>([])
+
+// 用于订单进度条的时间戳映射
+const orderTimestamps = computed<Record<string, string | undefined>>(() => ({
+  pending_payment: order.value?.created_at as string | undefined,
+  paid:            order.value?.paid_at as string | undefined,
+  confirmed:       order.value?.confirmed_at as string | undefined,
+  checked_in:      order.value?.checked_in_at as string | undefined,
+  completed:       order.value?.completed_at as string | undefined,
+  cancelled:       order.value?.cancelled_at as string | undefined,
+}))
 
 // 根据状态值返回对应展示信息。
 function statusType(status: string) {

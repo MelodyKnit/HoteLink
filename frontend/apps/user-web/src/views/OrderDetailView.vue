@@ -19,6 +19,18 @@
         <p class="mt-1 text-xs text-teal-200">订单号：{{ order.order_no }}</p>
       </div>
 
+      <!-- 订单进度条 -->
+      <div class="mt-3 rounded-2xl bg-white p-5 shadow-sm">
+        <OrderStepBar :status="order.status" :timestamps="{
+          pending_payment: order.created_at,
+          paid: order.paid_at,
+          confirmed: order.confirmed_at,
+          checked_in: order.checked_in_at,
+          completed: order.completed_at,
+          cancelled: order.cancelled_at,
+        }" />
+      </div>
+
       <!-- Hotel & Room -->
       <div class="mt-4 rounded-2xl bg-white p-5 shadow-sm">
         <h3 class="font-semibold text-gray-800">{{ order.hotel_name }}</h3>
@@ -202,6 +214,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { userOrderApi, userReviewApi, commonApi } from '@hotelink/api'
 import { ORDER_STATUS_MAP, PAYMENT_METHOD_MAP, PAYMENT_STATUS_MAP, formatMoney } from '@hotelink/utils'
+import { OrderStepBar } from '@hotelink/ui'
 
 const route = useRoute()
 const router = useRouter()

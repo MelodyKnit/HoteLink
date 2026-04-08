@@ -113,39 +113,44 @@ build_ai_client(provider) → OpenAI compatible client
 | AI 订房编排 | 同上，订房意图检测后自动切入 | 多轮对话状态机 |
 | FAQ 问答 | 客服场景内支持 | 通过 Prompt 约束 |
 | 入住须知解释 | 客服场景内支持 | 通过上下文注入 |
+| AI 推荐酒店 | `GET /api/v1/user/ai/recommendations` | 调用 LLM，不可用时降级为热门酒店排序 |
+| AI 酒店对比 | `POST /api/v1/user/ai/hotel-compare` | 调用 LLM 生成多维度对比分析 |
+| AI 会话列表 | `GET /api/v1/user/ai/sessions` | 查看 / 删除历史对话 |
+| AI 会话消息 | `GET /api/v1/user/ai/sessions/:id/messages` | 查看对话历史记录 |
 
 #### 规划中
 
-- 酒店推荐助手（独立推荐接口）
 - 行程建议与周边推荐
 - 发票与退改政策解释
 
 ### 4.2 管理端 AI 功能
 
-#### ⚠️ 已有接口但未真正调用 LLM
-
-| 功能 | 接口 | 当前状态 |
-|------|------|----------|
-| 经营报表智能总结 | `POST /api/v1/admin/ai/report-summary` | 返回固定模板文案 |
-| 评价智能摘要 | `POST /api/v1/admin/ai/review-summary` | 返回固定模板文案 |
-| 评价回复建议 | `POST /api/v1/admin/ai/reply-suggestion` | 仅返回 fallback |
-
-#### ✅ 已完整实现
+#### ✅ 已完整实现（调用 AIChatService，不可用时降级为 fallback）
 
 | 功能 | 接口 | 说明 |
 |------|------|------|
+| 经营报表智能总结 | `POST /api/v1/admin/ai/report-summary` | 调用 LLM，不可用时从 DB 算出统计文案 |
+| 评价智能摘要 | `POST /api/v1/admin/ai/review-summary` | 调用 LLM，不可用时从 DB 算出均分文案 |
+| 评价回复建议 | `POST /api/v1/admin/ai/reply-suggestion` | 调用 LLM 生成回复建议 |
+| AI 智能定价 | `POST /api/v1/admin/ai/pricing-suggestion` | 基于历史入住率与季节因素建议定价 |
+| AI 经营报告 | `POST /api/v1/admin/ai/business-report` | 注入营收 / 入住率 / 评分趋势，生成深度报告 |
+| AI 经营报告（流式） | `POST /api/v1/admin/ai/business-report/stream` | SSE 流式输出经营报告 |
+| AI 评价情感分析 | `POST /api/v1/admin/ai/review-sentiment` | 分析情感标签并持久化到 Review 模型 |
+| AI 营销文案 | `POST /api/v1/admin/ai/marketing-copy` | 活动标题、Banner 文案、节日营销 |
+| AI 内容生成 | `POST /api/v1/admin/ai/content-generate` | 酒店描述、房型卖点、SEO 文案 |
+| AI 异常检测报告 | `POST /api/v1/admin/ai/anomaly-report` | OCC / RevPAR 偏离预警 |
+| AI 订单异常摘要 | `POST /api/v1/admin/ai/order-anomaly-summary` | 订单异常模式摘要 |
 | AI 配置管理 | `GET/POST /api/v1/admin/ai/settings` | 读写 AI 开关与配置 |
 | 供应商管理 | `POST /admin/ai/provider/add\|switch\|delete` | 增删改查、切换活跃 |
+| AI 调用日志 | `GET /api/v1/admin/ai/call-logs` | 查询 AICallLog 表，分页返回调用记录 |
+| AI 用量统计 | `GET /api/v1/admin/ai/usage-stats` | 按场景 / 供应商统计 token 用量与费用 |
 
 #### 规划中
 
-- 经营分析报告（深度）— 详见 [feature-improvements.md](./feature-improvements.md) §1.3
-- 评价情感分析与自动标签 — §1.4
-- 营销文案生成 — §1.5
-- 酒店内容生成 — §1.6
-- 异常检测与预警 — §1.7
-- 客户画像与偏好标签 — §1.11
-- 智能定价助手 — §1.2
+- 批量评价情感分析（`/review-sentiment/batch`）
+- 情感分析总览（`/review-sentiment/overview`）
+- AI 使用额度与频控（基于 Redis 限流）
+- 客户画像与偏好标签
 
 ### 4.3 AI 使用边界
 
@@ -295,6 +300,18 @@ stateDiagram-v2
 - 订房动作卡片（城市、酒店、房型）
 - 对话历史保持
 
+用户端 AI 酒店对比页（`/hotel-compare`）支持：
+
+- 多酒店对比选择
+- AI 生成多维度对比分析
+- AI 不可用时降级为纯数据对比
+
+管理端 AI 调用日志页（`/admin/ai-logs`）支持：
+
+- AI 调用记录列表（时间、场景、供应商、模型、令牌数、耗时、状态）
+- 按场景 / 供应商 / 状态筛选
+- 分页浏览
+
 环境变量已写入：
 
 - [`../backend/.env.example`](../backend/.env.example)
@@ -333,21 +350,21 @@ stateDiagram-v2
 
 | 序号 | 功能 | 优先级 | 说明 |
 |------|------|--------|------|
-| 1 | 管理端 AI 三视图接入真实 LLM | P0 | 当前为 fallback，需新增 Prompt 模板并调用 LLM |
-| 2 | AI 调用日志表（AICallLog） | P0 | 记录每次 AI 请求/响应/耗时/token |
-| 3 | AI 使用额度与频控 | P1 | 基于 Redis 限流 |
-| 4 | AI 智能定价助手 | P1 | 基于历史入住率与季节因素建议定价 |
-| 5 | AI 评价情感分析 | P1 | 自动标注情感标签与关键词 |
-| 6 | AI 经营分析报告（深度） | P1 | 注入营收/入住率/评分趋势数据，生成深度报告 |
-| 7 | AI 营销文案生成 | P2 | 活动标题、Banner 文案、节日营销 |
-| 8 | AI 酒店内容生成 | P2 | 酒店描述、房型卖点、SEO 文案 |
-| 9 | AI 异常检测与预警 | P2 | OCC/RevPAR 偏离预警 |
-| 10 | AI 多轮对话持久化 | P2 | 独立 ChatSession 模型 |
-| 11 | AI 客户画像标签 | P2 | 基于行为数据生成偏好标签 |
-| 12 | AI 推荐引擎 | P2 | 酒店对比与个性化推荐 |
-| 13 | Prompt 模板版本化与回滚 | P3 | 模板管理后台 |
-| 14 | AI 输出审计机制 | P3 | 管理员复核 AI 生成内容 |
-| 15 | 推理模型（reasoning_model）利用 | P1 | 对复杂分析场景使用推理模型 |
+| 1 | 管理端 AI 三视图接入真实 LLM | P0 | ✅ 已完成，均调用 AIChatService 对应方法 |
+| 2 | AI 调用日志表（AICallLog） | P0 | ✅ 已完成，模型 + 管理端查询接口 |
+| 3 | AI 使用额度与频控 | P1 | 规划中，基于 Redis 限流 |
+| 4 | AI 智能定价助手 | P1 | ✅ 已完成，AdminAIPricingSuggestionView |
+| 5 | AI 评价情感分析 | P1 | ✅ 已完成，分析结果持久化到 Review 模型 |
+| 6 | AI 经营分析报告（深度） | P1 | ✅ 已完成，含流式输出 |
+| 7 | AI 营销文案生成 | P2 | ✅ 已完成，AdminAIMarketingCopyView |
+| 8 | AI 酒店内容生成 | P2 | ✅ 已完成，AdminAIContentGenerateView |
+| 9 | AI 异常检测与预警 | P2 | ✅ 已完成，AdminAIAnomalyReportView |
+| 10 | AI 多轮对话持久化 | P2 | ✅ 已完成，ChatSession + ChatMessage 模型 |
+| 11 | AI 客户画像标签 | P2 | 规划中 |
+| 12 | AI 推荐引擎 | P2 | ✅ 已完成，推荐酒店 + 酒店对比 |
+| 13 | Prompt 模板版本化与回滚 | P3 | 规划中 |
+| 14 | AI 输出审计机制 | P3 | 规划中 |
+| 15 | 推理模型（reasoning_model）利用 | P1 | 规划中 |
 
 ## 10. 文档维护要求
 

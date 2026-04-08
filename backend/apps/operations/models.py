@@ -1,7 +1,27 @@
-"""apps/operations/models.py —— 审计日志与系统通知模型。"""
+"""apps/operations/models.py —— 审计日志、系统通知与平台配置模型。"""
 
 from django.conf import settings
 from django.db import models
+
+
+class PlatformConfig(models.Model):
+    """平台配置单例模型，存储全局系统设置。"""
+    platform_name = models.CharField(max_length=100, default="HoteLink 酒店管理系统")
+    admin_name = models.CharField(max_length=100, default="HoteLink 管理端")
+    support_phone = models.CharField(max_length=30, default="400-000-0000")
+    order_auto_cancel_minutes = models.PositiveIntegerField(default=30)
+
+    class Meta:
+        verbose_name = "Platform Config"
+        verbose_name_plural = "Platform Configs"
+
+    def __str__(self) -> str:
+        return self.platform_name
+
+    @classmethod
+    def load(cls) -> "PlatformConfig":
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
 
 
 class AuditLog(models.Model):

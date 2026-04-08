@@ -130,7 +130,7 @@ from apps.api.serializers import (
 from apps.bookings.models import BookingOrder
 from apps.crm.models import ChatMessage, ChatSession, CouponTemplate, FavoriteHotel, InvoiceRequest, InvoiceTitle, PointsLog, Review, UserCoupon
 from apps.hotels.models import Hotel, RoomInventory, RoomType
-from apps.operations.models import AICallLog, SystemNotice
+from apps.operations.models import AICallLog, PlatformConfig, SystemNotice
 from apps.operations.services.ai_service import AIChatService
 from apps.operations.services.prompt_service import PromptSceneError
 from config.ai import load_ai_settings, update_ai_settings, BUILTIN_PROVIDERS
@@ -970,8 +970,13 @@ class UserOrdersCreateView(APIView):
             user=request.user,
             notice_type=SystemNotice.TYPE_ORDER,
             title="订单创建成功",
-            content=f"订单 {order.order_no} 已创建，请尽快完成支付。",
+            content=f"订单 {order.order_no} 已创建，请在{PlatformConfig.load().order_auto_cancel_minutes}分钟内完成支付，逾期将自动取消。",
         )
+
+        # 自动取消未支付订单
+        from apps.bookings.tasks import auto_cancel_unpaid_order
+        cancel_minutes = PlatformConfig.load().order_auto_cancel_minutes
+        auto_cancel_unpaid_order.apply_async(args=[order.id], countdown=cancel_minutes * 60)
 
         return api_response(
             data={
@@ -1946,11 +1951,13 @@ class AdminSettingsView(APIView):
     permission_classes = [IsAuthenticated, IsAdminRole]
 
     def get(self, request):
+        cfg = PlatformConfig.load()
         return api_response(
             data={
-                "platform_name": "HoteLink 酒店管理系统",
-                "support_phone": "400-000-0000",
-                "order_auto_cancel_minutes": 30,
+                "platform_name": cfg.platform_name,
+                "admin_name": cfg.admin_name,
+                "support_phone": cfg.support_phone,
+                "order_auto_cancel_minutes": cfg.order_auto_cancel_minutes,
             }
         )
 
@@ -1960,7 +1967,170 @@ class AdminSettingsView(APIView):
         serializer = SettingsUpdateSerializer(data=request.data)
         if not serializer.is_valid():
             return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
-        return api_response(data=serializer.validated_data)
+        cfg = PlatformConfig.load()
+        data = serializer.validated_data
+        for field in ("platform_name", "admin_name", "support_phone", "order_auto_cancel_minutes"):
+            if field in data:
+                setattr(cfg, field, data[field])
+        cfg.save()
+        return api_response(data={
+            "platform_name": cfg.platform_name,
+            "admin_name": cfg.admin_name,
+            "support_phone": cfg.support_phone,
+            "order_auto_cancel_minutes": cfg.order_auto_cancel_minutes,
+        })
+
+
+class AdminSystemStatusView(APIView):
+    """系统运行状态接口：CPU/内存/磁盘/数据库统计/服务连通性/进程运行时间。"""
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def get(self, request):
+        import os
+        import platform
+        import shutil
+        import sys
+        import time
+
+        import django
+        from django.db import connection
+
+        process_start = time.time()
+
+        # 基本系统信息
+        uname = platform.uname()
+        uptime_seconds = None
+        if os.path.exists('/proc/uptime'):
+            uptime_seconds = int(float(open('/proc/uptime').read().split()[0]))
+
+        # 磁盘
+        disk = shutil.disk_usage('/')
+        disk_info = {
+            "total_gb": round(disk.total / (1024 ** 3), 2),
+            "used_gb": round(disk.used / (1024 ** 3), 2),
+            "free_gb": round(disk.free / (1024 ** 3), 2),
+            "usage_percent": round(disk.used / disk.total * 100, 1),
+        }
+
+        # 内存
+        mem_info = None
+        if os.path.exists('/proc/meminfo'):
+            meminfo = {}
+            with open('/proc/meminfo') as f:
+                for line in f:
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        meminfo[parts[0].rstrip(':')] = int(parts[1])
+            total = meminfo.get('MemTotal', 0)
+            available = meminfo.get('MemAvailable', 0)
+            used = total - available
+            mem_info = {
+                "total_mb": round(total / 1024, 1),
+                "used_mb": round(used / 1024, 1),
+                "available_mb": round(available / 1024, 1),
+                "usage_percent": round(used / total * 100, 1) if total else 0,
+            }
+
+        # CPU 负载
+        load_avg = None
+        cpu_count = os.cpu_count() or 1
+        if hasattr(os, 'getloadavg'):
+            la = os.getloadavg()
+            load_avg = {
+                "1min": round(la[0], 2),
+                "5min": round(la[1], 2),
+                "15min": round(la[2], 2),
+                "cores": cpu_count,
+            }
+
+        # 数据库统计
+        db_engine = connection.vendor
+        db_name = connection.settings_dict.get('NAME', '')
+        with connection.cursor() as cursor:
+            db_stats = {"engine": db_engine, "name": db_name}
+            if db_engine == 'sqlite':
+                if db_name and os.path.exists(db_name):
+                    db_stats["size_mb"] = round(os.path.getsize(db_name) / (1024 * 1024), 2)
+            elif db_engine == 'postgresql':
+                cursor.execute("SELECT pg_database_size(current_database())")
+                db_stats["size_mb"] = round(cursor.fetchone()[0] / (1024 * 1024), 2)
+            elif db_engine == 'mysql':
+                cursor.execute(
+                    "SELECT ROUND(SUM(data_length + index_length) / 1024 / 1024, 2) "
+                    "FROM information_schema.tables WHERE table_schema = %s",
+                    [db_name],
+                )
+                row = cursor.fetchone()
+                if row and row[0]:
+                    db_stats["size_mb"] = float(row[0])
+                # 表数量
+                cursor.execute(
+                    "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = %s",
+                    [db_name],
+                )
+                db_stats["table_count"] = cursor.fetchone()[0]
+            db_stats["host"] = connection.settings_dict.get('HOST', 'localhost') or 'localhost'
+            db_stats["port"] = connection.settings_dict.get('PORT', '') or ''
+
+        # Redis / Celery 连通性
+        services = {}
+        try:
+            from django.conf import settings as django_settings
+            broker_url = getattr(django_settings, 'CELERY_BROKER_URL', '')
+            if broker_url:
+                import redis
+                r = redis.from_url(broker_url, socket_connect_timeout=2)
+                r.ping()
+                redis_info = r.info('server')
+                services["redis"] = {
+                    "status": "connected",
+                    "version": redis_info.get('redis_version', ''),
+                    "url": broker_url.split('@')[-1] if '@' in broker_url else broker_url,
+                }
+        except Exception:
+            services["redis"] = {"status": "disconnected"}
+
+        try:
+            from config.celery import app as celery_app
+            insp = celery_app.control.inspect(timeout=2)
+            active = insp.active()
+            services["celery"] = {
+                "status": "connected" if active is not None else "disconnected",
+                "workers": len(active) if active else 0,
+            }
+        except Exception:
+            services["celery"] = {"status": "disconnected", "workers": 0}
+
+        # 业务数据统计
+        User = get_user_model()
+        biz_stats = {
+            "users": User.objects.count(),
+            "orders": BookingOrder.objects.count(),
+            "hotels": Hotel.objects.count(),
+            "room_types": RoomType.objects.count(),
+            "reviews": Review.objects.count(),
+            "notices": SystemNotice.objects.count(),
+            "ai_calls": AICallLog.objects.count(),
+        }
+
+        elapsed_ms = round((time.time() - process_start) * 1000)
+
+        return api_response(data={
+            "system": {
+                "os": f"{uname.system} {uname.release}",
+                "machine": uname.machine,
+                "python": sys.version.split()[0],
+                "django": django.__version__,
+                "uptime_seconds": uptime_seconds,
+            },
+            "disk": disk_info,
+            "memory": mem_info,
+            "cpu_load": load_avg,
+            "database": db_stats,
+            "services": services,
+            "business": biz_stats,
+            "query_ms": elapsed_ms,
+        })
 
 
 class AdminAISettingsView(APIView):

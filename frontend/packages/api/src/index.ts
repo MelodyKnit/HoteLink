@@ -201,6 +201,7 @@ export const settingsApi = {
 // ========== System ==========
 export const adminSystemApi = {
   reset: (confirm: string) => post<{ reset: boolean; deleted_counts: Record<string, number>; message: string }>('/admin/system/reset', { confirm }),
+  status: () => get('/admin/system/status'),
 }
 
 // ========== Admin Coupons ==========

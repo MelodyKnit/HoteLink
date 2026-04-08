@@ -600,6 +600,7 @@ class EmployeeCreateSerializer(serializers.Serializer):
 class SettingsUpdateSerializer(serializers.Serializer):
     """SettingsUpdate 序列化器：用于接口参数校验或响应数据转换。"""
     platform_name = serializers.CharField(max_length=100, required=False)
+    admin_name = serializers.CharField(max_length=100, required=False)
     support_phone = serializers.CharField(max_length=30, required=False)
     order_auto_cancel_minutes = serializers.IntegerField(min_value=1, required=False)
 
