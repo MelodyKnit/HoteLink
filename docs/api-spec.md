@@ -552,7 +552,87 @@ Authorization: Bearer <access_token>
 
 ## 9. 通用基础接口
 
-### 9.1 上传文件
+### 9.1 系统初始化检查
+
+**接口**
+
+`GET /api/v1/system/init-check`
+
+**权限**
+
+- 公开接口（`AllowAny`）
+
+**说明**
+
+判断系统中是否已存在管理员账号。前端首次访问时调用此接口，若返回 `initialized: false`，引导进入初始化页面。
+
+**成功返回**
+
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "initialized": false
+  }
+}
+```
+
+### 9.2 系统首次初始化
+
+**接口**
+
+`POST /api/v1/system/init-setup`
+
+**权限**
+
+- 公开接口（`AllowAny`）
+- 仅当系统中无管理员时可用
+
+**请求体**
+
+```json
+{
+  "username": "admin",
+  "password": "Password123"
+}
+```
+
+**参数说明**
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `username` | string | 是 | 管理员用户名 |
+| `password` | string | 是 | 管理员密码 |
+
+**成功返回**
+
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "access_token": "xxx",
+    "refresh_token": "xxx",
+    "token_type": "Bearer",
+    "expires_in": 7200,
+    "user": {
+      "id": 1,
+      "username": "admin",
+      "role": "system_admin"
+    }
+  }
+}
+```
+
+**错误码**
+
+| code | 说明 |
+|---|---|
+| `4030` | 系统已初始化，无法重复创建 |
+| `4090` | 用户名已存在 |
+
+### 9.3 上传文件
 
 **接口**
 
@@ -591,7 +671,7 @@ Authorization: Bearer <access_token>
 }
 ```
 
-### 9.2 图片缩略图
+### 9.4 图片缩略图
 
 **接口**
 
@@ -614,7 +694,7 @@ Authorization: Bearer <access_token>
 - 服务端会将原图缩放后返回 JPEG 小图并写入本地缓存目录（`media/.thumb_cache`）
 - 建议管理端列表优先使用该接口返回的小图 URL，降低带宽与解码开销
 
-### 9.3 城市列表
+### 9.5 城市列表
 
 **接口**
 
@@ -624,7 +704,7 @@ Authorization: Bearer <access_token>
 
 - 用于前端酒店筛选、地址表单、管理端酒店编辑
 
-### 9.4 字典数据
+### 9.6 字典数据
 
 **接口**
 
@@ -1199,9 +1279,100 @@ Authorization: Bearer <access_token>
 }
 ```
 
-### 12.20 我的消息通知
+### 12.20 消息通知
+
+#### 12.20.1 通知列表
 
 `GET /api/v1/user/notices`
+
+**查询参数**
+
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|—|——|
+| `page` | int | 否 | 页码，默认 1 |
+| `page_size` | int | 否 | 每页数量，默认 20 |
+
+**返回列表元素**
+
+| 字段 | 类型 | 说明 |
+|---|---|——|
+| `id` | int | 通知 ID |
+| `notice_type` | string | 通知类型，见下方枚举 |
+| `title` | string | 标题 |
+| `content` | string | 正文内容 |
+| `is_read` | bool | 是否已读 |
+| `created_at` | string | 创建时间 ISO 8601 |
+
+**`notice_type` 枚举**
+
+| 値 | 含义 |
+|---|---|
+| `order` | 订单通知 |
+| `payment` | 支付通知 |
+| `member` | 会员通知（升级、积分） |
+| `coupon` | 优惠券通知 |
+| `review` | 评价积分奖励 |
+| `activity` | 活动通知 |
+| `system` | 系统通知 |
+
+**额外返回字段**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "items": [...],
+    "total": 50,
+    "page": 1,
+    "page_size": 20,
+    "unread_count": 3
+  }
+}
+```
+
+#### 12.20.2 未读数量
+
+`GET /api/v1/user/notices/unread-count`
+
+**返回示例**
+
+```json
+{ "code": 0, "data": { "unread_count": 3 } }
+```
+
+#### 12.20.3 标记已读 / 未读
+
+`POST /api/v1/user/notices`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|—|——|
+| `action` | string | 否 | `read`（默认）标记已读；`unread` 标记未读 |
+| `ids` | array\<int\> | 否 | 指定通知 ID 列表；不传则操作全部 |
+
+**返回示例**
+
+```json
+{ "code": 0, "data": { "unread_count": 0 } }
+```
+
+#### 12.20.4 删除通知
+
+`DELETE /api/v1/user/notices`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|—|——|
+| `ids` | array\<int\> | 否 | 指定通知 ID 列表；不传则删除全部 |
+
+**返回示例**
+
+```json
+{ "code": 0, "data": { "deleted": 3, "unread_count": 0 } }
+```
+
+**前端交互设计**
+
+- 普通模式：点击卡片即自动标记已读；`order`/`payment`/`coupon` 类型跳转对应页；其余类型以书本动画展开详情
+- 管理模式（点击「管理」按鈕进入）：支持多选、全选，可批量标记已读 / 未读 / 删除、一键清空全部通知
 
 ## 13. 管理端接口
 
@@ -1533,6 +1704,155 @@ Authorization: Bearer <access_token>
 
 `POST /api/v1/admin/settings/update`
 
+### 13.28 会员等级概览
+
+`GET /api/v1/admin/members/overview`
+
+**权限**
+
+- `hotel_admin` / `system_admin`
+
+**返回示例**
+
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "total_users": 256,
+    "levels": [
+      {
+        "level": "normal",
+        "label": "普通会员",
+        "count": 180,
+        "threshold": 0,
+        "discount_rate": 1.0,
+        "points_multiplier": 1.0
+      },
+      {
+        "level": "silver",
+        "label": "银卡会员",
+        "count": 50,
+        "threshold": 500,
+        "discount_rate": 0.95,
+        "points_multiplier": 1.2
+      }
+    ]
+  }
+}
+```
+
+**返回字段**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `total_users` | int | 普通用户总数 |
+| `levels[].level` | string | 等级代码 |
+| `levels[].label` | string | 等级中文名 |
+| `levels[].count` | int | 该等级人数 |
+| `levels[].threshold` | int | 升级所需积分阈值 |
+| `levels[].discount_rate` | float | 折扣率（1.0 表示无折扣） |
+| `levels[].points_multiplier` | float | 积分倍率 |
+
+### 13.29 优惠券模板列表
+
+`GET /api/v1/admin/coupons`
+
+**权限**
+
+- `hotel_admin` / `system_admin`
+
+**查询参数**
+
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `status` | string | 否 | 筛选状态：`active` / `inactive` |
+| `page` | int | 否 | 页码 |
+| `page_size` | int | 否 | 每页数量 |
+
+**返回列表元素**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `id` | int | 模板 ID |
+| `name` | string | 优惠券名称 |
+| `coupon_type` | string | 类型：`cash`（满减）/ `discount`（折扣） |
+| `amount` | number | 满减金额（`cash` 类型） |
+| `discount` | number | 折扣值（`discount` 类型，如 `8.5` 表示 85 折） |
+| `min_amount` | number | 使用门槛金额 |
+| `total_count` | int | 发放总量 |
+| `claimed_count` | int | 已领取数量 |
+| `remaining` | int | 剩余数量 |
+| `per_user_limit` | int | 每人限领 |
+| `required_level` | string | 领取所需会员等级（空表示不限） |
+| `points_cost` | int | 兑换所需积分 |
+| `status` | string | 状态：`active` / `inactive` |
+| `valid_days` | int | 有效天数 |
+| `valid_start` | string | 有效期开始日期 |
+| `valid_end` | string | 有效期结束日期 |
+| `created_at` | string | 创建时间 |
+
+### 13.30 创建优惠券模板
+
+`POST /api/v1/admin/coupons/create`
+
+**权限**
+
+- `hotel_admin` / `system_admin`
+
+**请求体**
+
+```json
+{
+  "name": "新用户满200减30",
+  "coupon_type": "cash",
+  "amount": 30.00,
+  "discount": 10,
+  "min_amount": 200.00,
+  "total_count": 500,
+  "per_user_limit": 1,
+  "required_level": "",
+  "points_cost": 0,
+  "valid_days": 30,
+  "valid_start": "2026-04-01",
+  "valid_end": "2026-06-30"
+}
+```
+
+### 13.31 更新优惠券模板状态
+
+`POST /api/v1/admin/coupons/update`
+
+**请求体**
+
+```json
+{
+  "template_id": 1,
+  "status": "inactive"
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `template_id` | int | 是 | 模板 ID |
+| `status` | string | 是 | 目标状态：`active`（上架）/ `inactive`（下架） |
+
+### 13.32 系统重置
+
+详见 [§8.2 系统重置](#82-系统重置)。
+
+- `POST /api/v1/admin/system/reset`
+- 权限：仅 `system_admin`
+- 需发送 `{"confirm": "RESET"}` 确认
+
+### 13.33 AI 供应商管理
+
+详见 [§8.1 AI 多供应商管理](#81-ai-多供应商管理)。
+
+- `POST /api/v1/admin/ai/provider/add` — 新增/编辑供应商
+- `POST /api/v1/admin/ai/provider/switch` — 切换活跃供应商
+- `POST /api/v1/admin/ai/provider/delete` — 删除供应商
+
 ## 14. AI 相关接口
 
 说明：
@@ -1863,8 +2183,15 @@ Authorization: Bearer <access_token>
 
 ## 17. 模块接口清单速查
 
-### 17.1 公共与认证
+### 17.1 系统、公共与认证
 
+- `GET /api/v1/` — API 根路由
+- `GET /api/v1/system/init-check` — 检查系统是否已初始化
+- `POST /api/v1/system/init-setup` — 首次初始化：创建管理员
+- `POST /api/v1/common/upload`
+- `GET /api/v1/common/image-thumb` — 图片缩略图
+- `GET /api/v1/common/cities`
+- `GET /api/v1/common/dicts`
 - `POST /api/v1/public/auth/register`
 - `POST /api/v1/public/auth/login`
 - `POST /api/v1/public/auth/admin-login`
@@ -1875,9 +2202,6 @@ Authorization: Bearer <access_token>
 - `GET /api/v1/public/hotels/detail`
 - `GET /api/v1/public/hotels/reviews`
 - `GET /api/v1/public/room-types/calendar`
-- `POST /api/v1/common/upload`
-- `GET /api/v1/common/cities`
-- `GET /api/v1/common/dicts`
 
 ### 17.2 用户端
 
@@ -1897,13 +2221,22 @@ Authorization: Bearer <access_token>
 - `POST /api/v1/user/orders/pay`
 - `POST /api/v1/user/orders/cancel`
 - `POST /api/v1/user/reviews/create`
+- `GET /api/v1/user/reviews`
 - `GET /api/v1/user/points/logs`
 - `GET /api/v1/user/coupons`
+- `GET /api/v1/user/coupons/available`
+- `POST /api/v1/user/coupons/claim`
 - `GET /api/v1/user/invoices`
 - `POST /api/v1/user/invoices/create`
 - `POST /api/v1/user/invoices/apply`
 - `GET /api/v1/user/notices`
+- `GET /api/v1/user/notices/unread-count`
+- `POST /api/v1/user/notices`（标记已读/未读）
+- `DELETE /api/v1/user/notices`（删除通知）
+- `GET /api/v1/user/orders/guest-history`
+- `GET /api/v1/user/orders/available-coupons`
 - `POST /api/v1/user/ai/chat`
+- `POST /api/v1/user/ai/chat/stream` — AI 客服流式（SSE）
 
 ### 17.3 管理端
 
@@ -1939,6 +2272,14 @@ Authorization: Bearer <access_token>
 - `POST /api/v1/admin/ai/reply-suggestion`
 - `GET /api/v1/admin/ai/settings`
 - `POST /api/v1/admin/ai/settings/update`
+- `POST /api/v1/admin/ai/provider/add` — 新增/编辑 AI 供应商
+- `POST /api/v1/admin/ai/provider/switch` — 切换活跃供应商
+- `POST /api/v1/admin/ai/provider/delete` — 删除供应商
+- `GET /api/v1/admin/members/overview` — 会员等级概览
+- `GET /api/v1/admin/coupons` — 优惠券模板列表
+- `POST /api/v1/admin/coupons/create` — 创建优惠券模板
+- `POST /api/v1/admin/coupons/update` — 更新优惠券模板状态
+- `POST /api/v1/admin/system/reset` — 系统重置（仅 system_admin）
 
 ## 18. 与论文和文档体系的关系
 

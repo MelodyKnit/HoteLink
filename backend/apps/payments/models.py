@@ -29,6 +29,7 @@ class PaymentRecord(models.Model):
         (STATUS_REFUNDED, "已退款"),
     ]
 
+    order_id: int
     order = models.ForeignKey("bookings.BookingOrder", on_delete=models.CASCADE, related_name="payments")
     payment_no = models.CharField(max_length=64, unique=True)
     method = models.CharField(max_length=20, choices=METHOD_CHOICES, default=METHOD_MOCK)

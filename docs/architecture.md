@@ -94,6 +94,7 @@
 HoteLink/
 ├─ backend/
 │  ├─ apps/
+│  │  ├─ api/
 │  │  ├─ users/
 │  │  ├─ hotels/
 │  │  ├─ bookings/
@@ -141,7 +142,22 @@ HoteLink/
 
 ## 6. 核心业务模块
 
-### 6.1 users
+### 6.1 api
+
+负责：
+
+- 统一路由注册（`urls.py`）
+- 所有 REST 视图（`views.py`，当前 73 个 View）
+- 序列化器（`serializers.py`）
+- 权限类（`permissions.py`）
+- 统一响应格式（`responses.py`）
+
+说明：
+
+- 本项目将所有接口层集中在 `apps/api` 中，其他 app 仅定义 Model 和 Service
+- 这种架构避免了 View 分散在多个 app 中导致的路由管理复杂性
+
+### 6.2 users
 
 负责：
 
@@ -157,7 +173,7 @@ HoteLink/
 - 用户与员工可采用统一账户表 + 扩展资料表方案
 - 管理端权限采用 RBAC
 
-### 6.2 hotels
+### 6.3 hotels
 
 负责：
 
@@ -177,7 +193,7 @@ HoteLink/
 - RoomInventory
 - Facility
 
-### 6.3 bookings
+### 6.4 bookings
 
 负责：
 
@@ -196,7 +212,7 @@ HoteLink/
 - CheckOutRecord
 - StayExtension
 
-### 6.4 payments
+### 6.5 payments
 
 负责：
 
@@ -214,7 +230,7 @@ HoteLink/
 - Bill
 - BillItem
 
-### 6.5 crm
+### 6.6 crm
 
 负责：
 
@@ -223,7 +239,7 @@ HoteLink/
 - 会员等级
 - 评价记录
 
-### 6.6 reports
+### 6.7 reports
 
 负责：
 
@@ -232,7 +248,7 @@ HoteLink/
 - 房态统计
 - 订单来源分析
 
-### 6.7 operations
+### 6.8 operations
 
 负责：
 
@@ -242,7 +258,7 @@ HoteLink/
 - 异步任务
 - AI 服务编排
 
-### 6.8 ai
+### 6.9 ai
 
 负责：
 
@@ -273,7 +289,7 @@ HoteLink/
 - 接口层能力：`/api/v1/user/ai/chat`（普通）与 `/api/v1/user/ai/chat/stream`（流式）
 - 等后续 AI 相关功能增多时，可再独立拆分 `apps.ai`
 
-### 6.9 system-ops
+### 6.10 system-ops
 
 负责：
 

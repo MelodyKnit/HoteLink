@@ -29,9 +29,15 @@
             <h4 class="font-semibold text-gray-800">{{ order.hotel_name || '酒店' }}</h4>
             <p class="mt-0.5 text-xs text-gray-400">{{ order.room_type_name || '房型' }}</p>
           </div>
-          <span class="shrink-0 text-xs font-medium" :class="statusColor(order.status)">
-            {{ statusLabel(order.status) }}
-          </span>
+          <div class="flex flex-col items-end gap-1">
+            <span class="shrink-0 text-xs font-medium" :class="statusColor(order.status)">
+              {{ statusLabel(order.status) }}
+            </span>
+            <span v-if="order.status === 'completed' && !order.has_review"
+              class="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
+              待评价
+            </span>
+          </div>
         </div>
         <div class="mt-3 flex items-end justify-between text-sm text-gray-500">
           <div>

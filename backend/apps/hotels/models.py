@@ -102,6 +102,7 @@ class RoomInventory(models.Model):
         (STATUS_OFFLINE, "下线不可售"),
     ]
 
+    room_type_id: int
     room_type = models.ForeignKey(RoomType, on_delete=models.CASCADE, related_name="inventories")
     date = models.DateField()
     price = models.DecimalField(max_digits=10, decimal_places=2, default=0)

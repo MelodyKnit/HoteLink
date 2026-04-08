@@ -45,7 +45,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { userOrderApi } from '@hotelink/api'
+import { userReviewApi } from '@hotelink/api'
 
 const loading = ref(true)
 const reviews = ref<any[]>([])
@@ -53,10 +53,8 @@ const error = ref('')
 
 onMounted(async () => {
   try {
-    /* Reuse order list with filter to get orders with reviews,
-       or a dedicated review list API if available */
-    const res = await (userOrderApi as any).reviews?.() || { code: -1 }
-    if (res.code === 0 && res.data) reviews.value = res.data.items || res.data
+    const res = await userReviewApi.list({ page: 1, page_size: 50 })
+    if (res.code === 0 && res.data) reviews.value = (res.data as any).items || []
     else reviews.value = []
   } catch {
     reviews.value = []

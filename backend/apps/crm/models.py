@@ -23,6 +23,8 @@ class CustomerProfile(models.Model):
 
 class FavoriteHotel(models.Model):
     """用户收藏酒店关系模型。"""
+    user_id: int
+    hotel_id: int
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="favorite_hotels")
     hotel = models.ForeignKey("hotels.Hotel", on_delete=models.CASCADE, related_name="favorited_by")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -39,11 +41,15 @@ class FavoriteHotel(models.Model):
 
 class Review(models.Model):
     """订单评价模型。"""
+    order_id: int
+    user_id: int
+    hotel_id: int
     order = models.OneToOneField("bookings.BookingOrder", on_delete=models.CASCADE, related_name="review")
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="reviews")
     hotel = models.ForeignKey("hotels.Hotel", on_delete=models.CASCADE, related_name="reviews")
     score = models.PositiveSmallIntegerField(default=5)
     content = models.TextField()
+    images = models.JSONField(default=list, blank=True, help_text="评价图片URL列表")
     reply_content = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -72,6 +78,8 @@ class PointsLog(models.Model):
         (TYPE_LEVEL_UP_GIFT, "升级礼包"),
     ]
 
+    user_id: int
+    order_id: int
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="points_logs")
     log_type = models.CharField(max_length=30, choices=TYPE_CHOICES)
     points = models.IntegerField(help_text="正值为获得，负值为消耗")
@@ -153,6 +161,9 @@ class UserCoupon(models.Model):
         (TYPE_DISCOUNT, "折扣券"),
     ]
 
+    user_id: int
+    template_id: int | None
+    used_order_id: int | None
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="coupons")
     template = models.ForeignKey(CouponTemplate, on_delete=models.SET_NULL, null=True, blank=True, related_name="user_coupons")
     name = models.CharField(max_length=100)
@@ -185,6 +196,7 @@ class InvoiceTitle(models.Model):
         (TYPE_COMPANY, "企业发票"),
     ]
 
+    user_id: int
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="invoice_titles")
     invoice_type = models.CharField(max_length=20, choices=TYPE_CHOICES, default=TYPE_PERSONAL)
     title = models.CharField(max_length=150)
@@ -212,6 +224,8 @@ class InvoiceRequest(models.Model):
         (STATUS_CANCELLED, "已取消"),
     ]
 
+    order_id: int
+    invoice_title_id: int
     order = models.ForeignKey("bookings.BookingOrder", on_delete=models.CASCADE, related_name="invoice_requests")
     invoice_title = models.ForeignKey(InvoiceTitle, on_delete=models.CASCADE, related_name="invoice_requests")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)

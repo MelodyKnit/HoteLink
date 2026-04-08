@@ -6,6 +6,7 @@ from django.db import models
 
 class AuditLog(models.Model):
     """审计日志模型，记录关键操作事件。"""
+    user_id: int | None
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="audit_logs")
     action = models.CharField(max_length=100)
     target = models.CharField(max_length=100, blank=True)
@@ -40,6 +41,7 @@ class SystemNotice(models.Model):
         (TYPE_COUPON, "优惠券通知"),
     ]
 
+    user_id: int
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="system_notices")
     notice_type = models.CharField(max_length=20, choices=TYPE_CHOICES, default=TYPE_SYSTEM)
     title = models.CharField(max_length=100)

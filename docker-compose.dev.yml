@@ -141,6 +141,52 @@ services:
     networks:
       - hotelink-dev-net
 
+  celery-worker-dev:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.dev
+    container_name: hotelink-celery-worker-dev
+    restart: unless-stopped
+    env_file:
+      - .env.docker.dev
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    working_dir: /app
+    volumes:
+      - ./backend:/app
+      - poetry_cache:/root/.cache/pypoetry
+    command: >
+      sh -c "poetry install --only main --no-root &&
+      celery -A config.celery worker --loglevel=info"
+    networks:
+      - hotelink-dev-net
+
+  celery-beat-dev:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.dev
+    container_name: hotelink-celery-beat-dev
+    restart: unless-stopped
+    env_file:
+      - .env.docker.dev
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    working_dir: /app
+    volumes:
+      - ./backend:/app
+      - poetry_cache:/root/.cache/pypoetry
+    command: >
+      sh -c "poetry install --only main --no-root &&
+      celery -A config.celery beat --loglevel=info"
+    networks:
+      - hotelink-dev-net
+
 volumes:
   mysql_dev_data:
   redis_dev_data:

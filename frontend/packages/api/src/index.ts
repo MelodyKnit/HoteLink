@@ -300,7 +300,8 @@ export const userOrderApi = {
 
 // ========== User Reviews ==========
 export const userReviewApi = {
-  create: (data: { order_id: number; score: number; content: string }) => post('/user/reviews/create', data),
+  list: (params?: Record<string, unknown>) => get<PaginatedData>('/user/reviews', params),
+  create: (data: { order_id: number; score: number; content: string; images?: string[] }) => post('/user/reviews/create', data),
 }
 
 // ========== User Favorites ==========
@@ -334,7 +335,8 @@ export const userPointsApi = {
 // ========== User Notices ==========
 export const userNoticeApi = {
   list: (params?: Record<string, unknown>) => get<PaginatedData>('/user/notices', params),
-  markRead: (ids?: number[]) => post<{ unread_count: number }>('/user/notices', ids ? { ids } : {}),
+  markRead: (ids?: number[]) => post<{ unread_count: number }>('/user/notices', ids ? { ids, action: 'read' } : { action: 'read' }),
+  markUnread: (ids: number[]) => post<{ unread_count: number }>('/user/notices', { ids, action: 'unread' }),
   unreadCount: () => get<{ unread_count: number }>('/user/notices/unread-count'),
   deleteNotices: (ids?: number[]) => del<{ deleted: number; unread_count: number }>('/user/notices', ids ? { ids } : {}),
 }

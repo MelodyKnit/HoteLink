@@ -36,6 +36,10 @@ class BookingOrder(models.Model):
         (PAYMENT_REFUNDED, "已退款"),
     ]
 
+    user_id: int
+    hotel_id: int
+    room_type_id: int
+    coupon_id: int | None
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="booking_orders")
     hotel = models.ForeignKey("hotels.Hotel", on_delete=models.PROTECT, related_name="booking_orders")
     room_type = models.ForeignKey("hotels.RoomType", on_delete=models.PROTECT, related_name="booking_orders")

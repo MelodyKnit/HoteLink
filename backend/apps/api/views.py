@@ -7,21 +7,27 @@ apps/api/views.py —— 项目所有 REST API 视图类。
             RefreshTokenApiView / LogoutApiView / UserAuthMeView
   《公共》  PublicHomeView / PublicHotelsView / PublicHotelSearchSuggestView /
             PublicHotelDetailView / PublicHotelReviewsView / PublicRoomTypeCalendarView /
-            CommonCitiesView / CommonDictsView / CommonUploadView
+            CommonCitiesView / CommonDictsView / CommonUploadView / CommonImageThumbView
   《用户》  UserProfileView / UserProfileAvatarView / UserPasswordChangeView /
-            UserFavoritesView / UserOrdersView / UserOrdersDetailView /
-            UserOrdersCreateView / UserOrdersUpdateView / UserOrdersPayView /
-            UserOrdersCancelView / UserReviewsCreateView / UserPointsLogsView /
-            UserNoticesView / UserCouponsView / UserInvoicesView /
-            UserInvoiceTitleCreateView / UserInvoiceApplyView / UserAIChatView
-  《管理员》  AdminDashboardOverviewView / AdminDashboardChartsView / AdminHotelsView /
-            AdminRoomTypesView / AdminInventoryView / AdminOrdersView /
-            AdminOrdersDetailView / AdminOrdersChangeStatusView /
-            AdminOrdersCheckInView / AdminOrdersCheckOutView / AdminReviewsView /
-            AdminReviewsReplyView / AdminUsersView / AdminUsersChangeStatusView /
-            AdminEmployeesView / AdminSettingsView / AdminAISettingsView /
+            UserFavoritesView / UserOrdersView / UserOrderGuestHistoryView /
+            UserOrdersDetailView / UserOrdersCreateView / UserOrdersUpdateView /
+            UserOrdersPayView / UserOrdersCancelView / UserReviewsCreateView /
+            UserReviewsListView / UserPointsLogsView / UserNoticesView /
+            UserNoticeUnreadCountView / UserCouponsView / UserAvailableCouponsView /
+            UserClaimCouponView / UserOrderAvailableCouponsView / UserInvoicesView /
+            UserInvoiceTitleCreateView / UserInvoiceApplyView / UserAIChatView /
+            UserAIChatStreamView
+  《管理员》  AdminDashboardOverviewView / AdminDashboardChartsView /
+            AdminMemberOverviewView / AdminCouponTemplatesView /
+            AdminCouponTemplateUpdateView / AdminHotelsView / AdminRoomTypesView /
+            AdminInventoryView / AdminOrdersView / AdminOrdersDetailView /
+            AdminOrdersChangeStatusView / AdminOrdersCheckInView /
+            AdminOrdersCheckOutView / AdminReviewsView / AdminReviewsReplyView /
+            AdminUsersView / AdminUsersChangeStatusView / AdminEmployeesView /
+            AdminSettingsView / AdminAISettingsView / AdminAIProviderAddView /
+            AdminAIProviderSwitchView / AdminAIProviderDeleteView /
             AdminAIReportSummaryView / AdminAIReviewSummaryView /
-            AdminAIReplySuggestionView / AdminReportTasksView
+            AdminAIReplySuggestionView / AdminReportTasksView / AdminSystemResetView
 """
 from __future__ import annotations
 
@@ -1045,7 +1051,7 @@ class UserOrdersCancelView(APIView):
 
 
 class UserReviewsCreateView(APIView):
-    """用户评价创建接口：可新增或更新评价，首评奖励积分。"""
+    """用户评价创建接口：仅限已完成订单，首评按内容质量分级奖励积分。"""
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -1056,6 +1062,9 @@ class UserReviewsCreateView(APIView):
         order = BookingOrder.objects.filter(id=data["order_id"], user=request.user).select_related("hotel").first()
         if not order:
             return api_response(code=4040, message="订单不存在", data=None, status_code=404)
+        if order.status != "completed":
+            return api_response(code=4003, message="只有已完成的订单才可以评价", data=None, status_code=403)
+        images = data.get("images") or []
         review, created = Review.objects.update_or_create(
             order=order,
             defaults={
@@ -1063,11 +1072,61 @@ class UserReviewsCreateView(APIView):
                 "hotel": order.hotel,
                 "score": data["score"],
                 "content": data["content"],
+                "images": images,
             },
         )
+        points_awarded = 0
         if created:
-            add_points(request.user, 10, PointsLog.TYPE_REVIEW_REWARD, f"评价订单 {order.order_no} 奖励", order=order)
-        return api_response(data={"review_id": review.id, "score": review.score})
+            char_len = len(data["content"].strip())
+            has_images = len(images) > 0
+            if char_len >= 100 and has_images:
+                points_earned = 10
+            elif char_len >= 50 and has_images:
+                points_earned = 7
+            elif char_len >= 50:
+                points_earned = 5
+            else:
+                points_earned = 0
+            if points_earned > 0:
+                add_points(request.user, points_earned, PointsLog.TYPE_REVIEW_REWARD, f"评价订单 {order.order_no} 奖励", order=order)
+                points_awarded = points_earned
+                SystemNotice.objects.create(
+                    user=request.user,
+                    notice_type=SystemNotice.TYPE_MEMBER,
+                    title="评价积分奖励",
+                    content=f"感谢您对「{order.hotel.name}」的评价，已奖励 {points_earned} 积分！",
+                )
+        return api_response(data={"review_id": review.id, "score": review.score, "points_awarded": points_awarded})
+
+
+class UserReviewsListView(APIView):
+    """用户自己的评价列表。"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        qs = (
+            Review.objects.filter(user=request.user)
+            .select_related("hotel", "order")
+            .order_by("-created_at")
+        )
+        page = max(int(request.query_params.get("page", 1)), 1)
+        page_size = min(int(request.query_params.get("page_size", 10)), 50)
+        total = qs.count()
+        items = qs[(page - 1) * page_size: page * page_size]
+        data = []
+        for r in items:
+            data.append({
+                "id": r.id,
+                "hotel_id": r.hotel_id,
+                "hotel_name": r.hotel.name if r.hotel else "",
+                "room_type_name": r.order.room_type_name if r.order and hasattr(r.order, "room_type_name") else "",
+                "score": r.score,
+                "content": r.content,
+                "images": r.images or [],
+                "reply": r.reply_content or "",
+                "created_at": r.created_at.strftime("%Y-%m-%d") if r.created_at else "",
+            })
+        return paginated_response(items=data, page=page, page_size=page_size, total=total)
 
 
 class UserPointsLogsView(APIView):
@@ -1105,12 +1164,16 @@ class UserNoticesView(APIView):
         )
 
     def post(self, request):
-        """标记通知已读：ids=[] 标记指定，ids=null/不传 标记全部已读。"""
+        """标记通知已读/未读：action='read'（默认）标记已读，action='unread' 标记未读；ids=[] 指定，不传则操作全部。"""
         ids = request.data.get("ids")
-        queryset = SystemNotice.objects.filter(user=request.user, is_read=False)
+        action = request.data.get("action", "read")
+        queryset = SystemNotice.objects.filter(user=request.user)
         if ids:
             queryset = queryset.filter(id__in=ids)
-        queryset.update(is_read=True)
+        if action == "unread":
+            queryset.update(is_read=False)
+        else:
+            queryset.filter(is_read=False).update(is_read=True)
         unread_count = SystemNotice.objects.filter(user=request.user, is_read=False).count()
         return api_response(data={"unread_count": unread_count})
 

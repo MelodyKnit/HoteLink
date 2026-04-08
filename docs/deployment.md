@@ -80,6 +80,8 @@
 - `backend-check`
 - `user-web-dev`
 - `admin-web-dev`
+- `celery-worker-dev`
+- `celery-beat-dev`
 
 对应卷与网络：
 

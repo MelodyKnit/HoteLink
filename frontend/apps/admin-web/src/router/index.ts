@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { getToken, systemApi } from '@hotelink/api'
+import { useAuthStore } from '@hotelink/store'
 import AdminLayout from '../layouts/AdminLayout.vue'
 
 let systemInitialized: boolean | null = null
@@ -85,6 +86,19 @@ router.beforeEach(async (to) => {
   }
   if (to.meta.guest && token) {
     return { name: 'dashboard' }
+  }
+
+  // 刷新后恢复用户数据
+  if (token) {
+    const auth = useAuthStore()
+    if (!auth.user) {
+      await auth.fetchMe()
+      // 验证管理员角色
+      if (auth.user && !auth.isAdmin) {
+        auth.logout()
+        return { name: 'login' }
+      }
+    }
   }
 })
 

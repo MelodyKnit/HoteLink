@@ -148,6 +148,7 @@ class ReviewSerializer(serializers.ModelSerializer):
             "username",
             "score",
             "content",
+            "images",
             "reply_content",
             "created_at",
         ]
@@ -177,6 +178,7 @@ class BookingOrderSerializer(serializers.ModelSerializer):
     room_type_id = serializers.IntegerField(read_only=True)
     payment_method = serializers.SerializerMethodField()
     total_amount = serializers.SerializerMethodField()
+    has_review = serializers.SerializerMethodField()
 
     def get_payment_method(self, obj):
         latest_payment = obj.payments.order_by("-id").first()
@@ -184,6 +186,12 @@ class BookingOrderSerializer(serializers.ModelSerializer):
 
     def get_total_amount(self, obj):
         return obj.pay_amount
+
+    def get_has_review(self, obj):
+        try:
+            return obj.review is not None
+        except Exception:
+            return False
 
     class Meta:
         model = BookingOrder
@@ -211,6 +219,7 @@ class BookingOrderSerializer(serializers.ModelSerializer):
             "discount_amount",
             "pay_amount",
             "total_amount",
+            "has_review",
             "created_at",
         ]
 
@@ -334,6 +343,12 @@ class ReviewCreateSerializer(serializers.Serializer):
     order_id = serializers.IntegerField(min_value=1)
     score = serializers.IntegerField(min_value=1, max_value=5)
     content = serializers.CharField()
+    images = serializers.ListField(
+        child=serializers.CharField(max_length=500),
+        required=False,
+        default=list,
+        max_length=9,
+    )
 
 
 class HotelCreateSerializer(serializers.ModelSerializer):

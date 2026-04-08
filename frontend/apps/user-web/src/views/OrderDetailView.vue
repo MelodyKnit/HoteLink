@@ -91,6 +91,15 @@
       </div>
     </div>
 
+    <!-- 评价成功积分提示 -->
+    <Teleport to="body">
+      <Transition enter-active-class="transition duration-300" enter-from-class="opacity-0 translate-y-2" leave-active-class="transition duration-300" leave-to-class="opacity-0 translate-y-2">
+        <div v-if="reviewSuccessMsg" class="fixed bottom-24 left-1/2 z-[60] -translate-x-1/2 rounded-full bg-green-600 px-5 py-2 text-sm text-white shadow-lg">
+          {{ reviewSuccessMsg }}
+        </div>
+      </Transition>
+    </Teleport>
+
     <!-- Cancel modal -->
     <Teleport to="body">
       <div v-if="showCancelModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" @click.self="showCancelModal = false">
@@ -108,19 +117,76 @@
     <!-- Review modal -->
     <Teleport to="body">
       <div v-if="showReviewModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" @click.self="showReviewModal = false">
-        <div class="w-full max-w-sm rounded-2xl bg-white p-6">
-          <h3 class="text-lg font-bold text-gray-900">评价订单</h3>
-          <div class="mt-3">
-            <p class="mb-1 text-sm text-gray-500">评分</p>
-            <div class="flex gap-2">
-              <button v-for="s in 5" :key="s" @click="reviewScore = s"
-                class="text-2xl transition" :class="s <= reviewScore ? 'text-yellow-500' : 'text-gray-300'">★</button>
+        <div class="w-full max-w-md rounded-2xl bg-white p-6 max-h-[90vh] overflow-y-auto">
+          <h3 class="text-lg font-bold text-gray-900">评价入住体验</h3>
+          <p class="mt-0.5 text-xs text-gray-400">{{ order.hotel_name }}</p>
+
+          <!-- 星级评分 -->
+          <div class="mt-4">
+            <p class="mb-1.5 text-sm font-medium text-gray-700">总体评分</p>
+            <div class="flex gap-1">
+              <button v-for="s in 5" :key="s" type="button" @click="reviewScore = s"
+                class="text-3xl leading-none transition-transform hover:scale-110"
+                :class="s <= reviewScore ? 'text-yellow-400' : 'text-gray-200'">&#9733;</button>
+              <span class="ml-2 self-center text-sm text-gray-500">{{ ['','很差','较差','一般','不错','很好'][reviewScore] }}</span>
             </div>
           </div>
-          <textarea v-model="reviewContent" rows="3" placeholder="分享您的入住体验..." class="mt-3 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
-          <div class="mt-4 flex gap-3">
-            <button @click="showReviewModal = false" class="flex-1 rounded-xl border py-2.5 text-sm text-gray-600">取消</button>
-            <button @click="handleReview" :disabled="reviewing" class="flex-1 rounded-xl bg-brand py-2.5 text-sm text-white hover:bg-brand-dark disabled:opacity-50">提交评价</button>
+
+          <!-- 评价内容 -->
+          <div class="mt-4">
+            <div class="flex items-center justify-between">
+              <p class="text-sm font-medium text-gray-700">评价内容</p>
+              <span class="text-xs" :class="reviewCharCount >= 100 ? 'text-green-600 font-medium' : reviewCharCount >= 50 ? 'text-brand font-medium' : 'text-gray-400'">
+                {{ reviewCharCount }}字
+                <span v-if="reviewCharCount < 50">（50字起）</span>
+              </span>
+            </div>
+            <textarea v-model="reviewContent" rows="4" maxlength="1000"
+              placeholder="分享您的入住体验，50字以上可获得积分奖励…"
+              class="mt-1.5 w-full resize-none rounded-xl border border-gray-200 px-3 py-2.5 text-sm outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/20" />
+            <div class="mt-1 h-1 overflow-hidden rounded-full bg-gray-100">
+              <div class="h-full rounded-full transition-all duration-300"
+                :class="reviewCharCount >= 100 ? 'bg-green-500' : reviewCharCount >= 50 ? 'bg-brand' : 'bg-gray-300'"
+                :style="{ width: Math.min(reviewCharCount, 100) + '%' }" />
+            </div>
+          </div>
+
+          <!-- 图片上传 -->
+          <div class="mt-4">
+            <div class="flex items-center justify-between">
+              <p class="text-sm font-medium text-gray-700">上传图片 <span class="font-normal text-gray-400">（选填）</span></p>
+              <span class="text-xs text-gray-400">{{ reviewImages.length }}/9</span>
+            </div>
+            <div class="mt-2 flex flex-wrap gap-2">
+              <div v-for="(img, idx) in reviewImages" :key="idx" class="group relative h-20 w-20 overflow-hidden rounded-xl">
+                <img :src="img" class="h-full w-full object-cover" />
+                <button type="button" @click="removeReviewImage(idx)"
+                  class="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition group-hover:opacity-100">
+                  <span class="text-xl text-white">×</span>
+                </button>
+              </div>
+              <label v-if="reviewImages.length < 9"
+                class="flex h-20 w-20 cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-gray-200 text-gray-400 transition hover:border-brand hover:text-brand"
+                :class="uploadingImage ? 'opacity-50 pointer-events-none' : ''">
+                <span class="text-2xl">{{ uploadingImage ? '…' : '+' }}</span>
+                <span class="text-xs">添加图片</span>
+                <input type="file" accept="image/*" multiple class="hidden" :disabled="uploadingImage" @change="handleReviewImageUpload" />
+              </label>
+            </div>
+          </div>
+
+          <!-- 积分预览 -->
+          <div class="mt-4 rounded-xl bg-teal-50 px-3 py-2.5 text-xs text-teal-700">
+            <p class="font-medium">可获积分：<span class="text-base font-bold text-brand">+{{ reviewPointsPreview }}</span> 分</p>
+            <p class="mt-0.5 text-teal-600/70">50字→5分 · +图片→7分 · 100字+图片→10分（首次评价可奖励）</p>
+          </div>
+
+          <div class="mt-5 flex gap-3">
+            <button type="button" @click="showReviewModal = false" class="flex-1 rounded-xl border border-gray-200 py-2.5 text-sm text-gray-600 hover:bg-gray-50">取消</button>
+            <button type="button" @click="handleReview" :disabled="reviewing || !reviewContent.trim()"
+              class="flex-1 rounded-xl bg-brand py-2.5 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-40">
+              {{ reviewing ? '提交中…' : '提交评价' }}
+            </button>
           </div>
         </div>
       </div>
@@ -131,7 +197,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { userOrderApi, userReviewApi } from '@hotelink/api'
+import { userOrderApi, userReviewApi, commonApi } from '@hotelink/api'
 import { ORDER_STATUS_MAP, PAYMENT_METHOD_MAP, PAYMENT_STATUS_MAP, formatMoney } from '@hotelink/utils'
 
 const route = useRoute()
@@ -148,7 +214,20 @@ const cancelling = ref(false)
 const showReviewModal = ref(false)
 const reviewScore = ref(5)
 const reviewContent = ref('')
+const reviewImages = ref<string[]>([])
 const reviewing = ref(false)
+const uploadingImage = ref(false)
+const reviewSuccessMsg = ref('')
+
+const reviewCharCount = computed(() => reviewContent.value.trim().length)
+const reviewPointsPreview = computed(() => {
+  const len = reviewCharCount.value
+  const hasImg = reviewImages.value.length > 0
+  if (len >= 100 && hasImg) return 10
+  if (len >= 50 && hasImg) return 7
+  if (len >= 50) return 5
+  return 0
+})
 
 const paymentMethodMap = PAYMENT_METHOD_MAP
 const paymentStatusMap = PAYMENT_STATUS_MAP
@@ -159,6 +238,23 @@ const canCancel = computed(() => ['pending_payment', 'paid', 'confirmed'].includ
 
 // 处理 goToPay 业务流程。
 function goToPay() { router.push(`/payment/${orderId}`) }
+
+async function handleReviewImageUpload(e: Event) {
+  const files = (e.target as HTMLInputElement).files
+  if (!files?.length) return
+  uploadingImage.value = true
+  try {
+    for (const file of Array.from(files)) {
+      if (reviewImages.value.length >= 9) break
+      const res = await commonApi.upload(file, 'review')
+      if (res.code === 0 && res.data) reviewImages.value.push((res.data as any).file_url as string)
+    }
+  } catch { /* ignore */ }
+  uploadingImage.value = false
+  ;(e.target as HTMLInputElement).value = ''
+}
+
+function removeReviewImage(idx: number) { reviewImages.value.splice(idx, 1) }
 
 // 处理 Cancel 交互逻辑。
 async function handleCancel() {
@@ -178,10 +274,21 @@ async function handleReview() {
   if (!reviewContent.value.trim()) return
   reviewing.value = true
   try {
-    const res = await userReviewApi.create({ order_id: orderId, score: reviewScore.value, content: reviewContent.value })
+    const res = await userReviewApi.create({
+      order_id: orderId,
+      score: reviewScore.value,
+      content: reviewContent.value,
+      images: reviewImages.value,
+    })
     if (res.code === 0) {
       order.value.has_review = true
       showReviewModal.value = false
+      reviewImages.value = []
+      const pts = (res.data as any)?.points_awarded ?? 0
+      if (pts > 0) {
+        reviewSuccessMsg.value = `评价成功！奖励 +${pts} 积分`
+        setTimeout(() => { reviewSuccessMsg.value = '' }, 4000)
+      }
     }
   } catch { /* ignore */ }
   reviewing.value = false
