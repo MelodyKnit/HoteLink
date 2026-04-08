@@ -27,7 +27,14 @@ apps/api/views.py —— 项目所有 REST API 视图类。
             AdminSettingsView / AdminAISettingsView / AdminAIProviderAddView /
             AdminAIProviderSwitchView / AdminAIProviderDeleteView /
             AdminAIReportSummaryView / AdminAIReviewSummaryView /
-            AdminAIReplySuggestionView / AdminReportTasksView / AdminSystemResetView
+            AdminAIReplySuggestionView / AdminAIPricingSuggestionView /
+            AdminAIBusinessReportView / AdminAIBusinessReportStreamView /
+            AdminAIReviewSentimentView / AdminAIMarketingCopyView /
+            AdminAIContentGenerateView / AdminAIAnomalyReportView /
+            AdminAIOrderAnomalySummaryView / AdminReportTasksView /
+            AdminAICallLogsView / AdminAIUsageStatsView / AdminSystemResetView
+  《用户AI》  UserAIRecommendationsView / UserAIHotelCompareView /
+            UserAISessionsView / UserAISessionMessagesView
 """
 from __future__ import annotations
 
@@ -55,14 +62,27 @@ from apps.api.permissions import IsAdminRole, IsSystemAdminRole, get_user_role
 from apps.api.responses import api_response, paginated_response
 from apps.api.serializers import (
     AIChatSerializer,
+    AIAnomalyReportSerializer,
+    AIBusinessReportSerializer,
+    AIOrderAnomalySummarySerializer,
+    AICallLogSerializer,
+    AIContentGenerateSerializer,
+    AIHotelCompareSerializer,
+    AIMarketingCopySerializer,
+    AIPricingSuggestionSerializer,
     AIProviderCreateSerializer,
     AIProviderDeleteSerializer,
     AIProviderSwitchSerializer,
+    AIRecommendationsSerializer,
     AIReplySuggestionSerializer,
     AIReportSummarySerializer,
+    AIReviewSentimentSerializer,
     AIReviewSummarySerializer,
     AISettingsUpdateSerializer,
     BookingOrderSerializer,
+    ChatMessageSerializer,
+    ChatSessionDeleteSerializer,
+    ChatSessionSerializer,
     InitSetupSerializer,
     ChangeUserStatusSerializer,
     CheckInSerializer,
@@ -108,9 +128,9 @@ from apps.api.serializers import (
     UserProfileSerializer,
 )
 from apps.bookings.models import BookingOrder
-from apps.crm.models import CouponTemplate, FavoriteHotel, InvoiceRequest, InvoiceTitle, PointsLog, Review, UserCoupon
+from apps.crm.models import ChatMessage, ChatSession, CouponTemplate, FavoriteHotel, InvoiceRequest, InvoiceTitle, PointsLog, Review, UserCoupon
 from apps.hotels.models import Hotel, RoomInventory, RoomType
-from apps.operations.models import SystemNotice
+from apps.operations.models import AICallLog, SystemNotice
 from apps.operations.services.ai_service import AIChatService
 from apps.operations.services.prompt_service import PromptSceneError
 from config.ai import load_ai_settings, update_ai_settings, BUILTIN_PROVIDERS
@@ -252,17 +272,23 @@ def fallback_ai_reply(scene: str) -> str:
     当 AI 服务未配置或调用失败时返回占位回复文本。
 
     Args:
-        scene: AI 场景标识：customer_service / report_summary / review_summary / reply_suggestion。
+        scene: AI 场景标识。
     """
-    if scene == "customer_service":
-        return "您好，这里是 HoteLink 智能客服。当前我暂时无法从系统已接入的数据中生成可靠答复，请稍后重试，或联系人工客服进一步处理。"
-    if scene == "report_summary":
-        return "当前时间段内营收与订单波动建议结合入住率、取消率和均价变化综合判断。"
-    if scene == "review_summary":
-        return "近期评价主要关注服务体验、卫生情况和入住便利性，建议优先处理重复出现的问题。"
-    if scene == "reply_suggestion":
-        return "感谢您的反馈，我们会认真优化相关体验，期待您的再次入住。"
-    return f"当前为 {scene} 场景的占位回复。"
+    _FALLBACKS = {
+        "customer_service": "您好，这里是 HoteLink 智能客服。当前我暂时无法从系统已接入的数据中生成可靠答复，请稍后重试，或联系人工客服进一步处理。",
+        "report_summary": "当前时间段内营收与订单波动建议结合入住率、取消率和均价变化综合判断。",
+        "review_summary": "近期评价主要关注服务体验、卫生情况和入住便利性，建议优先处理重复出现的问题。",
+        "reply_suggestion": "感谢您的反馈，我们会认真优化相关体验，期待您的再次入住。",
+        "pricing_suggestion": "建议参考周边竞品价格及历史入住率，适当调整节假日溢价区间。",
+        "business_report": "当前数据量不足以生成深度分析报告，建议在数据积累后重试。",
+        "marketing_copy": "期待您的入住，我们将为您提供优质的住宿体验。",
+        "content_generate": "尊享舒适住宿，品质之选。",
+        "review_sentiment": "当前无法进行情感分析，请稍后重试。",
+        "anomaly_report": "暂无明显异常，系统运行正常。",
+        "recommendations": "暂无个性化推荐，请浏览全部酒店。",
+        "hotel_compare": "暂无对比结果，请稍后重试。",
+    }
+    return _FALLBACKS.get(scene, f"当前为 {scene} 场景的占位回复。")
 
 
 def get_dict_payload() -> dict:
@@ -2030,7 +2056,7 @@ class AdminAIProviderDeleteView(APIView):
 
 
 class AdminAIReportSummaryView(APIView):
-    """AI 报表摘要接口：根据订单数据生成运营总结文案。"""
+    """AI 报表摘要接口：根据订单数据调用 LLM 生成运营总结文案。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
 
     def post(self, request):
@@ -2038,17 +2064,33 @@ class AdminAIReportSummaryView(APIView):
         if not serializer.is_valid():
             return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         data = serializer.validated_data
-        orders = BookingOrder.objects.filter(check_in_date__gte=data["start_date"], check_out_date__lte=data["end_date"])
-        if data.get("hotel_id"):
-            orders = orders.filter(hotel_id=data["hotel_id"])
-        total_orders = orders.count()
-        total_revenue = orders.filter(payment_status=BookingOrder.PAYMENT_PAID).aggregate(total=Sum("pay_amount"))["total"] or Decimal("0.00")
-        summary = f"统计区间内共有 {total_orders} 笔订单，已支付营收 {total_revenue} 元。建议结合取消率与房型均价进一步分析。"
-        return api_response(data={"scene": "report_summary", "summary": summary})
+        service = AIChatService()
+        if not service.is_available():
+            orders = BookingOrder.objects.filter(
+                check_in_date__gte=data["start_date"],
+                check_out_date__lte=data["end_date"],
+            )
+            if data.get("hotel_id"):
+                orders = orders.filter(hotel_id=data["hotel_id"])
+            total_orders = orders.count()
+            total_revenue = orders.filter(payment_status=BookingOrder.PAYMENT_PAID).aggregate(
+                total=Sum("pay_amount")
+            )["total"] or Decimal("0.00")
+            summary = f"统计区间内共有 {total_orders} 笔订单，已支付营收 {total_revenue} 元。建议结合取消率与房型均价进一步分析。"
+            return api_response(data={"scene": "report_summary", "summary": summary})
+        try:
+            result = service.generate_report_summary(
+                hotel_id=data.get("hotel_id"),
+                start_date=data["start_date"],
+                end_date=data["end_date"],
+            )
+            return api_response(data={"scene": "report_summary", "summary": result["summary"]})
+        except Exception:
+            return api_response(data={"scene": "report_summary", "summary": fallback_ai_reply("report_summary")})
 
 
 class AdminAIReviewSummaryView(APIView):
-    """AI 评价摘要接口：聚合评价区间数据并输出洞察总结。"""
+    """AI 评价摘要接口：聚合评价区间数据并调用 LLM 输出洞察总结。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
 
     def post(self, request):
@@ -2056,16 +2098,30 @@ class AdminAIReviewSummaryView(APIView):
         if not serializer.is_valid():
             return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         data = serializer.validated_data
-        reviews = Review.objects.filter(created_at__date__gte=data["start_date"], created_at__date__lte=data["end_date"])
-        if data.get("hotel_id"):
-            reviews = reviews.filter(hotel_id=data["hotel_id"])
-        avg_score = reviews.aggregate(avg=Avg("score"))["avg"] or 0
-        summary = f"统计区间内共有 {reviews.count()} 条评价，平均评分 {round(avg_score, 2)} 分。建议重点关注低分评价中的重复问题。"
-        return api_response(data={"scene": "review_summary", "summary": summary})
+        service = AIChatService()
+        if not service.is_available():
+            reviews = Review.objects.filter(
+                created_at__date__gte=data["start_date"],
+                created_at__date__lte=data["end_date"],
+            )
+            if data.get("hotel_id"):
+                reviews = reviews.filter(hotel_id=data["hotel_id"])
+            avg_score = reviews.aggregate(avg=Avg("score"))["avg"] or 0
+            summary = f"统计区间内共有 {reviews.count()} 条评价，平均评分 {round(avg_score, 2)} 分。建议重点关注低分评价中的重复问题。"
+            return api_response(data={"scene": "review_summary", "summary": summary})
+        try:
+            result = service.generate_review_summary(
+                hotel_id=data.get("hotel_id"),
+                start_date=data["start_date"],
+                end_date=data["end_date"],
+            )
+            return api_response(data={"scene": "review_summary", "summary": result["summary"]})
+        except Exception:
+            return api_response(data={"scene": "review_summary", "summary": fallback_ai_reply("review_summary")})
 
 
 class AdminAIReplySuggestionView(APIView):
-    """AI 回复建议接口：基于评价内容生成客服回复建议。"""
+    """AI 回复建议接口：基于评价内容调用 LLM 生成多风格客服回复建议。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
 
     def post(self, request):
@@ -2075,8 +2131,22 @@ class AdminAIReplySuggestionView(APIView):
         review = Review.objects.filter(id=serializer.validated_data["review_id"]).first()
         if not review:
             return api_response(code=4040, message="评价不存在", data=None, status_code=404)
-        suggestion = fallback_ai_reply("reply_suggestion")
-        return api_response(data={"scene": "reply_suggestion", "suggested_reply": suggestion})
+        service = AIChatService()
+        if not service.is_available():
+            return api_response(data={
+                "scene": "reply_suggestion",
+                "suggestions": [
+                    {"style": "formal", "content": fallback_ai_reply("reply_suggestion")},
+                ],
+            })
+        try:
+            result = service.generate_reply_suggestion(review=review)
+            return api_response(data={"scene": "reply_suggestion", "suggestions": result})
+        except Exception:
+            return api_response(data={
+                "scene": "reply_suggestion",
+                "suggestions": [{"style": "formal", "content": fallback_ai_reply("reply_suggestion")}],
+            })
 
 
 class AdminReportTasksView(APIView):
@@ -2249,4 +2319,457 @@ class AdminSystemResetView(APIView):
             "deleted_counts": deleted_counts,
             "message": "系统已重置为初始状态，管理员账号已保留。",
         })
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 新增 AI 功能视图 §15 — 管理员 AI 增强接口
+# ──────────────────────────────────────────────────────────────────────────────
+
+class AdminAIPricingSuggestionView(APIView):
+    """AI 智能定价建议接口：基于房型与历史数据生成价格优化建议。"""
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def post(self, request):
+        serializer = AIPricingSuggestionSerializer(data=request.data)
+        if not serializer.is_valid():
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
+        data = serializer.validated_data
+        room_type = RoomType.objects.filter(id=data["room_type_id"]).first()
+        if not room_type:
+            return api_response(code=4040, message="房型不存在", data=None, status_code=404)
+        service = AIChatService()
+        if not service.is_available():
+            return api_response(data={"scene": "pricing_suggestion", "suggestions": [], "message": fallback_ai_reply("pricing_suggestion")})
+        try:
+            result = service.generate_pricing_suggestion(
+                room_type=room_type,
+                target_dates=data["target_dates"],
+                use_reasoning=data.get("use_reasoning", False),
+            )
+            return api_response(data={"scene": "pricing_suggestion", "suggestions": result["suggestions"], "overall_analysis": result.get("overall_analysis", "")})
+        except Exception:
+            return api_response(data={"scene": "pricing_suggestion", "suggestions": [], "message": fallback_ai_reply("pricing_suggestion")})
+
+
+class AdminAIBusinessReportView(APIView):
+    """AI 深度经营报告接口：生成多维度经营分析 Markdown 报告。"""
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def post(self, request):
+        serializer = AIBusinessReportSerializer(data=request.data)
+        if not serializer.is_valid():
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
+        data = serializer.validated_data
+        service = AIChatService()
+        if not service.is_available():
+            return api_response(data={"scene": "business_report", "report": fallback_ai_reply("business_report")})
+        try:
+            result = service.generate_business_report(
+                hotel_id=data.get("hotel_id"),
+                start_date=data["start_date"],
+                end_date=data["end_date"],
+                dimensions=data.get("dimensions"),
+                use_reasoning=data.get("use_reasoning", False),
+            )
+            return api_response(data={"scene": "business_report", "report": result.get("report_markdown", "")})
+        except Exception:
+            return api_response(data={"scene": "business_report", "report": fallback_ai_reply("business_report")})
+
+
+class AdminAIBusinessReportStreamView(APIView):
+    """AI 深度经营报告流式接口：SSE 格式逐 token 推送 Markdown 报告内容。"""
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def post(self, request):
+        import json
+        from django.http import StreamingHttpResponse
+
+        serializer = AIBusinessReportSerializer(data=request.data)
+        if not serializer.is_valid():
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
+        data = serializer.validated_data
+        service = AIChatService()
+
+        def event_stream():
+            if not service.is_available():
+                fallback = fallback_ai_reply("business_report")
+                yield f"data: {json.dumps({'type': 'chunk', 'content': fallback, 'done': False}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'done', 'content': '', 'done': True})}\n\n"
+                return
+            try:
+                stream_result = service.stream_business_report(
+                    hotel_id=data.get("hotel_id"),
+                    start_date=data["start_date"],
+                    end_date=data["end_date"],
+                    dimensions=data.get("dimensions"),
+                    use_reasoning=data.get("use_reasoning", False),
+                )
+                # stream_business_report returns (text, None) tuple on fallback or an OpenAI stream
+                if isinstance(stream_result, tuple):
+                    text, _ = stream_result
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': text, 'done': False}, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps({'type': 'done', 'content': '', 'done': True})}\n\n"
+                    return
+                for chunk in stream_result:
+                    delta = chunk.choices[0].delta if chunk.choices else None
+                    token = (delta.content or "") if delta else ""
+                    done = (chunk.choices[0].finish_reason is not None) if chunk.choices else False
+                    event_type = "done" if done else "chunk"
+                    yield f"data: {json.dumps({'type': event_type, 'content': token, 'done': done}, ensure_ascii=False)}\n\n"
+            except Exception:
+                fallback = fallback_ai_reply("business_report")
+                yield f"data: {json.dumps({'type': 'chunk', 'content': fallback, 'done': False}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'done', 'content': '', 'done': True})}\n\n"
+
+        response = StreamingHttpResponse(event_stream(), content_type="text/event-stream; charset=utf-8")
+        response["Cache-Control"] = "no-cache"
+        response["X-Accel-Buffering"] = "no"
+        return response
+
+
+class AdminAIReviewSentimentView(APIView):
+    """AI 评价情感分析接口：分析单条评价的情感倾向并保存分析结果。"""
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def post(self, request):
+        from django.utils import timezone as tz
+
+        serializer = AIReviewSentimentSerializer(data=request.data)
+        if not serializer.is_valid():
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
+        review = Review.objects.filter(id=serializer.validated_data["review_id"]).first()
+        if not review:
+            return api_response(code=4040, message="评价不存在", data=None, status_code=404)
+        service = AIChatService()
+        if not service.is_available():
+            return api_response(data={"scene": "review_sentiment", "result": None, "message": fallback_ai_reply("review_sentiment")})
+        try:
+            result = service.analyze_review_sentiment(review=review)
+            # 将情感分析结果持久化到 Review 模型
+            Review.objects.filter(id=review.id).update(
+                sentiment_score=result.get("sentiment_score"),
+                sentiment_label=result.get("sentiment_label", ""),
+                auto_tags=result.get("tags", []),
+                sentiment_keywords=result.get("keywords", []),
+                sentiment_analyzed_at=tz.now(),
+            )
+            # 转换字段名以匹配前端期望的格式
+            return api_response(data={"scene": "review_sentiment", "result": {
+                "score": result.get("sentiment_score", 0),
+                "label": result.get("sentiment_label", "neutral"),
+                "keywords": result.get("keywords", []),
+                "tags": result.get("tags", []),
+                "summary": result.get("summary", ""),
+            }})
+        except Exception:
+            return api_response(data={"scene": "review_sentiment", "result": None, "message": fallback_ai_reply("review_sentiment")})
+
+
+class AdminAIMarketingCopyView(APIView):
+    """AI 营销文案生成接口：根据酒店信息与活动类型生成多风格营销文案。"""
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def post(self, request):
+        serializer = AIMarketingCopySerializer(data=request.data)
+        if not serializer.is_valid():
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
+        data = serializer.validated_data
+        service = AIChatService()
+        if not service.is_available():
+            return api_response(data={"scene": "marketing_copy", "copies": [], "message": fallback_ai_reply("marketing_copy")})
+        try:
+            result = service.generate_marketing_copy(
+                hotel_id=data.get("hotel_id"),
+                copy_type=data["copy_type"],
+                style=data.get("style", "formal"),
+                keywords=data.get("keywords", []),
+                target_audience=data.get("target_audience", ""),
+                extra_notes=data.get("extra_notes", ""),
+            )
+            return api_response(data={"scene": "marketing_copy", "copies": result.get("copies", [])})
+        except Exception:
+            return api_response(data={"scene": "marketing_copy", "copies": [], "message": fallback_ai_reply("marketing_copy")})
+
+
+class AdminAIContentGenerateView(APIView):
+    """AI 内容生成接口：生成酒店介绍、房型描述或 SEO 关键词候选内容。"""
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def post(self, request):
+        serializer = AIContentGenerateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
+        data = serializer.validated_data
+        service = AIChatService()
+        if not service.is_available():
+            return api_response(data={"scene": "content_generate", "results": [], "message": fallback_ai_reply("content_generate")})
+        try:
+            result = service.generate_content(
+                content_type=data["content_type"],
+                context_data=data["context"],
+                count=data.get("count", 3),
+            )
+            # 标准化 candidates 为 {content, highlights} 对象列表
+            raw_candidates = result.get("candidates", [])
+            results = []
+            for c in raw_candidates:
+                if isinstance(c, dict):
+                    results.append({"content": c.get("content", str(c)), "highlights": c.get("highlights", [])})
+                else:
+                    results.append({"content": str(c), "highlights": []})
+            return api_response(data={"scene": "content_generate", "results": results})
+        except Exception:
+            return api_response(data={"scene": "content_generate", "results": [], "message": fallback_ai_reply("content_generate")})
+
+
+class AdminAIAnomalyReportView(APIView):
+    """AI 异常检测报告接口：检测酒店经营数据中的异常信号。"""
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def post(self, request):
+        serializer = AIAnomalyReportSerializer(data=request.data)
+        if not serializer.is_valid():
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
+        data = serializer.validated_data
+        service = AIChatService()
+        if not service.is_available():
+            return api_response(data={"scene": "anomaly_report", "anomalies": [], "message": fallback_ai_reply("anomaly_report")})
+        try:
+            result = service.generate_anomaly_report(
+                hotel_id=data.get("hotel_id"),
+                analysis_date=data.get("date"),
+            )
+            # 展开 result 并转换字段名以匹配前端
+            severity_map = {"danger": "high", "warning": "medium", "info": "low"}
+            anomalies = []
+            for a in result.get("anomalies", []):
+                anomalies.append({
+                    "type": a.get("type", ""),
+                    "level": severity_map.get(a.get("severity", "info"), "low"),
+                    "description": a.get("description", a.get("ai_analysis", "")),
+                })
+            return api_response(data={
+                "scene": "anomaly_report",
+                "anomalies": anomalies,
+                "summary": result.get("overall_status", ""),
+            })
+        except Exception:
+            return api_response(data={"scene": "anomaly_report", "anomalies": [], "summary": "", "message": fallback_ai_reply("anomaly_report")})
+
+
+class AdminAIOrderAnomalySummaryView(APIView):
+    """AI 订单异常摘要接口：检测逾期未付、异常取消等订单风险。"""
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def post(self, request):
+        serializer = AIOrderAnomalySummarySerializer(data=request.data)
+        if not serializer.is_valid():
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
+        data = serializer.validated_data
+        service = AIChatService()
+        if not service.is_available():
+            return api_response(data={"scene": "order_anomaly", "anomalies": [], "summary": fallback_ai_reply("anomaly_report")})
+        try:
+            result = service.generate_order_anomaly_summary(analysis_date=data.get("date"))
+            return api_response(data={
+                "scene": "order_anomaly",
+                "anomalies": result.get("anomalies", []),
+                "summary": result.get("summary", ""),
+            })
+        except Exception:
+            return api_response(data={"scene": "order_anomaly", "anomalies": [], "summary": fallback_ai_reply("anomaly_report")})
+
+
+class AdminAICallLogsView(APIView):
+    """AI 调用日志查询接口：分页查询 AI 调用历史记录。"""
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def get(self, request):
+        queryset = AICallLog.objects.select_related("user").order_by("-created_at")
+        scene = request.query_params.get("scene")
+        status = request.query_params.get("status")
+        if scene:
+            queryset = queryset.filter(scene=scene)
+        if status:
+            queryset = queryset.filter(status=status)
+        page, page_size = get_page_params(request)
+        page_qs, total = paginate_queryset(queryset, page, page_size)
+        items = AICallLogSerializer(page_qs, many=True).data
+        return paginated_response(items=items, page=page, page_size=page_size, total=total)
+
+
+class AdminAIUsageStatsView(APIView):
+    """AI 用量统计接口：按场景 / 状态汇总 token 用量与费用估算。"""
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def get(self, request):
+        from django.db.models import Count
+
+        queryset = AICallLog.objects.all()
+        start_date = request.query_params.get("start_date")
+        end_date = request.query_params.get("end_date")
+        if start_date:
+            queryset = queryset.filter(created_at__date__gte=start_date)
+        if end_date:
+            queryset = queryset.filter(created_at__date__lte=end_date)
+
+        success_count = queryset.filter(status="success").count()
+        failed_count = queryset.filter(status__in=["failed", "timeout", "quota_exceeded"]).count()
+
+        by_scene_qs = queryset.values("scene").annotate(calls=Count("id"))
+        by_scene = {item["scene"]: item["calls"] for item in by_scene_qs}
+
+        by_provider_qs = queryset.values("provider").annotate(calls=Count("id"))
+        by_provider = {item["provider"]: item["calls"] for item in by_provider_qs}
+
+        totals = queryset.aggregate(
+            total_calls=Count("id"),
+            total_tokens=Sum("total_tokens"),
+            total_cost=Sum("cost_estimate"),
+        )
+        return api_response(data={
+            "total_calls": totals["total_calls"] or 0,
+            "success_calls": success_count,
+            "failed_calls": failed_count,
+            "total_tokens": totals["total_tokens"] or 0,
+            "total_cost": float(totals["total_cost"] or 0),
+            "by_scene": by_scene,
+            "by_provider": by_provider,
+        })
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 新增 AI 功能视图 §15 — 用户端 AI 接口
+# ──────────────────────────────────────────────────────────────────────────────
+
+class UserAIRecommendationsView(APIView):
+    """用户 AI 推荐接口：基于用户偏好和当前场景返回个性化推荐酒店列表。"""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = AIRecommendationsSerializer(data=request.data)
+        if not serializer.is_valid():
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
+        data = serializer.validated_data
+        limit = data.get("limit", 6)
+
+        def _fallback():
+            hotels = Hotel.objects.filter(status="published").order_by("-created_at")[:limit]
+            return [
+                {
+                    "id": h.id, "name": h.name, "city": h.city, "star": h.star,
+                    "min_price": float(h.min_price), "cover_image": h.cover_image or "",
+                    "rating": float(h.rating), "reason": "",
+                }
+                for h in hotels
+            ]
+
+        service = AIChatService()
+        if not service.is_available():
+            return api_response(data={"scene": "recommendations", "recommendations": _fallback()})
+        try:
+            raw_recs = service.generate_recommendations(
+                user=request.user,
+                scene=data.get("scene", "home"),
+                hotel_id=data.get("hotel_id"),
+                keyword=data.get("keyword", ""),
+                limit=limit,
+            )
+            # 将服务层字段名映射为前端期望的格式
+            recommendations = [
+                {
+                    "id": rec.get("hotel_id"),
+                    "name": rec.get("hotel_name"),
+                    "city": rec.get("city"),
+                    "star": rec.get("star"),
+                    "min_price": rec.get("min_price"),
+                    "cover_image": rec.get("cover_image", ""),
+                    "rating": rec.get("rating"),
+                    "reason": rec.get("recommendation_reason", ""),
+                }
+                for rec in raw_recs
+            ]
+            return api_response(data={"scene": "recommendations", "recommendations": recommendations})
+        except Exception:
+            return api_response(data={"scene": "recommendations", "recommendations": _fallback()})
+
+
+class UserAIHotelCompareView(APIView):
+    """用户 AI 对比接口：对 2-3 家酒店进行多维度智能对比分析。"""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = AIHotelCompareSerializer(data=request.data)
+        if not serializer.is_valid():
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
+        data = serializer.validated_data
+        hotel_ids = data["hotel_ids"]
+        hotels = Hotel.objects.filter(id__in=hotel_ids, status="published")
+        if hotels.count() < 2:
+            return api_response(code=4040, message="有效酒店数量不足，请检查酒店 ID", data=None, status_code=404)
+        service = AIChatService()
+        if not service.is_available():
+            return api_response(data={"scene": "hotel_compare", "comparison": None, "message": fallback_ai_reply("hotel_compare")})
+        try:
+            result = service.generate_hotel_compare(
+                hotel_ids=hotel_ids,
+                check_in_date=data.get("check_in_date"),
+                check_out_date=data.get("check_out_date"),
+            )
+            # 直接展开结果，让前端可以无嵌套地访问 recommendation
+            return api_response(data={
+                "scene": "hotel_compare",
+                "hotels": result.get("hotels", []),
+                "ai_summary": result.get("ai_summary", ""),
+                "recommendation": result.get("recommendation", ""),
+                "ai_generated": result.get("ai_generated", False),
+            })
+        except Exception:
+            return api_response(data={
+                "scene": "hotel_compare",
+                "hotels": [],
+                "ai_summary": "",
+                "recommendation": fallback_ai_reply("hotel_compare"),
+                "ai_generated": False,
+            })
+
+
+class UserAISessionsView(APIView):
+    """用户 AI 会话列表接口：查询当前用户的 AI 对话会话列表，支持删除会话。"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        sessions = ChatSession.objects.filter(user=request.user).order_by("-last_message_at")
+        page, page_size = get_page_params(request)
+        page_sessions, total = paginate_queryset(sessions, page, page_size)
+        items = ChatSessionSerializer(page_sessions, many=True).data
+        return paginated_response(items=items, page=page, page_size=page_size, total=total)
+
+    def post(self, request):
+        """通过 action 字段处理写操作（目前支持 action=delete）。"""
+        if request.data.get("action") != "delete":
+            return api_response(code=4001, message="不支持的操作", data=None, status_code=400)
+        serializer = ChatSessionDeleteSerializer(data=request.data)
+        if not serializer.is_valid():
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
+        session = ChatSession.objects.filter(id=serializer.validated_data["session_id"], user=request.user).first()
+        if not session:
+            return api_response(code=4040, message="会话不存在", data=None, status_code=404)
+        session.delete()
+        return api_response(data={"deleted": True})
+
+
+class UserAISessionMessagesView(APIView):
+    """用户 AI 会话消息接口：查询指定会话的消息历史。"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, session_id: int):
+        session = ChatSession.objects.filter(id=session_id, user=request.user).first()
+        if not session:
+            return api_response(code=4040, message="会话不存在", data=None, status_code=404)
+        messages = ChatMessage.objects.filter(session=session).order_by("created_at")
+        page, page_size = get_page_params(request)
+        page_messages, total = paginate_queryset(messages, page, page_size)
+        items = ChatMessageSerializer(page_messages, many=True).data
+        return paginated_response(items=items, page=page, page_size=page_size, total=total)
 

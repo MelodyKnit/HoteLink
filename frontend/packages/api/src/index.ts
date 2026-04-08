@@ -221,6 +221,56 @@ export const aiApi = {
   reviewSummary: (data: Record<string, unknown>) => post('/admin/ai/review-summary', data),
   replySuggestion: (payload: number | { review_id: number }) =>
     post('/admin/ai/reply-suggestion', typeof payload === 'number' ? { review_id: payload } : payload),
+  pricingSuggestion: (data: { room_type_id: number; target_dates: string[]; use_reasoning?: boolean }) =>
+    post<{ scene: string; room_type: Record<string, unknown>; suggestions: { date: string; suggested_price: number; reason: string }[] }>('/admin/ai/pricing-suggestion', data as Record<string, unknown>),
+  businessReport: (data: { hotel_id?: number; start_date: string; end_date: string; dimensions?: string[]; use_reasoning?: boolean }) =>
+    post<{ scene: string; report: string }>('/admin/ai/business-report', data as Record<string, unknown>),
+  async *businessReportStream(data: { hotel_id?: number; start_date: string; end_date: string; dimensions?: string[]; use_reasoning?: boolean }): AsyncGenerator<{ type: string; content: string; done: boolean }> {
+    const token = getToken()
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (token) headers.Authorization = `Bearer ${token}`
+    let resp: Response
+    try {
+      resp = await fetch('/api/v1/admin/ai/business-report/stream', { method: 'POST', headers, body: JSON.stringify(data) })
+    } catch { yield { type: 'done', content: '', done: true }; return }
+    if (!resp.ok || !resp.body) { yield { type: 'done', content: '', done: true }; return }
+    const reader = resp.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      let boundary = buffer.indexOf('\n\n')
+      while (boundary !== -1) {
+        const block = buffer.slice(0, boundary)
+        buffer = buffer.slice(boundary + 2)
+        for (const line of block.split('\n')) {
+          if (!line.startsWith('data: ')) continue
+          try {
+            const event = JSON.parse(line.slice(6)) as { type: string; content: string; done: boolean }
+            yield event
+            if (event.done) return
+          } catch { /* ignore */ }
+        }
+        boundary = buffer.indexOf('\n\n')
+      }
+    }
+  },
+  reviewSentiment: (review_id: number) =>
+    post<{ scene: string; review_id: number; result: { score: number; label: string; keywords: string[]; tags: string[]; summary: string } }>('/admin/ai/review-sentiment', { review_id }),
+  marketingCopy: (data: { hotel_id?: number; copy_type: string; style?: string; keywords?: string[]; target_audience?: string; extra_notes?: string }) =>
+    post<{ scene: string; copies: { type: string; title: string; content: string; tags: string[] }[] }>('/admin/ai/marketing-copy', data as Record<string, unknown>),
+  contentGenerate: (data: { content_type: string; context: Record<string, unknown>; count?: number }) =>
+    post<{ scene: string; content_type: string; results: { content: string; highlights: string[] }[] }>('/admin/ai/content-generate', data as Record<string, unknown>),
+  anomalyReport: (data: { hotel_id?: number; date?: string }) =>
+    post<{ scene: string; date: string; anomalies: { type: string; level: string; description: string; value: unknown; threshold: unknown }[]; summary: string }>('/admin/ai/anomaly-report', data as Record<string, unknown>),
+  orderAnomalySummary: (data?: { date?: string }) =>
+    post<{ scene: string; date: string; anomalies: { type: string; count: number; details: unknown[] }[]; summary: string }>('/admin/ai/order-anomaly-summary', (data || {}) as Record<string, unknown>),
+  callLogs: (params?: { scene?: string; status?: string; page?: number; page_size?: number }) =>
+    get<PaginatedData>('/admin/ai/call-logs', params as Record<string, unknown>),
+  usageStats: (params?: { start_date?: string; end_date?: string }) =>
+    get<{ total_calls: number; success_calls: number; failed_calls: number; total_tokens: number; total_cost: number; by_scene: Record<string, number>; by_provider: Record<string, number> }>('/admin/ai/usage-stats', params as Record<string, unknown>),
   settings: () => get<{
     ai_enabled: boolean
     active_provider: string
@@ -346,6 +396,13 @@ export const userNoticeApi = {
 export const userAiApi = {
   chat: (data: { scene: string; question: string; hotel_id?: number; order_id?: number; booking_context?: Record<string, unknown> }) =>
     post<{ answer: string; scene: string; booking_assistant?: Record<string, unknown> | null }>('/user/ai/chat', data),
+  recommendations: (data: { scene?: string; hotel_id?: number; keyword?: string; limit?: number }) =>
+    post<{ scene: string; recommendations: { id: number; name: string; city: string; star: number; cover_image: string; min_price: number; rating: number; reason: string }[] }>('/user/ai/recommendations', data as Record<string, unknown>),
+  hotelCompare: (data: { hotel_ids: number[]; check_in_date?: string; check_out_date?: string }) =>
+    post<{ scene: string; hotels: Record<string, unknown>[]; comparison: Record<string, unknown>; recommendation: string }>('/user/ai/hotel-compare', data as Record<string, unknown>),
+  sessions: () => get<{ items: { id: number; scene: string; title: string; message_count: number; last_message_at: string; created_at: string }[] }>('/user/ai/sessions'),
+  sessionDelete: (session_id: number) => post('/user/ai/sessions', { session_id, action: 'delete' }),
+  sessionMessages: (session_id: number) => get<{ items: { id: number; role: string; content: string; tokens_used: number; created_at: string }[] }>(`/user/ai/sessions/${session_id}/messages`),
 
   async *chatStream(
     data: { scene: string; question: string; hotel_id?: number; order_id?: number; booking_context?: Record<string, unknown> }

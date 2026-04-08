@@ -56,3 +56,43 @@ class SystemNotice(models.Model):
 
     def __str__(self) -> str:
         return self.title
+
+
+class AICallLog(models.Model):
+    """AI 调用日志模型，记录每次 LLM 调用的元数据和费用估算。"""
+    STATUS_SUCCESS = "success"
+    STATUS_FAILED = "failed"
+    STATUS_TIMEOUT = "timeout"
+    STATUS_QUOTA_EXCEEDED = "quota_exceeded"
+    STATUS_CHOICES = [
+        (STATUS_SUCCESS, "成功"),
+        (STATUS_FAILED, "失败"),
+        (STATUS_TIMEOUT, "超时"),
+        (STATUS_QUOTA_EXCEEDED, "超额"),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name="ai_call_logs",
+    )
+    scene = models.CharField(max_length=50, help_text="AI 使用场景标识")
+    provider = models.CharField(max_length=50, help_text="AI 供应商名称")
+    model = models.CharField(max_length=100, help_text="使用的模型名称")
+    input_tokens = models.PositiveIntegerField(default=0)
+    output_tokens = models.PositiveIntegerField(default=0)
+    total_tokens = models.PositiveIntegerField(default=0)
+    cost_estimate = models.DecimalField(max_digits=10, decimal_places=6, default=0, help_text="估算费用（元）")
+    latency_ms = models.PositiveIntegerField(default=0, help_text="响应延迟（毫秒）")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_SUCCESS)
+    error_message = models.CharField(max_length=500, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "AI Call Log"
+        verbose_name_plural = "AI Call Logs"
+        ordering = ["-id"]
+
+    def __str__(self) -> str:
+        return f"{self.scene} / {self.provider} / {self.status}"

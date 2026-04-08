@@ -6,9 +6,9 @@ from rest_framework import serializers
 from urllib.parse import quote, urlparse
 
 from apps.bookings.models import BookingOrder
-from apps.crm.models import CouponTemplate, FavoriteHotel, InvoiceRequest, InvoiceTitle, PointsLog, Review, UserCoupon
+from apps.crm.models import ChatMessage, ChatSession, CouponTemplate, FavoriteHotel, InvoiceRequest, InvoiceTitle, PointsLog, Review, UserCoupon
 from apps.hotels.models import Hotel, RoomInventory, RoomType
-from apps.operations.models import SystemNotice
+from apps.operations.models import AICallLog, SystemNotice
 from apps.payments.models import PaymentRecord
 from apps.reports.models import ReportTask
 from apps.users.models import UserProfile
@@ -640,3 +640,163 @@ class SystemResetSerializer(serializers.Serializer):
         if value != "RESET":
             raise serializers.ValidationError("请输入 RESET 以确认重置操作")
         return value
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 新增 AI 功能序列化器
+# ──────────────────────────────────────────────────────────────────────────────
+
+class AIPricingSuggestionSerializer(serializers.Serializer):
+    """AI 智能定价建议请求序列化器。"""
+    room_type_id = serializers.IntegerField(min_value=1)
+    target_dates = serializers.ListField(
+        child=serializers.DateField(),
+        min_length=1,
+        max_length=30,
+    )
+    use_reasoning = serializers.BooleanField(default=False, required=False)
+
+
+class AIBusinessReportSerializer(serializers.Serializer):
+    """AI 深度经营报告请求序列化器。"""
+    hotel_id = serializers.IntegerField(required=False, allow_null=True)
+    start_date = serializers.DateField()
+    end_date = serializers.DateField()
+    dimensions = serializers.ListField(
+        child=serializers.CharField(max_length=50),
+        required=False,
+        allow_null=True,
+    )
+    use_reasoning = serializers.BooleanField(default=False, required=False)
+
+    def validate(self, attrs):
+        if attrs["start_date"] > attrs["end_date"]:
+            raise serializers.ValidationError({"end_date": "结束日期不能早于开始日期"})
+        return attrs
+
+
+class AIReviewSentimentSerializer(serializers.Serializer):
+    """AI 评价情感分析请求序列化器。"""
+    review_id = serializers.IntegerField(min_value=1)
+
+
+class AIReviewSentimentBatchSerializer(serializers.Serializer):
+    """AI 评价情感批量分析请求序列化器。"""
+    hotel_id = serializers.IntegerField(required=False, allow_null=True)
+    start_date = serializers.DateField(required=False, allow_null=True)
+    end_date = serializers.DateField(required=False, allow_null=True)
+
+
+class AIMarketingCopySerializer(serializers.Serializer):
+    """AI 营销文案生成请求序列化器。"""
+    COPY_TYPE_CHOICES = [
+        "hotel_promo", "holiday_promo", "member_activity", "seasonal_promo", "social_media",
+    ]
+    hotel_id = serializers.IntegerField(required=False, allow_null=True)
+    copy_type = serializers.ChoiceField(choices=COPY_TYPE_CHOICES)
+    style = serializers.ChoiceField(
+        choices=["formal", "casual", "literary", "concise"],
+        default="formal",
+        required=False,
+    )
+    keywords = serializers.ListField(
+        child=serializers.CharField(max_length=20),
+        required=False,
+        default=list,
+    )
+    target_audience = serializers.CharField(max_length=100, default='', required=False, allow_blank=True)
+    extra_notes = serializers.CharField(max_length=500, default='', required=False, allow_blank=True)
+
+
+class AIContentGenerateSerializer(serializers.Serializer):
+    """AI 内容生成请求序列化器。"""
+    CONTENT_TYPE_CHOICES = ["hotel_description", "room_description", "seo_keywords"]
+    content_type = serializers.ChoiceField(choices=CONTENT_TYPE_CHOICES)
+    context = serializers.DictField(
+        child=serializers.CharField(allow_blank=True),
+        required=False,
+        allow_empty=True,
+        default=dict,
+    )
+    count = serializers.IntegerField(min_value=1, max_value=5, default=3, required=False)
+
+
+class AIAnomalyReportSerializer(serializers.Serializer):
+    """AI 异常检测报告请求序列化器。"""
+    hotel_id = serializers.IntegerField(required=False, allow_null=True)
+    date = serializers.DateField(required=False, allow_null=True)
+
+
+class AIOrderAnomalySummarySerializer(serializers.Serializer):
+    """AI 订单异常摘要请求序列化器。"""
+    date = serializers.DateField(required=False, allow_null=True)
+
+
+class AIRecommendationsSerializer(serializers.Serializer):
+    """AI 智能推荐请求序列化器。"""
+    scene = serializers.ChoiceField(
+        choices=["home", "hotel_detail", "search"],
+        default="home",
+        required=False,
+    )
+    hotel_id = serializers.IntegerField(required=False, allow_null=True)
+    keyword = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    limit = serializers.IntegerField(min_value=1, max_value=20, default=6, required=False)
+
+
+class AIHotelCompareSerializer(serializers.Serializer):
+    """AI 酒店对比分析请求序列化器。"""
+    hotel_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        min_length=2,
+        max_length=3,
+    )
+    check_in_date = serializers.DateField(required=False, allow_null=True)
+    check_out_date = serializers.DateField(required=False, allow_null=True)
+
+
+class AICallLogSerializer(serializers.ModelSerializer):
+    """AI 调用日志序列化器。"""
+    username = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AICallLog
+        fields = [
+            "id", "username", "scene", "provider", "model",
+            "input_tokens", "output_tokens", "total_tokens",
+            "cost_estimate", "latency_ms", "status", "error_message", "created_at",
+        ]
+
+    def get_username(self, obj):
+        return obj.user.username if obj.user_id else ""
+
+
+class ChatSessionSerializer(serializers.ModelSerializer):
+    """AI 会话序列化器。"""
+    class Meta:
+        model = ChatSession
+        fields = ["id", "scene", "title", "message_count", "last_message_at", "created_at"]
+
+
+class ChatMessageSerializer(serializers.ModelSerializer):
+    """AI 会话消息序列化器。"""
+    class Meta:
+        model = ChatMessage
+        fields = ["id", "role", "content", "tokens_used", "created_at"]
+
+
+class ChatSessionDeleteSerializer(serializers.Serializer):
+    """删除 AI 会话请求序列化器。"""
+    session_id = serializers.IntegerField(min_value=1)
+
+
+class AIUsageStatsSerializer(serializers.Serializer):
+    """AI 用量统计请求序列化器。"""
+    start_date = serializers.DateField(required=False, allow_null=True)
+    end_date = serializers.DateField(required=False, allow_null=True)
+
+
+class AIQuotaUpdateSerializer(serializers.Serializer):
+    """AI 配额更新请求序列化器。"""
+    daily_limit_per_user = serializers.IntegerField(min_value=1, required=False)
+    monthly_token_budget = serializers.IntegerField(min_value=1, required=False)

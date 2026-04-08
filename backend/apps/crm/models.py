@@ -51,6 +51,12 @@ class Review(models.Model):
     content = models.TextField()
     images = models.JSONField(default=list, blank=True, help_text="评价图片URL列表")
     reply_content = models.TextField(blank=True)
+    # AI 情感分析字段
+    sentiment_score = models.FloatField(null=True, blank=True, help_text="情感分数 0-1，0=极负面，1=极正面")
+    sentiment_label = models.CharField(max_length=20, blank=True, help_text="positive / neutral / negative")
+    auto_tags = models.JSONField(default=list, blank=True, help_text="AI 自动生成的评价标签列表")
+    sentiment_keywords = models.JSONField(default=list, blank=True, help_text="AI 提取的关键词列表")
+    sentiment_analyzed_at = models.DateTimeField(null=True, blank=True, help_text="最后一次 AI 情感分析时间")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -238,3 +244,55 @@ class InvoiceRequest(models.Model):
 
     def __str__(self) -> str:
         return f"{self.order_id}-{self.invoice_title_id}"
+
+
+class ChatSession(models.Model):
+    """AI 对话会话模型，持久化用户多轮聊天记录。"""
+    SCENE_CUSTOMER_SERVICE = "customer_service"
+    SCENE_BOOKING_ASSISTANT = "booking_assistant"
+    SCENE_CHOICES = [
+        (SCENE_CUSTOMER_SERVICE, "智能客服"),
+        (SCENE_BOOKING_ASSISTANT, "订房助手"),
+    ]
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="chat_sessions")
+    scene = models.CharField(max_length=30, choices=SCENE_CHOICES, default=SCENE_CUSTOMER_SERVICE)
+    title = models.CharField(max_length=200, blank=True, help_text="会话标题（自动从首条消息提取）")
+    message_count = models.PositiveIntegerField(default=0)
+    last_message_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Chat Session"
+        verbose_name_plural = "Chat Sessions"
+        ordering = ["-updated_at"]
+
+    def __str__(self) -> str:
+        return f"Session #{self.id} ({self.scene})"
+
+
+class ChatMessage(models.Model):
+    """AI 对话消息模型，记录会话中的每条消息。"""
+    ROLE_USER = "user"
+    ROLE_ASSISTANT = "assistant"
+    ROLE_SYSTEM = "system"
+    ROLE_CHOICES = [
+        (ROLE_USER, "用户"),
+        (ROLE_ASSISTANT, "助手"),
+        (ROLE_SYSTEM, "系统"),
+    ]
+
+    session = models.ForeignKey(ChatSession, on_delete=models.CASCADE, related_name="messages")
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES)
+    content = models.TextField()
+    tokens_used = models.PositiveIntegerField(default=0, help_text="本条消息消耗的 token 数（仅助手消息有值）")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Chat Message"
+        verbose_name_plural = "Chat Messages"
+        ordering = ["id"]
+
+    def __str__(self) -> str:
+        return f"[{self.role}] session #{self.session_id}"

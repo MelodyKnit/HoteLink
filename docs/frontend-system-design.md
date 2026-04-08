@@ -11,13 +11,13 @@
 - 核心交互流程
 - 现代化酒店网站与酒店管理系统应具备的能力
 
-本说明既服务于产品设计，也服务于后续：
+> 关联文档：
+> - 接口设计：[api-spec.md](./api-spec.md)
+> - 技术架构：[architecture.md](./architecture.md)
+> - AI 集成：[ai-integration.md](./ai-integration.md)
+> - 功能规划：[feature-improvements.md](./feature-improvements.md)
 
-- 页面原型设计
-- 路由规划
-- 前端组件拆分
-- 后端接口设计
-- 权限模型设计
+实现状态标记：已实现 = 页面与路由均已落地，设计中 = 仅有设计规划
 
 说明：
 
@@ -161,6 +161,35 @@ flowchart TD
 ```
 
 ## 7. 用户端界面设计清单
+
+> **用户端页面实现总览（24 路由 / 23 视图）**
+>
+> | # | 设计页面 | 路由 | 视图文件 | 状态 |
+> |---|---------|------|---------|------|
+> | 1 | 首页 | `/` | `HomeView.vue` | ✅ 已实现 |
+> | 2 | 酒店列表页 | `/hotels` | `HotelListView.vue` | ✅ 已实现 |
+> | 3 | 酒店详情页 | `/hotels/:id` | `HotelDetailView.vue` | ✅ 已实现 |
+> | 4 | 房型详情页 | — | — | 📐 设计中（合并在酒店详情页内） |
+> | 5 | 预订填写页 | `/booking` | `BookingView.vue` | ✅ 已实现 |
+> | 6 | 支付页 | `/payment/:orderId` | `PaymentView.vue` | ✅ 已实现 |
+> | 7 | 支付结果页 | `/payment/result/:orderId` | `PaymentResultView.vue` | ✅ 已实现 |
+> | 8 | 登录 / 注册页 | `/login` `/register` | `LoginView.vue` `RegisterView.vue` | ✅ 已实现 |
+> | 9 | 我的首页 | `/my` | `MyView.vue` | ✅ 已实现 |
+> | 10 | 我的订单页 | `/my/orders` | `OrderListView.vue` | ✅ 已实现 |
+> | 11 | 订单详情页 | `/my/orders/:id` | `OrderDetailView.vue` | ✅ 已实现 |
+> | 12 | 个人资料页 | `/my/profile` | `ProfileView.vue` | ✅ 已实现 |
+> | 13 | 会员中心页 | `/my/membership` | `MembershipView.vue` | ✅ 已实现 |
+> | 14 | 优惠券与权益页 | `/my/coupons` | `CouponListView.vue` | ✅ 已实现 |
+> | 15 | 发票管理页 | `/my/invoices` | `InvoiceView.vue` | ✅ 已实现 |
+> | 16 | 收藏与浏览记录页 | `/my/favorites` | `FavoriteListView.vue` | ✅ 已实现 |
+> | 17 | 评价与反馈页 | `/my/reviews` | `ReviewListView.vue` | ✅ 已实现 |
+> | 18 | 帮助中心 | `/help` | `HelpView.vue` | ✅ 已实现 |
+> | 19 | AI 智能客服页 | `/ai-chat` `/ai-booking` | `AIChatView.vue` | ✅ 已实现 |
+> | 20 | 品牌故事页 | `/about` | `AboutView.vue` | ✅ 已实现 |
+> | 21 | 活动专题页 | — | — | 📐 设计中 |
+> | 22 | 联系我们页 | `/contact` | `ContactView.vue` | ✅ 已实现 |
+> | — | 通知中心 | `/my/notifications` | `NotificationView.vue` | ✅ 已实现（文档未列设计） |
+> | — | 404 页 | `/404` | `NotFoundView.vue` | ✅ 已实现 |
 
 用户端既要满足“官网展示”，也要满足“预订闭环”。建议以移动优先，但 PC 端必须具有完整浏览和下单体验。
 
@@ -447,6 +476,47 @@ flowchart TD
 - 邮箱
 
 ## 8. 管理端界面设计清单
+
+> **管理端页面实现总览（19 路由 / 18 视图）**
+>
+> | # | 设计页面 | 路由 | 视图文件 | 状态 |
+> |---|---------|------|---------|------|
+> | 1 | 登录页 | `/admin/login` | `LoginView.vue` | ✅ 已实现 |
+> | 2 | 工作台 / 首页 | `/admin` | `DashboardView.vue` | ✅ 已实现 |
+> | 3 | 房态总览页 | `/admin/inventory` | `InventoryView.vue` | ✅ 已实现（库存/房态合一） |
+> | 3.5 | 酒店管理页 | `/admin/hotels` | `HotelListView.vue` | ✅ 已实现 |
+> | 4 | 房型管理页 | `/admin/room-types` | `RoomTypeListView.vue` | ✅ 已实现 |
+> | 5 | 房间管理页 | — | — | 📐 设计中 |
+> | 6 | 设施与服务配置页 | — | — | 📐 设计中 |
+> | 7 | 订单管理页 | `/admin/orders` | `OrderListView.vue` | ✅ 已实现 |
+> | 8 | 订单详情页 | `/admin/orders/:id` | `OrderDetailView.vue` | ✅ 已实现 |
+> | 9 | 新建预订页 | — | — | 📐 设计中 |
+> | 10 | 入住办理页 | — | — | 📐 设计中 |
+> | 11 | 退房结算页 | — | — | 📐 设计中 |
+> | 12 | 续住 / 换房页 | — | — | 📐 设计中 |
+> | 13 | 取消与退款处理页 | — | — | 📐 设计中 |
+> | 14 | 客户档案页 | `/admin/users` | `UserListView.vue` | ✅ 已实现（用户列表） |
+> | 15 | 会员管理页 | `/admin/members` | `MemberManageView.vue` | ✅ 已实现 |
+> | 16 | 评价与反馈管理页 | `/admin/reviews` | `ReviewListView.vue` | ✅ 已实现 |
+> | 17 | 财务总览页 | — | — | 📐 设计中 |
+> | 18 | 账单管理页 | — | — | 📐 设计中 |
+> | 19 | 支付记录页 | — | — | 📐 设计中 |
+> | 20 | 退款记录页 | — | — | 📐 设计中 |
+> | 21 | 经营报表页 | `/admin/reports` | `ReportView.vue` | ✅ 已实现 |
+> | 22 | 活动管理页 | — | — | 📐 设计中 |
+> | 23 | 优惠券管理页 | `/admin/coupons` | `CouponManageView.vue` | ✅ 已实现 |
+> | 24 | 内容管理页 | — | — | 📐 设计中 |
+> | 25 | 员工管理页 | `/admin/employees` | `EmployeeListView.vue` | ✅ 已实现 |
+> | 26 | 角色权限页 | — | — | 📐 设计中 |
+> | 27 | 系统配置页 | `/admin/settings` | `SettingsView.vue` | ✅ 已实现（含系统重置） |
+> | 28 | 通知中心页 | — | — | 📐 设计中 |
+> | 29 | 审计日志页 | — | — | 📐 设计中 |
+> | 30 | AI 助手工作台 | `/admin/ai` | `AIAssistantView.vue` | ✅ 已实现 |
+> | 31 | AI 配置页 | `/admin/ai-settings` | `AISettingsView.vue` | ✅ 已实现 |
+> | 32 | AI 经营分析页 | — | — | 📐 设计中（部分在报表页内） |
+> | 33 | AI 客服辅助页 | — | — | 📐 设计中 |
+> | — | 初始化设置页 | `/admin/setup` | `InitSetupView.vue` | ✅ 已实现（文档未列设计） |
+> | — | 404 页 | `/admin/404` | `NotFoundView.vue` | ✅ 已实现 |
 
 管理端要体现“高效率”“强信息密度”“可追踪”“权限清晰”。PC 端为主，移动端保留核心快捷操作。
 
@@ -905,7 +975,7 @@ flowchart LR
 - 管理端差评摘要
 - 管理端营销文案辅助
 
-### 11.4 用户端 AI 客服实现现状
+### 11.2 用户端 AI 客服实现现状
 
 - 路由入口：`/ai-chat`
 - 前端页面：`AIChatView.vue`
@@ -923,14 +993,14 @@ flowchart LR
 - 对异常场景保留兜底提示文案，避免界面停留在“加载中”
 - 订房上下文由前端随对话一起携带，支持用户先选城市，再选酒店，再一键进入订单填写页
 
-### 11.2 不建议一开始直接交给 AI 的内容
+### 11.3 不建议一开始直接交给 AI 的内容
 
 - 最终支付判定
 - 最终退款判定
 - 最终房态和库存判定
 - 最终订单价格计算
 
-### 11.3 设计边界
+### 11.4 设计边界
 
 - AI 输出默认是建议，不是最终系统结果
 - 高风险动作必须保留人工复核
@@ -938,7 +1008,7 @@ flowchart LR
 
 ## 12. 现代化界面设计原则
 
-### 11.1 用户端视觉方向
+### 12.1 用户端视觉方向
 
 - 大图与沉浸感
 - 强调品牌与信任感
@@ -946,7 +1016,7 @@ flowchart LR
 - 预订入口始终可见
 - 页面层次简洁、轻量、移动优先
 
-### 11.2 管理端视觉方向
+### 12.2 管理端视觉方向
 
 - 信息密度高但不拥挤
 - 卡片、表格、图表组合明确
@@ -954,7 +1024,7 @@ flowchart LR
 - 操作路径短
 - 抽屉、弹窗、批量操作高效
 
-### 11.3 响应式原则
+### 12.3 响应式原则
 
 - 用户端：移动优先，PC 增强内容展示
 - 管理端：PC 优先，移动端保留核心操作
@@ -988,30 +1058,66 @@ const { toastVisible, toastMessage, toastType, showToast, closeToast } = useToas
 - 支持场景标识：`hotel`（酒店图片）、`room_type`（房型主图）等
 - 上传后返回文件 URL，前端在表单中保存 URL
 
-## 14. 推荐下一步设计顺序
+### 13.3 共享 UI 组件库总览
 
-建议按下面顺序推进前端设计与开发：
+`packages/ui` 当前提供以下已实现组件：
 
-1. 先定用户端与管理端的导航结构
-2. 先做用户端首页、酒店详情、预订页
-3. 先做管理端工作台、房态总览、订单管理
-4. 再做会员、营销、报表、系统配置
-5. 最后统一补视觉规范、组件规范和交互规范
+| 组件 | 说明 |
+|------|------|
+| `StatCard.vue` | 统计卡片，用于工作台数据展示 |
+| `DataTable.vue` | 数据表格，支持排序与插槽 |
+| `ModalDialog.vue` | 模态对话框 |
+| `StatusBadge.vue` | 状态徽章（颜色标签） |
+| `PageHeader.vue` | 页面标题头部 |
+| `EmptyState.vue` | 空状态占位 |
+| `Pagination.vue` | 分页组件 |
+| `Toast.vue` | 消息提示 |
+| `SelectField.vue` | 下拉选择 |
+| `ConfirmDialog.vue` | 确认对话框（危险操作二次确认） |
 
-## 14. 文档维护要求
+Composable：
 
-- 新增页面时同步更新本文件
+| 名称 | 说明 |
+|------|------|
+| `useToast()` | 全局 Toast 消息管理 |
+| `useConfirm()` | 全局确认弹窗管理 |
+
+### 13.4 API 请求层
+
+`packages/api` 统一封装所有前后端交互，按业务域划分模块：
+
+- **管理端**：`systemApi`、`authApi`、`dashboardApi`、`hotelApi`、`roomTypeApi`、`inventoryApi`、`orderApi`、`reviewApi`、`userApi`、`employeeApi`、`reportApi`、`settingsApi`、`adminSystemApi`、`adminCouponApi`、`adminMemberApi`、`aiApi`、`commonApi`
+- **用户端**：`publicApi`、`userAuthApi`、`userProfileApi`、`userOrderApi`、`userReviewApi`、`userFavoriteApi`、`userCouponApi`、`userInvoiceApi`、`userPointsApi`、`userNoticeApi`、`userAiApi`
+- **工具**：`getToken`、`setTokens`、`clearTokens`、`getRefreshToken`、`configureApi`
+
+### 13.5 状态管理
+
+`packages/store` 提供跨应用的 Pinia Store：
+
+| Store | 说明 |
+|-------|------|
+| `useAuthStore` | 管理端登录态（login / logout / fetchMe） |
+| `useUserAuthStore` | 用户端登录态（login / register / logout / fetchMe） |
+## 14. 当前实现进度与下一步计划
+
+### 14.1 已完成
+
+用户端已实现 21/22 个设计页面（路由 24 条），管理端已实现 14/33 个设计页面（路由 19 条）。
+
+核心闭环（浏览 → 预订 → 支付 → 订单管理 → 评价）已全部落地。
+
+### 14.2 建议下一步优先级
+
+1. **管理端前台业务**：入住办理、退房结算、续住/换房 — 补齐 PMS 核心流程
+2. **管理端财务**：财务总览、账单管理、支付记录、退款记录 — 补齐资金链路
+3. **管理端运营**：通知中心、审计日志、活动管理 — 补齐运营支撑
+4. **管理端权限**：角色权限页、房间管理 — 补齐系统管理
+5. **用户端补充**：活动专题页 — 唯一未实现的用户端设计页面
+
+## 15. 文档维护要求
+
+- 新增页面时同步更新本文件的实现总览表和对应设计章节
 - 新增 AI 入口时同步更新本文件与 `ai-integration.md`
 - 新增导航结构时同步更新信息架构图
 - 若页面范围与论文主线发生变化，同步更新 `thesis-alignment.md`
 - 新增前端流式协议或渲染策略（如 SSE / Markdown）时，同步更新本文件与 `api-spec.md`
-
-## 15. 推荐下一步可继续产出
-
-如果继续往下做，建议下一步生成以下内容：
-
-1. 用户端页面原型结构说明
-2. 管理端页面原型结构说明
-3. 数据库实体关系图
-4. 前端路由表与菜单表
-5. API 模块清单与接口分组说明

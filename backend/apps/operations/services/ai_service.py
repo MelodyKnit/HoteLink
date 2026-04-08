@@ -1127,3 +1127,1068 @@ class AIChatService:
             f"已为您定位到 {hotel.name}。下面这些都是系统里当前可下单的房型，"
             "点任意一个房型，我直接带您进入订单填写页。"
         )
+
+
+    # ──────────────────────────────────────────────────────────────────────
+    # 以下为新增 AI 功能方法
+    # ──────────────────────────────────────────────────────────────────────
+
+    def _admin_chat(
+        self,
+        scene: str,
+        system_context: dict,
+        use_reasoning: bool = False,
+        temperature: float = 0.3,
+    ) -> str:
+        """渲染管理端场景提示词并调用 LLM，返回原始文本。不可用时返回空串。"""
+        if not self.is_available():
+            return ""
+        system_prompt = self.prompt_service.render_admin(scene, "system", **system_context)
+        user_prompt = self.prompt_service.render_admin(scene, "user", **system_context)
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+        model = None
+        if use_reasoning and self._provider and self._provider.reasoning_model:
+            model = self._provider.reasoning_model
+        result = self.create_chat_completion(messages, model=model, temperature=temperature)
+        return result.get("content", "")
+
+    def _parse_json_response(self, text: str) -> dict | list | None:
+        """从 LLM 响应中提取 JSON 对象或数组。"""
+        import json
+        text = text.strip()
+        # 尝试去除 markdown 代码块
+        text = re.sub(r"^```(?:json)?\n?", "", text, flags=re.MULTILINE)
+        text = re.sub(r"\n?```$", "", text, flags=re.MULTILINE)
+        text = text.strip()
+        try:
+            return json.loads(text)
+        except Exception:
+            # 尝试提取第一个 JSON 对象/数组
+            m = re.search(r"(\{[\s\S]*\}|\[[\s\S]*\])", text)
+            if m:
+                try:
+                    return json.loads(m.group(1))
+                except Exception:
+                    pass
+        return None
+
+    # ───────── 修复现有 "空壳" 视图：报表摘要 ─────────
+
+    def generate_report_summary(
+        self,
+        *,
+        hotel_id: int | None,
+        start_date,
+        end_date,
+    ) -> dict:
+        """生成酒店运营摘要报告（真实 LLM 调用）。"""
+        from decimal import Decimal
+        from django.db.models import Sum, Avg
+        from apps.bookings.models import BookingOrder
+        from apps.crm.models import Review
+
+        qs = BookingOrder.objects.filter(
+            check_in_date__gte=start_date,
+            check_out_date__lte=end_date,
+        )
+        if hotel_id:
+            qs = qs.filter(hotel_id=hotel_id)
+            hotel = Hotel.objects.filter(id=hotel_id).first()
+            hotel_scope = hotel.name if hotel else f"酒店 #{hotel_id}"
+        else:
+            hotel_scope = "全部酒店"
+
+        total_orders = qs.count()
+        paid_orders = qs.filter(payment_status=BookingOrder.PAYMENT_PAID).count()
+        cancelled_orders = qs.filter(status=BookingOrder.STATUS_CANCELLED).count()
+        cancellation_rate = round((cancelled_orders / total_orders * 100), 1) if total_orders else 0
+        total_revenue = qs.filter(payment_status=BookingOrder.PAYMENT_PAID).aggregate(
+            total=Sum("pay_amount")
+        )["total"] or Decimal("0")
+        avg_paid_price = (total_revenue / paid_orders).quantize(Decimal("0.01")) if paid_orders else Decimal("0")
+
+        checked_in_count = BookingOrder.objects.filter(status=BookingOrder.STATUS_CHECKED_IN).count()
+        total_stock = RoomType.objects.aggregate(total=Sum("stock"))["total"] or 0
+        occupancy_rate = round((checked_in_count / total_stock * 100), 1) if total_stock else 0
+
+        review_qs = Review.objects.filter(
+            created_at__date__gte=start_date,
+            created_at__date__lte=end_date,
+        )
+        if hotel_id:
+            review_qs = review_qs.filter(hotel_id=hotel_id)
+        review_count = review_qs.count()
+        avg_score = round(float(review_qs.aggregate(avg=Avg("score"))["avg"] or 0), 2)
+
+        context = {
+            "hotel_scope": hotel_scope,
+            "start_date": str(start_date),
+            "end_date": str(end_date),
+            "total_orders": total_orders,
+            "paid_orders": paid_orders,
+            "cancelled_orders": cancelled_orders,
+            "cancellation_rate": cancellation_rate,
+            "total_revenue": float(total_revenue),
+            "avg_paid_price": float(avg_paid_price),
+            "checked_in_count": checked_in_count,
+            "total_stock": total_stock,
+            "occupancy_rate": occupancy_rate,
+            "review_count": review_count,
+            "avg_score": avg_score,
+        }
+        provider_info = self._provider.name if self._provider else ""
+        model_info = self._provider.chat_model if self._provider else ""
+        summary = self._admin_chat("report_summary", context, temperature=0.4)
+        return {
+            "summary": summary,
+            "stats": context,
+            "ai_generated": bool(summary),
+            "model_used": model_info,
+            "provider": provider_info,
+        }
+
+    # ───────── 修复现有 "空壳" 视图：评价摘要 ─────────
+
+    def generate_review_summary(
+        self,
+        *,
+        hotel_id: int | None,
+        start_date,
+        end_date,
+    ) -> dict:
+        """生成评价洞察摘要（真实 LLM 调用）。"""
+        import json
+        from django.db.models import Avg, Count
+        from apps.crm.models import Review
+
+        qs = Review.objects.filter(
+            created_at__date__gte=start_date,
+            created_at__date__lte=end_date,
+        )
+        if hotel_id:
+            qs = qs.filter(hotel_id=hotel_id)
+            hotel = Hotel.objects.filter(id=hotel_id).first()
+            hotel_scope = hotel.name if hotel else f"酒店 #{hotel_id}"
+        else:
+            hotel_scope = "全部酒店"
+
+        total_reviews = qs.count()
+        avg_score = round(float(qs.aggregate(avg=Avg("score"))["avg"] or 0), 2)
+        score_dist = {str(i): qs.filter(score=i).count() for i in range(1, 6)}
+
+        def extract_keywords(reviews_qs, limit=20):
+            texts = list(reviews_qs.values_list("content", flat=True)[:limit])
+            words = []
+            for text in texts:
+                words.extend(re.findall(r"[一-鿿]{2,5}", text))
+            freq: dict[str, int] = {}
+            for w in words:
+                freq[w] = freq.get(w, 0) + 1
+            stop_words = {"酒店", "房间", "服务", "非常", "很好", "不错", "感觉", "没有", "还是", "可以"}
+            top = sorted(
+                [(k, v) for k, v in freq.items() if k not in stop_words],
+                key=lambda x: x[1],
+                reverse=True,
+            )
+            return [k for k, _ in top[:8]]
+
+        positive_kw = extract_keywords(qs.filter(score__gte=4))
+        negative_kw = extract_keywords(qs.filter(score__lte=2))
+        neutral_kw = extract_keywords(qs.filter(score=3))
+        unreplied = qs.filter(reply_content="").count()
+
+        context = {
+            "hotel_scope": hotel_scope,
+            "start_date": str(start_date),
+            "end_date": str(end_date),
+            "total_reviews": total_reviews,
+            "avg_score": avg_score,
+            "score_distribution": json.dumps(score_dist, ensure_ascii=False),
+            "positive_keywords": "、".join(positive_kw) or "（暂无）",
+            "negative_keywords": "、".join(negative_kw) or "（暂无）",
+            "neutral_keywords": "、".join(neutral_kw) or "（暂无）",
+            "unreplied_count": unreplied,
+        }
+        provider_info = self._provider.name if self._provider else ""
+        model_info = self._provider.chat_model if self._provider else ""
+        summary = self._admin_chat("review_summary", context, temperature=0.4)
+        return {
+            "summary": summary,
+            "stats": {
+                "total_reviews": total_reviews,
+                "avg_score": avg_score,
+                "score_distribution": score_dist,
+                "unreplied_count": unreplied,
+            },
+            "ai_generated": bool(summary),
+            "model_used": model_info,
+            "provider": provider_info,
+        }
+
+    # ───────── 修复现有 "空壳" 视图：回复建议 ─────────
+
+    def generate_reply_suggestion(self, *, review) -> dict:
+        """为评价生成 3 条回复建议（真实 LLM 调用）。"""
+        hotel = review.hotel
+        context = {
+            "hotel_name": hotel.name if hotel else "",
+            "reviewer_name": review.user.username if review.user_id else "住客",
+            "score": review.score,
+            "review_content": review.content,
+            "has_reply": "是（已有回复，请基于改进角度生成新建议）" if review.reply_content else "否",
+        }
+        provider_info = self._provider.name if self._provider else ""
+        model_info = self._provider.chat_model if self._provider else ""
+        raw = self._admin_chat("reply_suggestion", context, temperature=0.6)
+        suggestions = []
+        if raw:
+            blocks = re.split(r"^---+$", raw, flags=re.MULTILINE)
+            for block in blocks:
+                block = block.strip()
+                if block:
+                    m = re.match(r"^(正式风格|亲切风格|简洁风格)[：:]\s*", block)
+                    if m:
+                        style_label = m.group(1)
+                        content = block[m.end():].strip()
+                        style_map = {"正式风格": "formal", "亲切风格": "casual", "简洁风格": "concise"}
+                        suggestions.append({"style": style_map.get(style_label, "formal"), "content": content})
+                    else:
+                        suggestions.append({"style": "formal", "content": block})
+        return {
+            "suggestions": suggestions,
+            "raw": raw,
+            "ai_generated": bool(raw),
+            "model_used": model_info,
+        }
+
+    # ───────── 新功能：AI 智能定价建议 ─────────
+
+    def generate_pricing_suggestion(
+        self,
+        *,
+        room_type,
+        target_dates: list,
+        use_reasoning: bool = False,
+    ) -> dict:
+        """为指定房型和日期段生成 AI 定价建议。"""
+        import json
+        from django.utils.dateparse import parse_date
+        from apps.hotels.models import RoomInventory
+
+        hotel = room_type.hotel
+        today = timezone.localdate()
+
+        # 近 30 天历史库存数据
+        history_start = today - timezone.timedelta(days=30)
+        inventory_qs = RoomInventory.objects.filter(
+            room_type=room_type,
+            date__gte=history_start,
+            date__lt=today,
+        ).order_by("date")
+        history_data = []
+        for inv in inventory_qs:
+            total = room_type.stock
+            used = max(0, total - inv.stock)
+            history_data.append({
+                "date": str(inv.date),
+                "price": float(inv.price),
+                "stock": inv.stock,
+                "occupancy_rate": round(used / total * 100, 1) if total else 0,
+            })
+
+        # 目标日期附加元数据
+        import calendar
+        CHINESE_HOLIDAYS = {
+            "01-01", "02-10", "02-11", "02-12", "02-13", "02-14",
+            "04-05", "05-01", "05-02", "05-03", "06-01",
+            "09-29", "09-30", "10-01", "10-02", "10-03",
+        }
+        dates_info = []
+        for d in target_dates:
+            d_obj = parse_date(str(d)) if not hasattr(d, "strftime") else d
+            if d_obj is None:
+                continue
+            mmdd = d_obj.strftime("%m-%d")
+            is_holiday = mmdd in CHINESE_HOLIDAYS
+            is_weekend = d_obj.weekday() >= 5
+            inv = RoomInventory.objects.filter(room_type=room_type, date=d_obj).first()
+            dates_info.append({
+                "date": str(d_obj),
+                "is_holiday": is_holiday,
+                "is_weekend": is_weekend,
+                "current_price": float(inv.price) if inv else float(room_type.base_price),
+                "current_stock": inv.stock if inv else room_type.stock,
+            })
+
+        context = {
+            "hotel_name": hotel.name,
+            "room_type_name": room_type.name,
+            "bed_type": room_type.get_bed_type_display(),
+            "base_price": float(room_type.base_price),
+            "max_guest_count": room_type.max_guest_count,
+            "history_json": json.dumps(history_data, ensure_ascii=False),
+            "dates_json": json.dumps(dates_info, ensure_ascii=False),
+            "target_dates_str": "、".join(str(d) for d in target_dates),
+        }
+        raw = self._admin_chat("pricing_suggestion", context, use_reasoning=use_reasoning, temperature=0.3)
+        parsed = self._parse_json_response(raw) if raw else None
+
+        suggestions = []
+        overall_analysis = ""
+        if isinstance(parsed, dict):
+            suggestions = parsed.get("suggestions", [])
+            overall_analysis = parsed.get("overall_analysis", "")
+
+        # 兜底：返回基础信息
+        if not suggestions:
+            for item in dates_info:
+                suggestions.append({
+                    "date": item["date"],
+                    "suggested_price": item["current_price"],
+                    "suggested_min": round(item["current_price"] * 0.9, 2),
+                    "suggested_max": round(item["current_price"] * 1.3, 2),
+                    "reason": "基于基准价估算（AI 服务不可用）",
+                    "price_strategy": "standard",
+                    "is_holiday": item["is_holiday"],
+                    "is_weekend": item["is_weekend"],
+                    "historical_occupancy_rate": None,
+                })
+
+        provider_info = self._provider.name if self._provider else ""
+        model_info = (self._provider.reasoning_model if use_reasoning else self._provider.chat_model) if self._provider else ""
+        return {
+            "room_type_id": room_type.id,
+            "room_type_name": room_type.name,
+            "hotel_name": hotel.name,
+            "suggestions": suggestions,
+            "overall_analysis": overall_analysis,
+            "ai_generated": bool(raw),
+            "model_used": model_info,
+        }
+
+    # ───────── 新功能：AI 深度经营分析报告 ─────────
+
+    def generate_business_report(
+        self,
+        *,
+        hotel_id: int | None,
+        start_date,
+        end_date,
+        dimensions: list | None = None,
+        use_reasoning: bool = False,
+    ) -> dict:
+        """生成深度经营分析报告。"""
+        import json
+        from decimal import Decimal
+        from django.db.models import Sum, Avg, Count
+        from apps.bookings.models import BookingOrder
+        from apps.crm.models import Review
+
+        if dimensions is None:
+            dimensions = ["revenue", "occupancy", "room_type_ranking", "review_keywords", "anomaly"]
+
+        qs = BookingOrder.objects.filter(
+            created_at__date__gte=start_date,
+            created_at__date__lte=end_date,
+        ).select_related("room_type")
+        if hotel_id:
+            qs = qs.filter(hotel_id=hotel_id)
+            hotel = Hotel.objects.filter(id=hotel_id).first()
+            hotel_scope = hotel.name if hotel else f"酒店 #{hotel_id}"
+        else:
+            hotel_scope = "全部酒店"
+
+        from datetime import date, timedelta
+        import datetime as dt
+
+        # 营收数据（按日）
+        revenue_by_day = {}
+        cur = start_date if isinstance(start_date, dt.date) else dt.datetime.strptime(str(start_date), "%Y-%m-%d").date()
+        end_d = end_date if isinstance(end_date, dt.date) else dt.datetime.strptime(str(end_date), "%Y-%m-%d").date()
+        while cur <= end_d:
+            day_rev = qs.filter(created_at__date=cur, payment_status=BookingOrder.PAYMENT_PAID).aggregate(
+                total=Sum("pay_amount")
+            )["total"] or Decimal(0)
+            revenue_by_day[str(cur)] = float(day_rev)
+            cur += timedelta(days=1)
+
+        total_revenue = sum(revenue_by_day.values())
+        total_orders = qs.count()
+        paid_orders = qs.filter(payment_status=BookingOrder.PAYMENT_PAID).count()
+        cancelled_orders = qs.filter(status=BookingOrder.STATUS_CANCELLED).count()
+
+        # 房型排名
+        room_ranking = []
+        if "room_type_ranking" in dimensions:
+            rt_data = (
+                qs.filter(payment_status=BookingOrder.PAYMENT_PAID)
+                .values("room_type__name")
+                .annotate(revenue=Sum("pay_amount"), count=Count("id"))
+                .order_by("-revenue")[:8]
+            )
+            for item in rt_data:
+                room_ranking.append({
+                    "name": item["room_type__name"],
+                    "order_count": item["count"],
+                    "revenue": float(item["revenue"] or 0),
+                })
+
+        # 评价数据
+        review_qs = Review.objects.filter(
+            created_at__date__gte=start_date,
+            created_at__date__lte=end_date,
+        )
+        if hotel_id:
+            review_qs = review_qs.filter(hotel_id=hotel_id)
+        avg_score = round(float(review_qs.aggregate(avg=Avg("score"))["avg"] or 0), 2)
+        review_count = review_qs.count()
+
+        def top_words(reviews_qs, n=6):
+            texts = list(reviews_qs.values_list("content", flat=True)[:30])
+            freq: dict[str, int] = {}
+            for text in texts:
+                for w in re.findall(r"[一-鿿]{2,5}", text):
+                    freq[w] = freq.get(w, 0) + 1
+            stop = {"酒店", "房间", "非常", "很好", "感觉", "没有", "还是", "可以", "不错"}
+            top = sorted([(k, v) for k, v in freq.items() if k not in stop], key=lambda x: -x[1])
+            return [k for k, _ in top[:n]]
+
+        positive_kw = top_words(review_qs.filter(score__gte=4))
+        negative_kw = top_words(review_qs.filter(score__lte=2))
+
+        # 异常标记
+        occupancy = round(
+            BookingOrder.objects.filter(status=BookingOrder.STATUS_CHECKED_IN).count()
+            / max(1, RoomType.objects.aggregate(s=Sum("stock"))["s"] or 1) * 100, 1
+        )
+        anomaly_flags = []
+        cancel_rate = round(cancelled_orders / max(1, total_orders) * 100, 1)
+        if cancel_rate > 30:
+            anomaly_flags.append(f"取消率 {cancel_rate}% 偏高（阈值 30%）")
+        if avg_score < 3.5 and review_count > 0:
+            anomaly_flags.append(f"平均评分 {avg_score} 偏低（阈值 3.5 分）")
+
+        context = {
+            "hotel_scope": hotel_scope,
+            "start_date": str(start_date),
+            "end_date": str(end_date),
+            "dimensions_str": "、".join(dimensions),
+            "has_anomaly": bool(anomaly_flags),
+            "revenue_data_json": json.dumps({
+                "total_revenue": total_revenue,
+                "daily": revenue_by_day,
+            }, ensure_ascii=False),
+            "order_data_json": json.dumps({
+                "total_orders": total_orders,
+                "paid_orders": paid_orders,
+                "cancelled_orders": cancelled_orders,
+                "cancel_rate": cancel_rate,
+                "occupancy_rate": occupancy,
+            }, ensure_ascii=False),
+            "room_type_ranking_json": json.dumps(room_ranking, ensure_ascii=False),
+            "review_data_json": json.dumps({
+                "total_reviews": review_count,
+                "avg_score": avg_score,
+                "positive_keywords": positive_kw,
+                "negative_keywords": negative_kw,
+            }, ensure_ascii=False),
+            "anomaly_flags_json": json.dumps(anomaly_flags, ensure_ascii=False),
+        }
+        raw = self._admin_chat("business_report", context, use_reasoning=use_reasoning, temperature=0.4)
+        provider_info = self._provider.name if self._provider else ""
+        model_info = (self._provider.reasoning_model if use_reasoning else self._provider.chat_model) if self._provider else ""
+        return {
+            "report_markdown": raw or "（AI 服务不可用，无法生成报告）",
+            "summary": (raw or "")[:200] if raw else "",
+            "highlights": [
+                {"type": "info", "text": f"统计区间总营收 ¥{total_revenue:.2f}"},
+                {"type": "info", "text": f"共 {total_orders} 笔订单，取消率 {cancel_rate}%"},
+            ],
+            "ai_generated": bool(raw),
+            "model_used": model_info,
+        }
+
+    def stream_business_report(
+        self,
+        *,
+        hotel_id: int | None,
+        start_date,
+        end_date,
+        dimensions: list | None = None,
+        use_reasoning: bool = False,
+    ):
+        """流式生成经营分析报告（返回 OpenAI stream 迭代器或 fallback 文本）。"""
+        import json
+        from decimal import Decimal
+        from django.db.models import Sum
+        from apps.bookings.models import BookingOrder
+        if dimensions is None:
+            dimensions = ["revenue", "occupancy", "room_type_ranking", "review_keywords"]
+
+        qs = BookingOrder.objects.filter(
+            created_at__date__gte=start_date,
+            created_at__date__lte=end_date,
+        )
+        if hotel_id:
+            qs = qs.filter(hotel_id=hotel_id)
+            hotel = Hotel.objects.filter(id=hotel_id).first()
+            hotel_scope = hotel.name if hotel else f"酒店 #{hotel_id}"
+        else:
+            hotel_scope = "全部酒店"
+
+        total_orders = qs.count()
+        total_revenue = float(
+            qs.filter(payment_status=BookingOrder.PAYMENT_PAID).aggregate(total=Sum("pay_amount"))["total"] or Decimal(0)
+        )
+        cancel_rate = round(
+            qs.filter(status=BookingOrder.STATUS_CANCELLED).count() / max(1, total_orders) * 100, 1
+        )
+        from apps.crm.models import Review
+        review_qs = Review.objects.filter(
+            created_at__date__gte=start_date,
+            created_at__date__lte=end_date,
+        )
+        if hotel_id:
+            review_qs = review_qs.filter(hotel_id=hotel_id)
+
+        context = {
+            "hotel_scope": hotel_scope,
+            "start_date": str(start_date),
+            "end_date": str(end_date),
+            "dimensions_str": "、".join(dimensions),
+            "has_anomaly": cancel_rate > 30,
+            "revenue_data_json": json.dumps({"total_revenue": total_revenue}, ensure_ascii=False),
+            "order_data_json": json.dumps({"total_orders": total_orders, "cancel_rate": cancel_rate}, ensure_ascii=False),
+            "room_type_ranking_json": "[]",
+            "review_data_json": json.dumps({"total_reviews": review_qs.count()}, ensure_ascii=False),
+            "anomaly_flags_json": "[]",
+        }
+
+        if not self.is_available():
+            return None, "（AI 服务不可用，无法生成报告）"
+
+        system_prompt = self.prompt_service.render_admin("business_report", "system", **context)
+        user_prompt = self.prompt_service.render_admin("business_report", "user", **context)
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+        model = None
+        if use_reasoning and self._provider and self._provider.reasoning_model:
+            model = self._provider.reasoning_model
+        stream = self.stream_chat_completion(messages, model=model, temperature=0.4)
+        return stream, None
+
+    # ───────── 新功能：AI 营销文案生成 ─────────
+
+    def generate_marketing_copy(
+        self,
+        *,
+        hotel_id: int | None,
+        copy_type: str,
+        style: str = "formal",
+        keywords: list | None = None,
+        target_audience: str = "",
+        extra_notes: str = "",
+    ) -> dict:
+        """生成营销文案。"""
+        import json
+        hotel = Hotel.objects.filter(id=hotel_id).first() if hotel_id else None
+        room_highlights = []
+        if hotel:
+            for rt in RoomType.objects.filter(hotel=hotel, status=RoomType.STATUS_ONLINE)[:3]:
+                room_highlights.append(f"{rt.name}（¥{rt.base_price}/晚）")
+
+        context = {
+            "hotel_name": hotel.name if hotel else "HoteLink 酒店",
+            "city": hotel.city if hotel else "",
+            "star": hotel.star if hotel else 4,
+            "address": hotel.address if hotel else "",
+            "description": (hotel.description or "")[:200] if hotel else "",
+            "min_price": float(hotel.min_price) if hotel else 0,
+            "room_highlights": "、".join(room_highlights) or "（暂无房型数据）",
+            "copy_type": copy_type,
+            "styles_str": style,
+            "keywords_str": "、".join(keywords or []) or "（未指定）",
+            "target_audience": target_audience or "通用",
+            "extra_notes": extra_notes or "（无额外要求）",
+        }
+        raw = self._admin_chat("marketing_copy", context, temperature=0.7)
+        parsed = self._parse_json_response(raw) if raw else None
+
+        copies = []
+        if isinstance(parsed, dict) and "copies" in parsed:
+            copies = parsed["copies"]
+        elif not copies:
+            copies = [{"title": "精品体验", "content": raw or "AI 服务暂不可用", "style": style}]
+
+        provider_info = self._provider.name if self._provider else ""
+        return {
+            "copies": copies,
+            "ai_generated": bool(raw),
+            "provider": provider_info,
+        }
+
+    # ───────── 新功能：AI 内容生成助手 ─────────
+
+    def generate_content(
+        self,
+        *,
+        content_type: str,
+        context_data: dict,
+        count: int = 3,
+    ) -> dict:
+        """生成酒店/房型描述或 SEO 关键词。"""
+        import json
+        context = {
+            "content_type": content_type,
+            "count": count,
+            "context_json": json.dumps(context_data, ensure_ascii=False),
+        }
+        raw = self._admin_chat("content_generate", context, temperature=0.7)
+        parsed = self._parse_json_response(raw) if raw else None
+
+        candidates = []
+        if isinstance(parsed, dict) and "candidates" in parsed:
+            candidates = parsed["candidates"]
+        elif isinstance(parsed, list):
+            candidates = parsed
+        elif raw:
+            candidates = [raw]
+
+        provider_info = self._provider.name if self._provider else ""
+        return {
+            "candidates": candidates[:count],
+            "ai_generated": bool(raw),
+            "provider": provider_info,
+        }
+
+    # ───────── 新功能：AI 评价情感分析 ─────────
+
+    def analyze_review_sentiment(self, *, review) -> dict:
+        """分析单条评价的情感、关键词和标签。"""
+        hotel = review.hotel
+        context = {
+            "hotel_name": hotel.name if hotel else "",
+            "score": review.score,
+            "review_content": review.content,
+        }
+        raw = self._admin_chat("review_sentiment", context, temperature=0.2)
+        parsed = self._parse_json_response(raw) if raw else None
+
+        if isinstance(parsed, dict):
+            return {
+                "review_id": review.id,
+                "sentiment_score": float(parsed.get("sentiment_score", 0.5)),
+                "sentiment_label": parsed.get("sentiment_label", "neutral"),
+                "keywords": parsed.get("keywords", []),
+                "tags": parsed.get("tags", []),
+                "summary": parsed.get("summary", ""),
+                "ai_generated": True,
+            }
+
+        # 兜底：基于评分
+        score = review.score
+        if score >= 4:
+            label, score_val = "positive", 0.8
+        elif score == 3:
+            label, score_val = "neutral", 0.5
+        else:
+            label, score_val = "negative", 0.2
+        return {
+            "review_id": review.id,
+            "sentiment_score": score_val,
+            "sentiment_label": label,
+            "keywords": [],
+            "tags": [],
+            "summary": "",
+            "ai_generated": False,
+        }
+
+    # ───────── 新功能：AI 异常检测报告 ─────────
+
+    def generate_anomaly_report(
+        self,
+        *,
+        hotel_id: int | None,
+        analysis_date,
+    ) -> dict:
+        """生成今日运营异常报告。"""
+        import json
+        from apps.bookings.models import BookingOrder
+        from apps.crm.models import Review
+        from django.db.models import Sum
+
+        today = analysis_date
+        yesterday = today - timezone.timedelta(days=1)
+
+        qs_base = BookingOrder.objects
+        if hotel_id:
+            qs_base = qs_base.filter(hotel_id=hotel_id)
+            hotel = Hotel.objects.filter(id=hotel_id).first()
+            hotel_scope = hotel.name if hotel else f"酒店 #{hotel_id}"
+        else:
+            hotel_scope = "全部酒店"
+
+        today_new = qs_base.filter(created_at__date=today).count()
+        today_cancelled = qs_base.filter(created_at__date=today, status=BookingOrder.STATUS_CANCELLED).count()
+        today_cancel_rate = round(today_cancelled / max(1, today_new) * 100, 1)
+        today_checked_in = qs_base.filter(status=BookingOrder.STATUS_CHECKED_IN).count()
+        today_expected = qs_base.filter(check_in_date=today, status__in=[
+            BookingOrder.STATUS_CONFIRMED, BookingOrder.STATUS_PAID
+        ]).count()
+
+        total_stock = RoomType.objects.aggregate(s=Sum("stock"))["s"] or 1
+        today_occ = round(today_checked_in / total_stock * 100, 1)
+
+        yesterday_checked_in = qs_base.filter(
+            status=BookingOrder.STATUS_CHECKED_IN,
+        ).count()
+        # 用昨日 check_in_date 订单近似昨日在住率
+        yesterday_occ = today_occ  # fallback
+
+        overdue_checkin_qs = qs_base.filter(
+            check_in_date__lt=today,
+            status__in=[BookingOrder.STATUS_CONFIRMED, BookingOrder.STATUS_PAID],
+        )
+        overdue_checkout_qs = qs_base.filter(
+            check_out_date__lt=today,
+            status=BookingOrder.STATUS_CHECKED_IN,
+        )
+        overdue_checkin_ids = list(overdue_checkin_qs.values_list("id", flat=True)[:10])
+        overdue_checkout_ids = list(overdue_checkout_qs.values_list("id", flat=True)[:10])
+
+        recent_reviews = Review.objects.filter(created_at__date__gte=today - timezone.timedelta(days=1))
+        if hotel_id:
+            recent_reviews = recent_reviews.filter(hotel_id=hotel_id)
+        positive_count = recent_reviews.filter(score__gte=4).count()
+        neutral_count = recent_reviews.filter(score=3).count()
+        negative_count = recent_reviews.filter(score__lte=2).count()
+        neg_summaries = list(
+            recent_reviews.filter(score__lte=2).values_list("content", flat=True)[:3]
+        )
+
+        context = {
+            "analysis_date": str(today),
+            "hotel_scope": hotel_scope,
+            "today_new_orders": today_new,
+            "today_cancelled": today_cancelled,
+            "today_cancel_rate": today_cancel_rate,
+            "today_checked_in": today_checked_in,
+            "today_expected_checkin": today_expected,
+            "today_occupancy_rate": today_occ,
+            "yesterday_occupancy_rate": yesterday_occ,
+            "occupancy_drop": max(0, round(yesterday_occ - today_occ, 1)),
+            "overdue_checkin_count": overdue_checkin_qs.count(),
+            "overdue_checkin_ids": json.dumps(overdue_checkin_ids),
+            "overdue_checkout_count": overdue_checkout_qs.count(),
+            "overdue_checkout_ids": json.dumps(overdue_checkout_ids),
+            "recent_positive_count": positive_count,
+            "recent_neutral_count": neutral_count,
+            "recent_negative_count": negative_count,
+            "negative_review_summaries": "；".join(neg_summaries[:3]) or "（无差评）",
+        }
+
+        raw = self._admin_chat("anomaly_report", context, temperature=0.3)
+        parsed = self._parse_json_response(raw) if raw else None
+
+        if isinstance(parsed, dict):
+            return {
+                "date": str(today),
+                "hotel_id": hotel_id,
+                "has_anomaly": parsed.get("has_anomaly", False),
+                "anomalies": parsed.get("anomalies", []),
+                "overall_status": parsed.get("overall_status", "normal"),
+                "ai_generated": True,
+            }
+
+        # 兜底：规则生成异常列表
+        anomalies = []
+        if overdue_checkin_qs.count() > 0:
+            anomalies.append({
+                "type": "overdue_checkin",
+                "severity": "warning",
+                "title": f"{overdue_checkin_qs.count()} 单入住日期已过未入住",
+                "description": f"订单 {overdue_checkin_ids[:5]} 超过入住日期仍未办理入住",
+                "ai_analysis": "建议联系客户确认是否需要取消",
+                "suggested_actions": ["联系客户确认", "考虑取消超期未入住订单"],
+            })
+        if overdue_checkout_qs.count() > 0:
+            anomalies.append({
+                "type": "overdue_checkout",
+                "severity": "warning",
+                "title": f"{overdue_checkout_qs.count()} 单退房日期已过未退房",
+                "description": f"订单 {overdue_checkout_ids[:5]} 超过退房日期仍未退房",
+                "ai_analysis": "建议前台主动确认退房情况",
+                "suggested_actions": ["前台确认入住状态", "处理超期账单"],
+            })
+        if negative_count >= 3:
+            anomalies.append({
+                "type": "negative_review_spike",
+                "severity": "danger" if negative_count >= 5 else "warning",
+                "title": f"近24小时内 {negative_count} 条差评",
+                "description": f"差评内容: {neg_summaries[0][:50] if neg_summaries else '（无内容）'}",
+                "ai_analysis": "差评集中爆发，请及时关注并回复",
+                "suggested_actions": ["主动联系差评客户致歉", "排查共性问题"],
+            })
+        return {
+            "date": str(today),
+            "hotel_id": hotel_id,
+            "has_anomaly": bool(anomalies),
+            "anomalies": anomalies,
+            "overall_status": "critical" if any(a["severity"] == "danger" for a in anomalies) else (
+                "warning" if anomalies else "normal"
+            ),
+            "ai_generated": False,
+        }
+
+    # ───────── 新功能：AI 订单异常摘要 ─────────
+
+    def generate_order_anomaly_summary(self, *, analysis_date) -> dict:
+        """生成今日订单异常摘要（规则驱动 + AI 解释）。"""
+        from apps.bookings.models import BookingOrder
+        from django.db.models import Count
+
+        today = analysis_date
+        anomalies = []
+
+        # 超时未支付（超过60分钟的 pending_payment 订单）
+        overdue_payment_cutoff = timezone.now() - timezone.timedelta(minutes=60)
+        overdue_payment = BookingOrder.objects.filter(
+            status=BookingOrder.STATUS_PENDING_PAYMENT,
+            created_at__lt=overdue_payment_cutoff,
+        )
+        if overdue_payment.exists():
+            ids = list(overdue_payment.values_list("id", flat=True)[:10])
+            anomalies.append({
+                "type": "overdue_payment",
+                "count": overdue_payment.count(),
+                "description": f"{overdue_payment.count()} 个订单超过 60 分钟未支付",
+                "order_ids": ids,
+                "suggestion": "建议发送支付提醒通知，或取消超时未支付订单",
+            })
+
+        # 频繁取消用户（7天内取消3次以上）
+        week_ago = today - timezone.timedelta(days=7)
+        frequent_cancel_users = (
+            BookingOrder.objects.filter(
+                status=BookingOrder.STATUS_CANCELLED,
+                created_at__date__gte=week_ago,
+            )
+            .values("user_id")
+            .annotate(cancel_count=Count("id"))
+            .filter(cancel_count__gte=3)
+        )
+        if frequent_cancel_users.exists():
+            user_ids = [item["user_id"] for item in frequent_cancel_users[:5]]
+            anomalies.append({
+                "type": "frequent_cancel_user",
+                "count": frequent_cancel_users.count(),
+                "description": f"{frequent_cancel_users.count()} 个用户近 7 天内取消 3 次以上",
+                "user_ids": user_ids,
+                "suggestion": "建议关注高频取消用户行为，评估是否限制预订",
+            })
+
+        # 入住日期已过未入住
+        overdue_checkin = BookingOrder.objects.filter(
+            check_in_date__lt=today,
+            status__in=[BookingOrder.STATUS_CONFIRMED, BookingOrder.STATUS_PAID],
+        )
+        if overdue_checkin.exists():
+            ids = list(overdue_checkin.values_list("id", flat=True)[:10])
+            anomalies.append({
+                "type": "overdue_checkin",
+                "count": overdue_checkin.count(),
+                "description": f"{overdue_checkin.count()} 个已确认订单入住日期已过但未入住",
+                "order_ids": ids,
+                "suggestion": "建议联系客户确认是否取消",
+            })
+
+        summary = f"今日共检测到 {len(anomalies)} 类异常，涉及 {sum(a['count'] for a in anomalies)} 个事项"
+        return {
+            "date": str(today),
+            "summary": summary,
+            "anomalies": anomalies,
+            "ai_generated": False,
+        }
+
+    # ───────── 新功能：AI 智能推荐 ─────────
+
+    def generate_recommendations(
+        self,
+        *,
+        user,
+        scene: str = "home",
+        hotel_id: int | None = None,
+        keyword: str | None = None,
+        limit: int = 6,
+    ) -> list[dict]:
+        """为用户生成个性化酒店推荐。"""
+        import json
+        from apps.bookings.models import BookingOrder
+        from apps.crm.models import FavoriteHotel
+
+        # 构建用户历史画像
+        recent_orders = BookingOrder.objects.filter(user=user).select_related("hotel").order_by("-id")[:10]
+        favorite_hotel_ids = list(FavoriteHotel.objects.filter(user=user).values_list("hotel_id", flat=True)[:20])
+
+        preferred_cities = list({o.hotel.city for o in recent_orders if o.hotel})
+        preferred_stars = list({o.hotel.star for o in recent_orders if o.hotel})
+        total_spent = float(sum(o.pay_amount for o in recent_orders))
+
+        user_profile = {
+            "order_count": len(recent_orders),
+            "total_spent": total_spent,
+            "preferred_cities": preferred_cities,
+            "preferred_stars": preferred_stars,
+            "favorite_hotels": favorite_hotel_ids[:10],
+        }
+
+        # 候选酒店（排除已订近期酒店，优先在线酒店）
+        exclude_ids = [o.hotel_id for o in recent_orders if o.hotel_id]
+        candidates = Hotel.objects.filter(status=Hotel.STATUS_ONLINE)
+        if scene == "hotel_detail" and hotel_id:
+            target = Hotel.objects.filter(id=hotel_id).first()
+            if target:
+                candidates = candidates.filter(city=target.city).exclude(id=hotel_id)
+        elif scene == "search" and keyword:
+            candidates = candidates.filter(
+                name__icontains=keyword
+            ) | candidates.filter(city__icontains=keyword)
+        candidates = candidates.order_by("-rating", "-id")[:20]
+
+        hotels_data = [
+            {
+                "id": h.id,
+                "name": h.name,
+                "city": h.city,
+                "star": h.star,
+                "rating": float(h.rating),
+                "min_price": float(h.min_price),
+                "is_recommended": h.is_recommended,
+            }
+            for h in candidates
+        ]
+
+        context = {
+            "user_profile_json": json.dumps(user_profile, ensure_ascii=False),
+            "hotels_json": json.dumps(hotels_data, ensure_ascii=False),
+            "scene": scene,
+            "keyword": keyword or "",
+            "limit": limit,
+        }
+
+        raw = self._admin_chat("recommendations", context, temperature=0.4)
+        parsed = self._parse_json_response(raw) if raw else None
+
+        recommended_ids = []
+        reasons: dict[str, str] = {}
+        if isinstance(parsed, dict):
+            recommended_ids = [int(i) for i in parsed.get("recommended_ids", [])]
+            reasons = {str(k): v for k, v in parsed.get("reasons", {}).items()}
+
+        if not recommended_ids:
+            recommended_ids = [h["id"] for h in hotels_data[:limit]]
+
+        hotel_map = {h.id: h for h in candidates}
+        result = []
+        for hid in recommended_ids[:limit]:
+            hotel = hotel_map.get(hid)
+            if hotel is None:
+                continue
+            reason = reasons.get(str(hid), "根据您的偏好推荐")
+            result.append({
+                "hotel_id": hotel.id,
+                "hotel_name": hotel.name,
+                "city": hotel.city,
+                "star": hotel.star,
+                "rating": float(hotel.rating),
+                "min_price": float(hotel.min_price),
+                "cover_image": hotel.cover_image or "",
+                "recommendation_reason": reason,
+            })
+        return result
+
+    # ───────── 新功能：AI 酒店对比分析 ─────────
+
+    def generate_hotel_compare(
+        self,
+        *,
+        hotel_ids: list[int],
+        check_in_date=None,
+        check_out_date=None,
+    ) -> dict:
+        """对多家酒店进行 AI 对比分析。"""
+        import json
+        hotels = list(Hotel.objects.filter(id__in=hotel_ids).prefetch_related("room_types"))
+        if not hotels:
+            return {"hotels": [], "ai_summary": "未找到指定酒店", "ai_generated": False}
+
+        hotels_data = []
+        for hotel in hotels:
+            rts = list(hotel.room_types.filter(status=RoomType.STATUS_ONLINE).order_by("base_price")[:3])
+            hotels_data.append({
+                "id": hotel.id,
+                "name": hotel.name,
+                "city": hotel.city,
+                "star": hotel.star,
+                "rating": float(hotel.rating),
+                "min_price": float(hotel.min_price),
+                "address": hotel.address,
+                "description": (hotel.description or "")[:200],
+                "room_types": [
+                    {
+                        "name": rt.name,
+                        "bed_type": rt.get_bed_type_display(),
+                        "area": rt.area,
+                        "price": float(rt.base_price),
+                    }
+                    for rt in rts
+                ],
+            })
+
+        context = {
+            "check_in_date": str(check_in_date) if check_in_date else "",
+            "check_out_date": str(check_out_date) if check_out_date else "",
+            "hotels_json": json.dumps(hotels_data, ensure_ascii=False),
+        }
+        raw = self._admin_chat("hotel_compare", context, temperature=0.4)
+        parsed = self._parse_json_response(raw) if raw else None
+
+        hotel_analysis = []
+        ai_summary = ""
+        recommendation = ""
+        if isinstance(parsed, dict):
+            hotel_analysis = parsed.get("hotel_analysis", [])
+            ai_summary = parsed.get("comparison_summary", "")
+            recommendation = parsed.get("recommendation", "")
+
+        if not hotel_analysis:
+            for h in hotels:
+                hotel_analysis.append({
+                    "hotel_id": h.id,
+                    "strengths": [f"{h.star}星级"],
+                    "weaknesses": [],
+                    "suitable_for": "通用",
+                })
+
+        # 合并 AI 分析和原始酒店数据
+        final_hotels = []
+        for hdata in hotels_data:
+            analysis = next((a for a in hotel_analysis if a.get("hotel_id") == hdata["id"]), {})
+            final_hotels.append({
+                **hdata,
+                "strengths": analysis.get("strengths", []),
+                "weaknesses": analysis.get("weaknesses", []),
+                "suitable_for": analysis.get("suitable_for", "通用"),
+            })
+
+        return {
+            "hotels": final_hotels,
+            "ai_summary": ai_summary,
+            "recommendation": recommendation,
+            "ai_generated": bool(raw),
+        }

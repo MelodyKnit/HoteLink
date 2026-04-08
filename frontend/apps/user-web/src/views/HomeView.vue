@@ -72,6 +72,36 @@
       </div>
     </section>
 
+    <!-- AI Personalized Recommendations (logged-in only) -->
+    <section v-if="aiRecommendations.length" class="mx-auto max-w-5xl px-4 pb-0 pt-6">
+      <div class="mb-4 flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="rounded-full bg-gradient-to-r from-brand to-teal-500 px-2.5 py-0.5 text-[11px] font-semibold text-white">AI 推荐</span>
+          <h2 class="text-base font-bold text-gray-900">专属为您推荐</h2>
+        </div>
+        <button @click="refreshRecommendations" class="text-xs text-gray-400 hover:text-brand transition">🔄 换一批</button>
+      </div>
+      <div class="flex gap-4 overflow-x-auto pb-2 scrollbar-hide">
+        <router-link
+          v-for="hotel in aiRecommendations"
+          :key="hotel.id"
+          :to="`/hotels/${hotel.id}`"
+          class="group shrink-0 w-52 overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-gray-100 transition hover:shadow-lg"
+        >
+          <div class="relative h-32 overflow-hidden bg-gray-200">
+            <img v-if="hotel.cover_image" :src="hotel.cover_image" :alt="hotel.name" class="h-full w-full object-cover transition group-hover:scale-105" />
+            <div v-else class="flex h-full items-center justify-center text-2xl text-gray-300">🏨</div>
+            <div class="absolute right-2 top-2 rounded-full bg-white/90 px-1.5 py-0.5 text-xs font-semibold text-orange-600">¥{{ hotel.min_price }}<span class="text-gray-400 font-normal">起</span></div>
+          </div>
+          <div class="p-3">
+            <h3 class="text-sm font-semibold text-gray-900 line-clamp-1">{{ hotel.name }}</h3>
+            <p class="mt-0.5 text-[11px] text-gray-400">📍 {{ hotel.city }}</p>
+            <p v-if="hotel.reason" class="mt-1 text-[10px] text-teal-600 line-clamp-2">💡 {{ hotel.reason }}</p>
+          </div>
+        </router-link>
+      </div>
+    </section>
+
     <!-- Recommended Hotels -->
     <section class="mx-auto max-w-5xl px-4 py-8 md:py-12">
       <div class="mb-6 flex items-center justify-between">
@@ -157,10 +187,12 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { publicApi } from '@hotelink/api'
+import { publicApi, userAiApi } from '@hotelink/api'
+import { useUserAuthStore } from '@hotelink/store'
 import { formatDate } from '@hotelink/utils'
 
 const router = useRouter()
+const auth = useUserAuthStore()
 const loading = ref(true)
 const error = ref('')
 const keyword = ref('')
@@ -171,6 +203,7 @@ tomorrow.setDate(tomorrow.getDate() + 1)
 const checkOut = ref(formatDate(tomorrow))
 
 const recommendedHotels = ref<any[]>([])
+const aiRecommendations = ref<any[]>([])
 
 function formatRating(value: unknown): string {
   const n = Number(value)
@@ -202,6 +235,16 @@ const previewReviews = ref([
   { name: '王先生', score: 4, content: '整体不错，性价比很高。前台服务热情周到，退房流程也很便捷。' },
 ])
 
+async function refreshRecommendations() {
+  if (!auth.isLoggedIn) return
+  try {
+    const res = await userAiApi.recommendations({ scene: 'home', limit: 6 })
+    if (res.code === 0 && res.data) {
+      aiRecommendations.value = (res.data as any).recommendations || []
+    }
+  } catch { /* silent */ }
+}
+
 // 处理 Search 交互逻辑。
 function handleSearch() {
   const query: Record<string, string> = {}
@@ -229,6 +272,10 @@ onMounted(async () => {
     error.value = '首页数据加载失败，请稍后刷新重试'
   } finally {
     loading.value = false
+  }
+  // AI 推荐（登录用户）
+  if (auth.isLoggedIn) {
+    refreshRecommendations()
   }
 })
 </script>

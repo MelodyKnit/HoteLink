@@ -70,9 +70,15 @@
               <span class="rounded bg-brand/10 px-1.5 py-0.5 text-xs font-semibold text-brand">{{ formatRating(hotel.rating) }}</span>
               <span class="text-xs text-gray-400">{{ hotel.review_count || 0 }}条评价</span>
             </div>
-            <div class="text-right">
-              <span class="text-lg font-bold text-orange-600">¥{{ hotel.min_price }}</span>
-              <span class="text-xs text-gray-400">/晚起</span>
+            <div class="flex items-end gap-3">
+              <button
+                @click.stop="$router.push({ path: '/hotel-compare', query: { id: hotel.id } })"
+                class="text-xs text-gray-400 hover:text-brand transition cursor-pointer"
+              >AI 对比</button>
+              <div class="text-right">
+                <span class="text-lg font-bold text-orange-600">¥{{ hotel.min_price }}</span>
+                <span class="text-xs text-gray-400">/晚起</span>
+              </div>
             </div>
           </div>
         </div>

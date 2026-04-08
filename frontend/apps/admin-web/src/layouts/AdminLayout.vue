@@ -146,6 +146,7 @@ const ALL_MENU_GROUPS = [
     label: 'AI 能力',
     items: [
       { path: '/admin/ai', icon: '🤖', label: 'AI 助手' },
+      { path: '/admin/ai-logs', icon: '📋', label: '调用日志' },
       { path: '/admin/ai-settings', icon: '🔧', label: 'AI 配置', systemOnly: true },
     ],
   },

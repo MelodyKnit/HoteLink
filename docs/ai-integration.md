@@ -2,229 +2,272 @@
 
 ## 1. 文档目标
 
-本文件用于说明项目中的 AI 能力如何接入、放在哪些功能里最合适、如何配置，以及如何保证密钥与隐私安全。
+本文件用于说明项目中的 AI 能力如何接入、当前落地情况、配置方式，以及如何保证密钥与隐私安全。
+
+> 关联文档：
+> - 新增 AI 功能接口设计：[api-spec.md](./api-spec.md) §15
+> - AI 功能改进规划：[feature-improvements.md](./feature-improvements.md) §一
 
 ## 2. 当前接入方式
 
-项目当前采用：
+项目采用：
 
-- OpenAI Python SDK
-- DeepSeek OpenAI 兼容接口
-- Jinja2 Prompt 模板渲染（后端）
+- **OpenAI Python SDK**（统一客户端）
+- **DeepSeek OpenAI 兼容接口**（默认供应商）
+- **Jinja2 Prompt 模板渲染**（后端服务端）
+- **SSE 流式输出**（用户端实时响应）
 
-当前代码位置：
+### 2.1 核心代码位置
 
-- [`../backend/config/ai.py`](../backend/config/ai.py)
-- [`../backend/apps/operations/services/ai_service.py`](../backend/apps/operations/services/ai_service.py)
-- [`../backend/apps/operations/services/prompt_service.py`](../backend/apps/operations/services/prompt_service.py)
-- [`../backend/prompts/customer_service/system.j2`](../backend/prompts/customer_service/system.j2)
-- [`../backend/prompts/customer_service/user.j2`](../backend/prompts/customer_service/user.j2)
-- [`../backend/.env.example`](../backend/.env.example)
+| 文件 | 职责 |
+|------|------|
+| [`backend/config/ai.py`](../backend/config/ai.py) | AI 配置类、供应商管理、客户端工厂 |
+| [`backend/apps/operations/services/ai_service.py`](../backend/apps/operations/services/ai_service.py) | AI 聊天服务、订房编排、上下文构建 |
+| [`backend/apps/operations/services/prompt_service.py`](../backend/apps/operations/services/prompt_service.py) | Prompt 模板渲染、场景路由 |
+| [`backend/prompts/customer_service/system.j2`](../backend/prompts/customer_service/system.j2) | 客服系统 Prompt |
+| [`backend/prompts/customer_service/user.j2`](../backend/prompts/customer_service/user.j2) | 客服用户 Prompt |
 
-当前默认配置：
+### 2.2 默认配置
 
-- `AI_PROVIDER=deepseek`
-- `AI_BASE_URL=https://api.deepseek.com`
-- `AI_MODEL=deepseek-chat`
-- `AI_REASONING_MODEL=deepseek-reasoner`
+```
+AI_PROVIDER=deepseek
+AI_BASE_URL=https://api.deepseek.com
+AI_MODEL=deepseek-chat
+AI_REASONING_MODEL=deepseek-reasoner
+```
 
-## 3. 为什么推荐这样接入
+## 3. 架构设计
 
-- `openai` SDK 生态成熟，后续如果切换模型提供方，改动成本较低
+### 3.1 为什么这样接入
+
+- `openai` SDK 生态成熟，切换供应商只需改 `base_url`，改动成本低
 - DeepSeek 提供 OpenAI 兼容接口，便于统一接入
-- 所有 AI 调用放在后端，避免密钥暴露到前端
+- 所有 AI 调用放在后端，密钥不暴露到前端
+- 通过 `AISettings` + `.ai_providers.json` 支持运行时热切换供应商
 
-## 4. AI 功能应该优先加在哪些地方
+### 3.2 AI 调用链路
 
-建议先加在“低风险、高价值、强辅助”的场景，而不是直接介入核心交易逻辑。
+```mermaid
+sequenceDiagram
+    participant U as 用户前端
+    participant V as View (API 层)
+    participant S as AIChatService
+    participant P as PromptTemplateService
+    participant LLM as AI Provider (DeepSeek/OpenAI/...)
 
-### 4.1 用户端推荐优先级
+    U->>V: POST /user/ai/chat {scene, question, hotel_id?, order_id?, booking_context?}
+    V->>S: build_context(user, hotel_id, order_id)
+    S->>S: 加载用户近5条订单、关联酒店房型、系统通知、推荐酒店
+    S->>S: 检测订房意图 → 是否切入状态机
+    alt 订房编排场景
+        S->>S: 按 booking_context 阶段输出结构化选项
+        S-->>V: {answer, booking_assistant: {stage, options}}
+    else 普通客服场景
+        S->>P: render('customer_service/system.j2', context)
+        P-->>S: system_prompt
+        S->>P: render('customer_service/user.j2', {question})
+        P-->>S: user_prompt
+        S->>LLM: chat.completions.create(messages)
+        LLM-->>S: response
+        S-->>V: {answer}
+    end
+    V-->>U: ApiResponse(data)
+```
 
-#### 第一优先级
+### 3.3 多供应商架构
 
-- 智能客服
-- 酒店推荐
-- 房型推荐
-- FAQ 智能问答
-- 入住须知解释
+```
+AISettings
+├── enabled: bool
+├── active_provider: str
+└── providers: dict
+    ├── deepseek: AIProviderConfig(base_url, api_key, chat_model, reasoning_model)
+    ├── openai: AIProviderConfig(...)
+    ├── zhipu: AIProviderConfig(...)
+    ├── moonshot: AIProviderConfig(...)
+    └── qwen: AIProviderConfig(...)
 
-原因：
+build_ai_client(provider) → OpenAI compatible client
+```
 
-- 用户直接感知强
-- 对订单转化有帮助
-- 风险相对可控
+内置供应商预设：
 
-#### 第二优先级
+| 名称 | Base URL | 默认模型 |
+|------|----------|----------|
+| deepseek | `api.deepseek.com` | `deepseek-chat` |
+| openai | `api.openai.com/v1` | `gpt-4o-mini` |
+| zhipu | `open.bigmodel.cn/api/paas/v4` | `glm-4-flash` |
+| moonshot | `api.moonshot.cn/v1` | `moonshot-v1-8k` |
+| qwen | `dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-turbo` |
 
-- 订单问答助手
-- 发票与退改政策解释
+## 4. AI 功能落地情况
+
+### 4.1 用户端 AI 功能
+
+#### ✅ 已实现
+
+| 功能 | 接口 | 实现状态 |
+|------|------|----------|
+| 智能客服问答 | `POST /api/v1/user/ai/chat` | 完整实现，调用 LLM |
+| 流式客服问答 | `POST /api/v1/user/ai/chat/stream` | SSE 流式输出 |
+| AI 订房编排 | 同上，订房意图检测后自动切入 | 多轮对话状态机 |
+| FAQ 问答 | 客服场景内支持 | 通过 Prompt 约束 |
+| 入住须知解释 | 客服场景内支持 | 通过上下文注入 |
+
+#### 规划中
+
+- 酒店推荐助手（独立推荐接口）
 - 行程建议与周边推荐
+- 发票与退改政策解释
 
-#### 不建议一开始就交给 AI 的能力
+### 4.2 管理端 AI 功能
+
+#### ⚠️ 已有接口但未真正调用 LLM
+
+| 功能 | 接口 | 当前状态 |
+|------|------|----------|
+| 经营报表智能总结 | `POST /api/v1/admin/ai/report-summary` | 返回固定模板文案 |
+| 评价智能摘要 | `POST /api/v1/admin/ai/review-summary` | 返回固定模板文案 |
+| 评价回复建议 | `POST /api/v1/admin/ai/reply-suggestion` | 仅返回 fallback |
+
+#### ✅ 已完整实现
+
+| 功能 | 接口 | 说明 |
+|------|------|------|
+| AI 配置管理 | `GET/POST /api/v1/admin/ai/settings` | 读写 AI 开关与配置 |
+| 供应商管理 | `POST /admin/ai/provider/add\|switch\|delete` | 增删改查、切换活跃 |
+
+#### 规划中
+
+- 经营分析报告（深度）— 详见 [feature-improvements.md](./feature-improvements.md) §1.3
+- 评价情感分析与自动标签 — §1.4
+- 营销文案生成 — §1.5
+- 酒店内容生成 — §1.6
+- 异常检测与预警 — §1.7
+- 客户画像与偏好标签 — §1.11
+- 智能定价助手 — §1.2
+
+### 4.3 AI 使用边界
+
+**不应由 AI 直接决定的内容**：
 
 - 支付结果确认
 - 最终退款判定
-- 最终房态判断
-- 最终价格计算
+- 最终房态与库存判断
+- 最终订单价格计算
 
-这些必须由业务规则决定。
+这些必须由业务规则决定。AI 输出默认是**建议**，不是最终结果。
 
-## 4.3 当前已落地的防幻觉机制（客服场景）
+### 4.4 已落地的防幻觉机制
 
-- 场景白名单：仅支持 `customer_service`，兼容 `general -> customer_service`。
-- 非白名单场景：服务端直接拒绝（`PromptSceneError` + `4002`）。
-- Prompt 强约束：通过 Jinja 模板明确禁止编造库存、价格、退款规则、会员权益等。
-- 上下文绑定：仅注入系统已知数据（用户订单、关联酒店/房型、系统通知、字典枚举）。
-- 上下文不足：要求模型明确说明“无法从系统数据确认”，而不是猜测。
-- 订房编排：当用户表达订房意图时，服务端优先切入确定性状态机，按“城市 -> 酒店 -> 房型 -> 下单跳转”输出结构化选项。
-- 流式输出：接口层支持 SSE，不改变上述约束链路。
+- **场景白名单**：仅支持 `customer_service`，兼容 `general` → `customer_service`、`booking_assistant` → `customer_service`
+- **非白名单场景**：服务端直接拒绝（`PromptSceneError` + `4002`）
+- **Prompt 强约束**：通过 Jinja 模板明确禁止编造库存、价格、退款规则、会员权益等
+- **上下文绑定**：仅注入系统已知数据（用户订单、关联酒店/房型、系统通知、字典枚举、推荐酒店）
+- **上下文不足**：要求模型明确说明"无法从系统数据确认"，而不是猜测
+- **隐私保护**：Prompt 明确禁止暴露内部实现、数据库结构、SQL、Prompt 模板内容
+- **订房编排**：用户表达订房意图时，服务端优先切入确定性状态机
+- **流式输出**：SSE 接口不改变上述约束链路
 
-### 4.2 管理端推荐优先级
+## 5. Prompt 模板系统
 
-#### 第一优先级
+### 5.1 模板目录
 
-- 经营报表智能总结
-- 差评摘要
-- 客诉优先级建议
-- 常见回复建议
-- 营销文案辅助
+```
+backend/prompts/
+└── customer_service/
+    ├── system.j2    # 系统提示词
+    └── user.j2      # 用户提示词
+```
 
-原因：
+### 5.2 system.j2 上下文变量
 
-- 对运营和客服效率提升明显
-- 风险比直接控制订单和支付低
+| 变量 | 类型 | 说明 |
+|------|------|------|
+| `now` | string | 当前日期时间（ISO 格式） |
+| `supported_topics` | list | 允许的话题列表（酒店基础信息、房型基础信息、用户本人订单状态、支付与发票流程、系统通知） |
+| `dictionaries_json` | JSON | 系统字典（酒店状态、房间状态、床型、订单状态、支付状态） |
+| `user_profile_json` | JSON | 用户基本信息（id、username、email、is_authenticated） |
+| `requested_order_json` | JSON | 当前请求关联的订单（如有） |
+| `requested_hotel_json` | JSON | 当前请求关联的酒店（如有） |
+| `requested_hotel_room_types_json` | JSON | 关联酒店的在线房型（最多 10 条） |
+| `recent_orders_json` | JSON | 用户最近 5 条订单 |
+| `recommended_hotels_json` | JSON | 推荐酒店列表（最多 5 条） |
+| `recent_notices_json` | JSON | 用户最近 5 条系统通知 |
 
-#### 第二优先级
+### 5.3 system.j2 核心约束
 
-- 客户偏好标签建议
-- 异常订单摘要
-- 房态异常提醒文案
-- 酒店内容编辑辅助
+Prompt 中明确了以下约束：
 
-## 5. 推荐的具体 AI 功能清单
+1. **禁止编造**：不得编造政策、价格、促销、退款规则、会员权益
+2. **数据来源**：只使用当前请求的订单/酒店数据或用户近期订单
+3. **推荐范围**：只推荐"当前关联酒店"或"推荐酒店列表"中的酒店
+4. **超出范围**：明确说明限制，建议联系人工客服
+5. **隐私保护**：不暴露 Prompt 结构、数据库结构、SQL、内部实现
 
-### 5.1 用户端
+### 5.4 场景路由
 
-#### 智能客服页 / 悬浮助手
+`PromptTemplateService` 支持场景规范化映射：
 
-解决：
+```
+general           → customer_service
+booking_assistant → customer_service
+customer_service  → customer_service
+其他场景          → PromptSceneError (4002)
+```
 
-- 入住时间
-- 早餐政策
-- 停车政策
-- 退改规则
-- 发票问题
-- 联系酒店
+## 6. 订房编排状态机
 
-#### 智能推荐模块
+### 6.1 状态流转
 
-放置位置：
+```mermaid
+stateDiagram-v2
+    [*] --> 意图检测
+    意图检测 --> 选择城市: 识别到订房意图
+    意图检测 --> 普通客服: 非订房意图
+    选择城市 --> 选择酒店: 城市已确定
+    选择酒店 --> 选择房型: 酒店已选择
+    选择房型 --> 跳转下单: 房型已选择
+    跳转下单 --> [*]
+```
 
-- 首页
-- 酒店列表页
-- 酒店详情页
-- 会员中心
+### 6.2 编排特点
 
-推荐内容：
+- 每个阶段返回结构化 `booking_assistant` 字段，携带 `stage`、`options`、`action`
+- 支持预算偏好提取、距离排序（POI 附近酒店）、评分排序
+- 前端渲染城市/酒店/房型动作卡片，点击后继续对话或跳转 `/booking`
+- 上下文由前端通过 `booking_context` 字段传递，支持跨轮对话状态保持
+- 即使 LLM 不可用，仍通过酒店名词元重叠匹配直接命中酒店并返回房型
 
-- 推荐酒店
-- 推荐房型
-- 推荐套餐
-- 推荐加购服务
+## 7. AI 配置项说明
 
-#### 订单问答助手
+### 7.1 环境变量
 
-放置位置：
+| 变量 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `AI_ENABLED` | bool | `true` | AI 功能总开关 |
+| `AI_PROVIDER` | string | `deepseek` | 默认供应商名称 |
+| `AI_BASE_URL` | string | 供应商预设 | 自定义 API 地址 |
+| `AI_API_KEY` | string | — | API 密钥（必填） |
+| `AI_MODEL` | string | 供应商预设 | 聊天模型名称 |
+| `AI_REASONING_MODEL` | string | — | 推理模型名称 |
+| `AI_TIMEOUT` | int | `60` | 请求超时（秒） |
 
-- 订单详情页
-
-可回答：
-
-- 当前订单状态
-- 是否支持取消
-- 发票如何申请
-- 入住需要带什么
-
-### 5.2 管理端
-
-#### AI 经营分析助手
-
-放置位置：
-
-- 工作台
-- 财务总览页
-- 经营报表页
-
-可输出：
-
-- 本日营收总结
-- 入住率波动原因提示
-- 渠道变化摘要
-- 异常指标说明
-
-#### AI 客诉与评价分析
-
-放置位置：
-
-- 评价与反馈管理页
-- 客户档案页
-
-可输出：
-
-- 差评摘要
-- 高频投诉标签
-- 客户情绪等级建议
-- 回复建议
-
-#### AI 营销助手
-
-放置位置：
-
-- 活动管理页
-- 内容管理页
-
-可输出：
-
-- 活动标题建议
-- Banner 文案草稿
-- 会员活动描述
-- 节假日营销文案
-
-## 6. AI 配置项说明
-
-建议统一使用环境变量：
-
-- `AI_PROVIDER`
-- `AI_ENABLED`
-- `AI_BASE_URL`
-- `AI_API_KEY`
-- `AI_MODEL`
-- `AI_REASONING_MODEL`
-- `AI_TIMEOUT`
-
-### 6.1 多供应商支持
-
-系统支持多供应商并行配置，支持运行时切换：
-
-- 可在管理端添加多个供应商（如 DeepSeek / OpenAI / 智谱 / Moonshot / Qwen）
-- 可设置当前活跃供应商
-- 当 A 供应商额度不足时，可即时切换到 B 供应商，无需重启服务
-
-后端实现位置：
-
-- `backend/config/ai.py`
-- `backend/apps/operations/services/ai_service.py`
-- `backend/apps/api/views.py`（`AdminAISettingsView` 及 provider 管理接口）
-
-### 6.2 管理端接口
+### 7.2 管理端配置接口
 
 - `GET /api/v1/admin/ai/settings`：读取 AI 开关、活跃供应商、供应商列表
-- `POST /api/v1/admin/ai/settings/update`：更新 AI 开关/活跃供应商/供应商配置
+- `POST /api/v1/admin/ai/settings/update`：更新 AI 开关 / 活跃供应商 / 供应商配置
 - `POST /api/v1/admin/ai/provider/add`：添加或编辑供应商
 - `POST /api/v1/admin/ai/provider/switch`：切换活跃供应商
 - `POST /api/v1/admin/ai/provider/delete`：删除非活跃供应商
 
-### 6.3 用户端 AI 客服接口
+### 7.3 运行时配置持久化
+
+- 供应商配置保存在 `.ai_providers.json`（已 .gitignore 忽略）
+- 管理端修改后实时生效，无需重启服务
+- 切换供应商时前一供应商配置保留，方便回切
+
+### 7.4 用户端 AI 客服接口
 
 - `POST /api/v1/user/ai/chat`：标准问答
 - `POST /api/v1/user/ai/chat/stream`：流式问答（SSE）
@@ -235,9 +278,9 @@
 - AI 订房场景会额外返回 `booking_assistant`，用于驱动城市、酒店、房型和跳转动作
 - 前端调用流式接口时，应先处理 `meta` 事件中的结构化订房数据，再消费 `chunk/done` 文本事件
 
-### 6.4 前端页面
+### 7.5 前端 AI 页面
 
-管理端 AI 设置页支持：
+管理端 AI 设置页（`/admin/ai-settings`）支持：
 
 - 查看所有供应商状态
 - 快捷添加内置供应商
@@ -245,24 +288,31 @@
 - 切换当前活跃供应商
 - 删除非活跃供应商
 
-这些变量当前已写入：
+用户端 AI 客服页（`/ai-chat`、`/ai-booking`）支持：
+
+- 智能问答输入框
+- 流式输出 Markdown 渲染
+- 订房动作卡片（城市、酒店、房型）
+- 对话历史保持
+
+环境变量已写入：
 
 - [`../backend/.env.example`](../backend/.env.example)
 - [`../.env.docker.example`](../.env.docker.example)
 - [`../.env.docker.dev.example`](../.env.docker.dev.example)
 
-## 7. 安全要求
+## 8. 安全要求
 
-### 7.1 绝对不能提交到 GitHub 的内容
+### 8.1 绝对不能提交到 GitHub 的内容
 
 - 真实 `AI_API_KEY`
 - 真实数据库密码
 - 真实 Redis 密码
 - 私钥、证书
 - 本地 `.env`
-- 本地运行时 AI 供应商配置文件（如 `.ai_providers.json`）
+- 本地运行时 AI 供应商配置文件（`.ai_providers.json`）
 
-### 7.2 可以提交到 GitHub 的内容
+### 8.2 可以提交到 GitHub 的内容
 
 - `.env.example`
 - `.env.docker.example`
@@ -270,31 +320,38 @@
 - AI 配置读取代码
 - AI 服务封装代码
 
-### 7.3 当前项目的保护措施
+### 8.3 当前项目的保护措施
 
-- [`../.gitignore`](../.gitignore) 已忽略 `.env` 和 `.env.*`
-- [`../.gitignore`](../.gitignore) 已忽略 `backend/.ai_providers.json` 与同类文件
-- `.gitignore` 允许提交示例配置文件
+- [`.gitignore`](../.gitignore) 已忽略 `.env` 和 `.env.*`（示例文件除外）
+- [`.gitignore`](../.gitignore) 已忽略 `backend/.ai_providers.json` 与同类文件
 - AI 只在后端调用，不在前端暴露密钥
+- Prompt 明确禁止输出敏感信息
 
-## 8. AI 使用边界
+## 9. 后续扩展规划
 
-- AI 默认输出为建议，不是最终业务结论
-- 涉及金额、库存、订单状态、入住资格、退款结果的内容，必须以业务系统规则为准
-- AI 返回内容需要考虑幻觉风险
-- 高风险场景需要人工确认
+以下扩展的完整接口设计见 [api-spec.md](./api-spec.md) §15，功能描述见 [feature-improvements.md](./feature-improvements.md) §一。
 
-## 9. 后续扩展建议
-
-1. 增加 AI 调用日志表
-2. 增加 Prompt 模板版本化与回滚能力
-3. 增加 AI 开关和模型配置后台页面
-4. 增加 AI 使用额度与频控
-5. 增加 AI 输出审计机制
+| 序号 | 功能 | 优先级 | 说明 |
+|------|------|--------|------|
+| 1 | 管理端 AI 三视图接入真实 LLM | P0 | 当前为 fallback，需新增 Prompt 模板并调用 LLM |
+| 2 | AI 调用日志表（AICallLog） | P0 | 记录每次 AI 请求/响应/耗时/token |
+| 3 | AI 使用额度与频控 | P1 | 基于 Redis 限流 |
+| 4 | AI 智能定价助手 | P1 | 基于历史入住率与季节因素建议定价 |
+| 5 | AI 评价情感分析 | P1 | 自动标注情感标签与关键词 |
+| 6 | AI 经营分析报告（深度） | P1 | 注入营收/入住率/评分趋势数据，生成深度报告 |
+| 7 | AI 营销文案生成 | P2 | 活动标题、Banner 文案、节日营销 |
+| 8 | AI 酒店内容生成 | P2 | 酒店描述、房型卖点、SEO 文案 |
+| 9 | AI 异常检测与预警 | P2 | OCC/RevPAR 偏离预警 |
+| 10 | AI 多轮对话持久化 | P2 | 独立 ChatSession 模型 |
+| 11 | AI 客户画像标签 | P2 | 基于行为数据生成偏好标签 |
+| 12 | AI 推荐引擎 | P2 | 酒店对比与个性化推荐 |
+| 13 | Prompt 模板版本化与回滚 | P3 | 模板管理后台 |
+| 14 | AI 输出审计机制 | P3 | 管理员复核 AI 生成内容 |
+| 15 | 推理模型（reasoning_model）利用 | P1 | 对复杂分析场景使用推理模型 |
 
 ## 10. 文档维护要求
 
 - 每次新增 AI 场景，都要同步更新本文件
 - 每次 AI 配置项发生变化，都要同步更新本文件和 `README.md`
 - 每次 AI 页面入口发生变化，都要同步更新 `frontend-system-design.md`
-- 每次新增或修改 Prompt 模板，都要同步更新本文件的“防幻觉机制”和“接口说明”
+- 每次新增或修改 Prompt 模板，都要同步更新本文件的"Prompt 模板系统"和相关说明
