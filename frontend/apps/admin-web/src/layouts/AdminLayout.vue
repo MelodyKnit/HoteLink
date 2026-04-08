@@ -35,8 +35,9 @@
 
         <div class="border-t border-slate-700 px-4 py-4">
           <div class="flex items-center gap-3">
-            <div class="flex h-8 w-8 items-center justify-center rounded-full bg-teal-600 text-sm font-bold">
-              {{ (auth.user?.nickname || auth.user?.username || 'A').charAt(0).toUpperCase() }}
+            <div class="flex h-8 w-8 shrink-0 overflow-hidden rounded-full bg-teal-600 text-sm font-bold">
+              <img v-if="auth.user?.avatar && !sidebarAvatarError" :src="auth.user.avatar" class="h-full w-full object-cover" @error="sidebarAvatarError = true" />
+              <span v-else class="flex h-full w-full items-center justify-center">{{ (auth.user?.nickname || auth.user?.username || 'A').charAt(0).toUpperCase() }}</span>
             </div>
             <div class="flex-1 truncate">
               <p class="text-sm font-medium">{{ auth.user?.nickname || auth.user?.username }}</p>
@@ -78,6 +79,9 @@ const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
 const sidebarOpen = ref(false)
+const sidebarAvatarError = ref(false)
+
+const isSystemAdmin = computed(() => auth.user?.role === 'system_admin')
 
 const todayStr = computed(() => {
   const d = new Date()
@@ -95,7 +99,7 @@ function handleLogout() {
   router.push('/admin/login')
 }
 
-const menuGroups = [
+const ALL_MENU_GROUPS = [
   {
     label: '总览',
     items: [
@@ -119,7 +123,7 @@ const menuGroups = [
   {
     label: '客户与评价',
     items: [
-      { path: '/admin/users', icon: '👥', label: '用户管理' },
+      { path: '/admin/users', icon: '👥', label: '用户管理', systemOnly: true },
       { path: '/admin/members', icon: '👑', label: '会员管理' },
       { path: '/admin/coupons', icon: '🎫', label: '优惠券管理' },
       { path: '/admin/reviews', icon: '⭐', label: '评价管理' },
@@ -135,17 +139,27 @@ const menuGroups = [
     label: '系统管理',
     items: [
       { path: '/admin/employees', icon: '🧑‍💼', label: '员工管理' },
-      { path: '/admin/settings', icon: '⚙️', label: '系统配置' },
+      { path: '/admin/settings', icon: '⚙️', label: '系统配置', systemOnly: true },
     ],
   },
   {
     label: 'AI 能力',
     items: [
       { path: '/admin/ai', icon: '🤖', label: 'AI 助手' },
-      { path: '/admin/ai-settings', icon: '🔧', label: 'AI 配置' },
+      { path: '/admin/ai-settings', icon: '🔧', label: 'AI 配置', systemOnly: true },
     ],
   },
 ]
+
+// 根据角色过滤菜单。
+const menuGroups = computed(() => {
+  return ALL_MENU_GROUPS
+    .map(group => ({
+      ...group,
+      items: group.items.filter(item => isSystemAdmin.value || !('systemOnly' in item && item.systemOnly)),
+    }))
+    .filter(group => group.items.length > 0)
+})
 </script>
 
 <style scoped>

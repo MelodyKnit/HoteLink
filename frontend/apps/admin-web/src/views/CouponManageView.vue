@@ -155,7 +155,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { adminCouponApi } from '@hotelink/api'
-import { SelectField } from '@hotelink/ui'
+import { SelectField, useToast } from '@hotelink/ui'
+
+const { showToast } = useToast()
 
 const templates = ref<any[]>([])
 const showCreate = ref(false)
@@ -209,6 +211,7 @@ async function handleCreate() {
   try {
     const res = await adminCouponApi.create(form.value as any)
     if (res.code === 0) {
+      showToast('优惠券创建成功', 'success')
       showCreate.value = false
       await loadData()
     } else {
@@ -224,8 +227,15 @@ async function handleCreate() {
 async function toggleStatus(tpl: any, status: string) {
   try {
     const res = await adminCouponApi.update({ template_id: tpl.id, status })
-    if (res.code === 0) await loadData()
-  } catch { /* ignore */ }
+    if (res.code === 0) {
+      showToast(status === 'active' ? '已上架' : '已下架', 'success')
+      await loadData()
+    } else {
+      showToast(res.message || '操作失败', 'error')
+    }
+  } catch {
+    showToast('操作失败，请重试', 'error')
+  }
 }
 
 onMounted(loadData)

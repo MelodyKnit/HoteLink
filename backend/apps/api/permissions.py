@@ -1,8 +1,9 @@
 """
 apps/api/permissions.py —— 自定义 DRF 权限类。
 
-包含辅助函数 get_user_role()，以及 IsAdminRole 权限类（仅允许
-酒店管理员或系统管理员访问的接口）。
+包含辅助函数 get_user_role()，以及两个权限类：
+- IsAdminRole：允许 hotel_admin 或 system_admin 访问。
+- IsSystemAdminRole：仅允许 system_admin 访问（系统核心/破坏性操作）。
 """
 from rest_framework.permissions import BasePermission
 
@@ -33,3 +34,11 @@ class IsAdminRole(BasePermission):
     def has_permission(self, request, view) -> bool:
         """检查当前请求用户是否具有管理员角色。"""
         return get_user_role(request.user) in {"hotel_admin", "system_admin"}
+
+
+class IsSystemAdminRole(BasePermission):
+    """仅允许 system_admin 访问的 DRF 权限类，用于系统核心或破坏性操作。"""
+
+    def has_permission(self, request, view) -> bool:
+        """检查当前请求用户是否为系统管理员。"""
+        return get_user_role(request.user) == "system_admin"

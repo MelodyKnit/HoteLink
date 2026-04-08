@@ -120,7 +120,6 @@
 
     </div>
 
-    <Toast :visible="toastVisible" :message="toastMessage" :type="toastType" @close="closeToast" />
   </section>
 </template>
 
@@ -128,9 +127,10 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { aiApi } from '@hotelink/api'
 import { extractApiError } from '@hotelink/utils'
-import { PageHeader, StatusBadge, Toast, useToast } from '@hotelink/ui'
+import { PageHeader, StatusBadge, useToast, useConfirm } from '@hotelink/ui'
 
-const { toastVisible, toastMessage, toastType, showToast, closeToast } = useToast()
+const { showToast } = useToast()
+const { confirm: confirmDialog } = useConfirm()
 
 interface ProviderInfo {
   name: string
@@ -192,7 +192,7 @@ async function switchProvider(name: string) {
 
 // 删除供应商
 async function deleteProvider(name: string) {
-  if (!confirm(`确认删除供应商 ${name}？`)) return
+  if (!await confirmDialog(`确认删除供应商 ${name}？`, { type: 'danger' })) return
   const res = await aiApi.deleteProvider(name)
   if (res.code === 0) {
     await loadSettings()

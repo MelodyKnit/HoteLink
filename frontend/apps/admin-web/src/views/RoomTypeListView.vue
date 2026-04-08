@@ -126,7 +126,6 @@
       </template>
     </ModalDialog>
 
-    <Toast :visible="toastVisible" :message="toastMessage" :type="toastType" @close="closeToast" />
   </section>
 </template>
 
@@ -134,9 +133,10 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { roomTypeApi, hotelApi, commonApi } from '@hotelink/api'
 import { formatMoney, BED_TYPE_MAP, extractApiError } from '@hotelink/utils'
-import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, Toast, useToast, SelectField } from '@hotelink/ui'
+import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, useToast, useConfirm, SelectField } from '@hotelink/ui'
 
-const { toastVisible, toastMessage, toastType, showToast, closeToast } = useToast()
+const { showToast } = useToast()
+const { confirm: confirmDialog } = useConfirm()
 
 const columns = [
   { key: 'id', label: 'ID' },
@@ -281,7 +281,7 @@ async function handleSave() {
 }
 
 async function handleDelete(row: Record<string, unknown>) {
-  if (!confirm(`确定删除房型「${row.name}」？`)) return
+  if (!await confirmDialog(`确定删除房型「${row.name}」？`, { type: 'danger' })) return
   try {
     const res = await roomTypeApi.delete(row.id as number)
     if (res.code === 0) {

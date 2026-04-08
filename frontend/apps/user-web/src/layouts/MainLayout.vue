@@ -24,8 +24,9 @@
                 {{ unreadCount > 9 ? '9+' : unreadCount }}
               </span>
             </router-link>
-            <router-link to="/my" class="flex h-8 w-8 items-center justify-center rounded-full bg-brand text-sm font-bold text-white">
-              {{ (auth.user?.nickname || auth.user?.username || 'U').charAt(0).toUpperCase() }}
+            <router-link to="/my" class="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-brand text-sm font-bold text-white">
+              <img v-if="auth.user?.avatar && !headerAvatarError" :src="auth.user.avatar" class="h-full w-full object-cover" @error="headerAvatarError = true" />
+              <span v-else>{{ (auth.user?.nickname || auth.user?.username || 'U').charAt(0).toUpperCase() }}</span>
             </router-link>
           </template>
           <template v-else>
@@ -99,6 +100,10 @@ import { userNoticeApi } from '@hotelink/api'
 const auth = useUserAuthStore()
 const route = useRoute()
 const unreadCount = ref(0)
+const headerAvatarError = ref(false)
+
+// 头像 URL 变化时重置加载错误状态
+watch(() => auth.user?.avatar, () => { headerAvatarError.value = false })
 
 // ---- SVG icon components ----
 const IconHome = defineComponent({ render: () => h('svg', { fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24' }, [h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6' })]) })

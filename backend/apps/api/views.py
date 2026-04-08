@@ -51,7 +51,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from apps.api.permissions import IsAdminRole
+from apps.api.permissions import IsAdminRole, IsSystemAdminRole, get_user_role
 from apps.api.responses import api_response, paginated_response
 from apps.api.serializers import (
     AIChatSerializer,
@@ -501,7 +501,7 @@ class CommonUploadView(APIView):
         file_obj = serializer.validated_data["file"]
         scene = serializer.validated_data["scene"]
         path = default_storage.save(f"uploads/{scene}/{file_obj.name}", file_obj)
-        file_url = request.build_absolute_uri(f"/media/{path}")
+        file_url = f"/media/{path}"
         return api_response(data={"file_name": file_obj.name, "file_url": file_url, "scene": scene})
 
 
@@ -739,7 +739,7 @@ class UserProfileAvatarView(APIView):
             return api_response(code=4002, message="缺少 avatar", data=None, status_code=400)
         path = default_storage.save(f"avatars/{request.user.id}/{file_obj.name}", file_obj)
         profile = ensure_profile(request.user)
-        profile.avatar = request.build_absolute_uri(f"/media/{path}")
+        profile.avatar = f"/media/{path}"
         profile.save(update_fields=["avatar", "updated_at"])
         return api_response(data={"avatar": profile.avatar})
 
@@ -1515,7 +1515,7 @@ class AdminDashboardChartsView(APIView):
 
 
 class AdminHotelsView(APIView):
-    """酒店管理接口：列表查询、创建、更新与删除。"""
+    """酒店管理接口：列表查询、创建、更新（hotel_admin 可操作），删除（仅 system_admin）。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
 
     _HOTEL_ORDERING_WHITELIST = {"id", "-id", "name", "-name", "city", "-city", "star", "-star", "min_price", "-min_price"}
@@ -1566,6 +1566,8 @@ class AdminHotelsView(APIView):
                     setattr(hotel, field, value)
             hotel.save()
             return api_response(data=HotelSimpleSerializer(hotel).data)
+        if get_user_role(request.user) != "system_admin":
+            return api_response(code=4030, message="仅系统管理员可以删除酒店", data=None, status_code=403)
         hotel_id = request.data.get("hotel_id")
         deleted, _ = Hotel.objects.filter(pk=hotel_id).delete()
         if not deleted:
@@ -1839,6 +1841,20 @@ class AdminReviewsReplyView(APIView):
         return api_response(data={"review_id": review.id, "reply_content": review.reply_content})
 
 
+class AdminReviewDeleteView(APIView):
+    """管理员删除评价接口（仅 system_admin）。"""
+    permission_classes = [IsAuthenticated, IsSystemAdminRole]
+
+    def post(self, request):
+        review_id = request.data.get("review_id")
+        if not review_id:
+            return api_response(code=4001, message="缺少 review_id 参数", data=None, status_code=400)
+        deleted, _ = Review.objects.filter(id=review_id).delete()
+        if not deleted:
+            return api_response(code=4040, message="评价不存在", data=None, status_code=404)
+        return api_response(data={"review_id": review_id, "deleted": True})
+
+
 class AdminUsersView(APIView):
     """管理员用户列表接口。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
@@ -1854,8 +1870,8 @@ class AdminUsersView(APIView):
 
 
 class AdminUsersChangeStatusView(APIView):
-    """管理员用户状态修改接口。"""
-    permission_classes = [IsAuthenticated, IsAdminRole]
+    """管理员用户状态修改接口（仅 system_admin）。"""
+    permission_classes = [IsAuthenticated, IsSystemAdminRole]
 
     def post(self, request):
         serializer = ChangeUserStatusSerializer(data=request.data)
@@ -1870,7 +1886,7 @@ class AdminUsersChangeStatusView(APIView):
 
 
 class AdminEmployeesView(APIView):
-    """管理员员工管理接口：查询员工列表并创建管理员账号。"""
+    """管理员员工管理接口：查询员工列表（hotel_admin 可操作），创建管理员账号（仅 system_admin）。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
 
     def get(self, request):
@@ -1880,6 +1896,8 @@ class AdminEmployeesView(APIView):
         return paginated_response(items=UserProfileSerializer(page_queryset, many=True).data, page=page, page_size=page_size, total=total)
 
     def post(self, request):
+        if get_user_role(request.user) != "system_admin":
+            return api_response(code=4030, message="仅系统管理员可以创建员工账号", data=None, status_code=403)
         serializer = EmployeeCreateSerializer(data=request.data)
         if not serializer.is_valid():
             return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
@@ -1898,7 +1916,7 @@ class AdminEmployeesView(APIView):
 
 
 class AdminSettingsView(APIView):
-    """平台设置接口：读取与更新系统展示配置。"""
+    """平台设置接口：读取（hotel_admin 可操作），更新（仅 system_admin）。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
 
     def get(self, request):
@@ -1911,6 +1929,8 @@ class AdminSettingsView(APIView):
         )
 
     def post(self, request):
+        if get_user_role(request.user) != "system_admin":
+            return api_response(code=4030, message="仅系统管理员可以修改平台设置", data=None, status_code=403)
         serializer = SettingsUpdateSerializer(data=request.data)
         if not serializer.is_valid():
             return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
@@ -1918,7 +1938,7 @@ class AdminSettingsView(APIView):
 
 
 class AdminAISettingsView(APIView):
-    """AI 设置接口：查询当前 AI 多供应商配置，支持增删改查和切换活跃供应商。"""
+    """AI 设置接口：查询配置（hotel_admin 可操作），修改配置（仅 system_admin）。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
 
     def get(self, request):
@@ -1935,6 +1955,8 @@ class AdminAISettingsView(APIView):
         )
 
     def post(self, request):
+        if get_user_role(request.user) != "system_admin":
+            return api_response(code=4030, message="仅系统管理员可以修改 AI 配置", data=None, status_code=403)
         serializer = AISettingsUpdateSerializer(data=request.data)
         if not serializer.is_valid():
             return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
@@ -1952,8 +1974,8 @@ class AdminAISettingsView(APIView):
 
 
 class AdminAIProviderAddView(APIView):
-    """新增或编辑 AI 供应商接口。"""
-    permission_classes = [IsAuthenticated, IsAdminRole]
+    """新增或编辑 AI 供应商接口（仅 system_admin）。"""
+    permission_classes = [IsAuthenticated, IsSystemAdminRole]
 
     def post(self, request):
         serializer = AIProviderCreateSerializer(data=request.data)
@@ -1967,8 +1989,8 @@ class AdminAIProviderAddView(APIView):
 
 
 class AdminAIProviderSwitchView(APIView):
-    """切换活跃 AI 供应商接口。"""
-    permission_classes = [IsAuthenticated, IsAdminRole]
+    """切换活跃 AI 供应商接口（仅 system_admin）。"""
+    permission_classes = [IsAuthenticated, IsSystemAdminRole]
 
     def post(self, request):
         serializer = AIProviderSwitchSerializer(data=request.data)
@@ -1986,8 +2008,8 @@ class AdminAIProviderSwitchView(APIView):
 
 
 class AdminAIProviderDeleteView(APIView):
-    """删除 AI 供应商接口（不允许删除当前活跃供应商）。"""
-    permission_classes = [IsAuthenticated, IsAdminRole]
+    """删除 AI 供应商接口（不允许删除当前活跃供应商，仅 system_admin）。"""
+    permission_classes = [IsAuthenticated, IsSystemAdminRole]
 
     def post(self, request):
         serializer = AIProviderDeleteSerializer(data=request.data)
@@ -2109,7 +2131,7 @@ class AdminReportTasksView(APIView):
 
 
 class AdminCouponTemplatesView(APIView):
-    """管理端优惠券模板列表/创建接口。"""
+    """管理端优惠券模板列表（hotel_admin 可操作），创建（仅 system_admin）。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
 
     def get(self, request):
@@ -2122,6 +2144,8 @@ class AdminCouponTemplatesView(APIView):
         return paginated_response(items=CouponTemplateSerializer(page_queryset, many=True).data, page=page, page_size=page_size, total=total)
 
     def post(self, request):
+        if get_user_role(request.user) != "system_admin":
+            return api_response(code=4030, message="仅系统管理员可以创建优惠券模板", data=None, status_code=403)
         serializer = CouponTemplateCreateSerializer(data=request.data)
         if not serializer.is_valid():
             return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
@@ -2130,8 +2154,8 @@ class AdminCouponTemplatesView(APIView):
 
 
 class AdminCouponTemplateUpdateView(APIView):
-    """管理端优惠券模板上/下架接口。"""
-    permission_classes = [IsAuthenticated, IsAdminRole]
+    """管理端优惠券模板上/下架接口（仅 system_admin）。"""
+    permission_classes = [IsAuthenticated, IsSystemAdminRole]
 
     def post(self, request):
         tpl_id = request.data.get("template_id")
@@ -2173,17 +2197,13 @@ class AdminMemberOverviewView(APIView):
 
 
 class AdminSystemResetView(APIView):
-    """系统重置接口：清除所有业务数据，恢复到初始状态。仅系统管理员可用。"""
-    permission_classes = [IsAuthenticated, IsAdminRole]
+    """系统重置接口：清除所有业务数据，恢复到初始状态（仅 system_admin）。"""
+    permission_classes = [IsAuthenticated, IsSystemAdminRole]
 
     def post(self, request):
         serializer = SystemResetSerializer(data=request.data)
         if not serializer.is_valid():
             return api_response(code=4001, message="请输入 RESET 确认重置", data={"errors": serializer.errors}, status_code=400)
-
-        profile = ensure_profile(request.user)
-        if profile.role != UserProfile.ROLE_SYSTEM_ADMIN and not request.user.is_superuser:
-            return api_response(code=4030, message="仅系统管理员可以执行重置操作", data=None, status_code=403)
 
         # 按依赖顺序清除所有业务数据
         from apps.crm.models import (

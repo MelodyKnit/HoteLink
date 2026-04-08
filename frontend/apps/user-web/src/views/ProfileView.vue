@@ -75,6 +75,9 @@
 import { ref, onMounted } from 'vue'
 import { userProfileApi } from '@hotelink/api'
 import { useUserAuthStore } from '@hotelink/store'
+import { useToast } from '@hotelink/ui'
+
+const { showToast } = useToast()
 
 const authStore = useUserAuthStore()
 const saving = ref(false)
@@ -115,7 +118,9 @@ async function handleSave() {
     const res = await userProfileApi.update(form.value)
     if (res.code === 0) {
       await authStore.fetchMe()
-      alert('保存成功')
+      showToast('保存成功', 'success')
+    } else {
+      showToast((res as any).message || '保存失败', 'error')
     }
   } catch { /* ignore */ }
   saving.value = false
@@ -123,14 +128,16 @@ async function handleSave() {
 
 // 处理 ChangePw 交互逻辑。
 async function handleChangePw() {
-  if (pw.value.new_password !== pw.value.confirm_password) { alert('两次密码不一致'); return }
-  if (pw.value.new_password.length < 6) { alert('密码至少6位'); return }
+  if (pw.value.new_password !== pw.value.confirm_password) { showToast('两次密码不一致', 'error'); return }
+  if (pw.value.new_password.length < 6) { showToast('密码至6位', 'warning'); return }
   changingPw.value = true
   try {
     const res = await userProfileApi.changePassword(pw.value)
     if (res.code === 0) {
-      alert('密码修改成功')
+      showToast('密码修改成功', 'success')
       pw.value = { old_password: '', new_password: '', confirm_password: '' }
+    } else {
+      showToast((res as any).message || '密码修改失败', 'error')
     }
   } catch { /* ignore */ }
   changingPw.value = false

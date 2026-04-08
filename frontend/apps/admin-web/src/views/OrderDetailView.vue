@@ -70,13 +70,28 @@
       <!-- 操作按钮 -->
       <div class="mt-6 flex flex-wrap gap-3">
         <button v-if="order.status === 'paid'" class="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-medium text-white hover:bg-indigo-700" @click="confirmOrder">确认订单</button>
-        <button v-if="order.status === 'confirmed' || order.status === 'paid'" class="rounded-lg bg-green-600 px-5 py-2 text-sm font-medium text-white hover:bg-green-700" @click="doCheckIn">办理入住</button>
+        <button v-if="order.status === 'confirmed' || order.status === 'paid'" class="rounded-lg bg-green-600 px-5 py-2 text-sm font-medium text-white hover:bg-green-700" @click="openCheckIn">办理入住</button>
         <button v-if="order.status === 'checked_in'" class="rounded-lg bg-orange-600 px-5 py-2 text-sm font-medium text-white hover:bg-orange-700" @click="doCheckOut">办理退房</button>
       </div>
     </template>
 
     <div v-else class="text-center py-20 text-slate-400">订单未找到</div>
   </section>
+
+  <!-- Check-in Modal -->
+  <ModalDialog :visible="showCheckInModal" title="办理入住" size="sm" @close="showCheckInModal = false">
+    <div class="space-y-4">
+      <p class="text-sm text-slate-500">请确认并输入该客户分配的房间号。</p>
+      <div>
+        <label class="mb-1 block text-sm font-medium">房间号</label>
+        <input v-model="checkInRoomNo" required autofocus class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-teal-500" placeholder="如 301" @keyup.enter="submitCheckIn" />
+      </div>
+    </div>
+    <template #footer>
+      <button class="rounded-lg border border-slate-200 px-4 py-2 text-sm hover:bg-slate-50" @click="showCheckInModal = false">取消</button>
+      <button class="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700" @click="submitCheckIn">确认入住</button>
+    </template>
+  </ModalDialog>
 </template>
 
 <script setup lang="ts">
@@ -84,7 +99,10 @@ import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { orderApi } from '@hotelink/api'
 import { formatMoney, formatDateTime, ORDER_STATUS_MAP, PAYMENT_STATUS_MAP, PAYMENT_METHOD_MAP } from '@hotelink/utils'
-import { PageHeader, StatusBadge } from '@hotelink/ui'
+import { PageHeader, StatusBadge, ModalDialog, useToast, useConfirm } from '@hotelink/ui'
+
+const { showToast } = useToast()
+const { confirm: confirmDialog } = useConfirm()
 
 interface PaymentItem {
   id: number
@@ -96,6 +114,9 @@ interface PaymentItem {
 }
 
 const route = useRoute()
+
+const showCheckInModal = ref(false)
+const checkInRoomNo = ref('')
 
 const loading = ref(true)
 const order = ref<Record<string, unknown> | null>(null)
@@ -122,23 +143,60 @@ async function loadDetail() {
 
 // 处理 confirmOrder 业务流程。
 async function confirmOrder() {
-  if (!confirm('确认此订单？')) return
-  await orderApi.changeStatus({ order_id: order.value!.id as number, target_status: 'confirmed' })
-  loadDetail()
+  if (!await confirmDialog('确认此订单？', { type: 'warning' })) return
+  try {
+    const res = await orderApi.changeStatus({ order_id: order.value!.id as number, target_status: 'confirmed' })
+    if (res.code === 0) {
+      showToast('订单已确认', 'success')
+      loadDetail()
+    } else {
+      showToast(res.message || '确认失败', 'error')
+    }
+  } catch {
+    showToast('操作失败，请重试', 'error')
+  }
 }
 
-// 处理 doCheckIn 业务流程。
-async function doCheckIn() {
-  const roomNo = prompt('请输入房间号')
-  if (!roomNo) return
-  await orderApi.checkIn({ order_id: order.value!.id as number, room_no: roomNo })
-  loadDetail()
+// 打开办理入住弹窗。
+function openCheckIn() {
+  checkInRoomNo.value = ''
+  showCheckInModal.value = true
+}
+
+// 提交入住并办理。
+async function submitCheckIn() {
+  if (!checkInRoomNo.value.trim()) {
+    showToast('请输入房间号', 'warning')
+    return
+  }
+  try {
+    const res = await orderApi.checkIn({ order_id: order.value!.id as number, room_no: checkInRoomNo.value.trim() })
+    if (res.code === 0) {
+      showToast('入住办理成功', 'success')
+      showCheckInModal.value = false
+      loadDetail()
+    } else {
+      showToast(res.message || '办理入住失败', 'error')
+    }
+  } catch {
+    showToast('操作失败，请重试', 'error')
+  }
 }
 
 // 处理 doCheckOut 业务流程。
 async function doCheckOut() {
-  await orderApi.checkOut({ order_id: order.value!.id as number })
-  loadDetail()
+  if (!await confirmDialog('确认办理退房？', { type: 'warning' })) return
+  try {
+    const res = await orderApi.checkOut({ order_id: order.value!.id as number })
+    if (res.code === 0) {
+      showToast('退房办理成功', 'success')
+      loadDetail()
+    } else {
+      showToast(res.message || '办理退房失败', 'error')
+    }
+  } catch {
+    showToast('操作失败，请重试', 'error')
+  }
 }
 
 onMounted(loadDetail)

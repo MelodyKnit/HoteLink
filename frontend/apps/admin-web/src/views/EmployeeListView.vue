@@ -26,7 +26,7 @@
         </div>
         <div>
           <label class="mb-1 block text-sm font-medium">密码</label>
-          <input v-model="form.password" type="password" required minlength="6" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-teal-500" />
+          <input v-model="form.password" type="password" required minlength="8" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-teal-500" />
         </div>
         <div>
           <label class="mb-1 block text-sm font-medium">姓名</label>
@@ -55,7 +55,9 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { employeeApi } from '@hotelink/api'
-import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, SelectField } from '@hotelink/ui'
+import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, SelectField, useToast } from '@hotelink/ui'
+
+const { showToast } = useToast()
 
 const columns = [
   { key: 'id', label: 'ID' },
@@ -78,13 +80,20 @@ const form = reactive({ username: '', password: '', name: '', mobile: '', role: 
 // 加载 List 相关数据。
 async function loadList() {
   loading.value = true
-  const res = await employeeApi.list({ page: page.value, page_size: pageSize.value })
-  if (res.code === 0 && res.data) {
-    const d = res.data as unknown as { items: Record<string, unknown>[]; total: number }
-    list.value = d.items || []
-    total.value = d.total || 0
+  try {
+    const res = await employeeApi.list({ page: page.value, page_size: pageSize.value })
+    if (res.code === 0 && res.data) {
+      const d = res.data as unknown as { items: Record<string, unknown>[]; total: number }
+      list.value = d.items || []
+      total.value = d.total || 0
+    } else {
+      showToast(res.message || '加载员工列表失败', 'error')
+    }
+  } catch {
+    showToast('加载员工列表失败，请检查网络', 'error')
+  } finally {
+    loading.value = false
   }
-  loading.value = false
 }
 
 // 打开 Create 相关界面。
@@ -99,9 +108,18 @@ function openCreate() {
 
 // 处理 Create 交互逻辑。
 async function handleCreate() {
-  await employeeApi.create(form)
-  showCreate.value = false
-  loadList()
+  try {
+    const res = await employeeApi.create(form)
+    if (res.code === 0) {
+      showToast('员工创建成功', 'success')
+      showCreate.value = false
+      loadList()
+    } else {
+      showToast(res.message || '创建失败', 'error')
+    }
+  } catch {
+    showToast('创建失败，请重试', 'error')
+  }
 }
 
 onMounted(loadList)

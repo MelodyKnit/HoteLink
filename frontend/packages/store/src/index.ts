@@ -3,7 +3,7 @@ import { ref, computed } from 'vue'
 import { authApi, userAuthApi, getToken, setTokens, clearTokens, getRefreshToken } from '@hotelink/api'
 
 export const useAuthStore = defineStore('auth', () => {
-  const user = ref<{ id: number; username: string; role: string; nickname?: string } | null>(null)
+  const user = ref<{ id: number; username: string; role: string; nickname?: string; avatar?: string } | null>(null)
   const token = ref<string | null>(getToken())
   const isLoggedIn = computed(() => !!token.value)
   const isAdmin = computed(() => user.value?.role === 'hotel_admin' || user.value?.role === 'system_admin')
@@ -30,6 +30,7 @@ export const useAuthStore = defineStore('auth', () => {
         username: res.data.username,
         role: res.data.role,
         nickname: res.data.nickname,
+        avatar: res.data.avatar,
       }
     }
   }

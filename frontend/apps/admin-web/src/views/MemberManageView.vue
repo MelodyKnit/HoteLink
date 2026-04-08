@@ -64,6 +64,9 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { adminMemberApi } from '@hotelink/api'
+import { useToast } from '@hotelink/ui'
+
+const { showToast } = useToast()
 
 const levels = ref<any[]>([])
 const totalUsers = ref(0)
@@ -90,8 +93,12 @@ async function loadData() {
     if (res.code === 0 && res.data) {
       levels.value = (res.data as any).levels || []
       totalUsers.value = (res.data as any).total_users || 0
+    } else {
+      showToast((res as any).message || '加载会员数据失败', 'error')
     }
-  } catch { /* ignore */ }
+  } catch {
+    showToast('加载会员数据失败，请检查网络', 'error')
+  }
 }
 
 onMounted(loadData)

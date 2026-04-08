@@ -51,7 +51,8 @@
       </div>
     </div>
 
-    <Toast :visible="toastVisible" :message="toastMessage" :type="toastType" @close="closeToast" />
+  </section>
+</template>
   </section>
 </template>
 
@@ -59,9 +60,10 @@
 import { ref, reactive, onMounted } from 'vue'
 import { settingsApi, adminSystemApi } from '@hotelink/api'
 import { extractApiError } from '@hotelink/utils'
-import { PageHeader, Toast, useToast } from '@hotelink/ui'
+import { PageHeader, useToast, useConfirm } from '@hotelink/ui'
 
-const { toastVisible, toastMessage, toastType, showToast, closeToast } = useToast()
+const { showToast } = useToast()
+const { confirm: confirmDialog } = useConfirm()
 
 const loading = ref(true)
 const saving = ref(false)
@@ -116,7 +118,7 @@ async function handleSave() {
 // 执行系统重置
 async function handleReset() {
   if (resetConfirm.value !== 'RESET') return
-  if (!confirm('最后确认：此操作将清除所有业务数据且不可逆，是否继续？')) return
+  if (!await confirmDialog('最后确认：此操作将清除所有业务数据且不可逆，是否继续？', { type: 'danger', title: '危险操作' })) return
   resetting.value = true
   resetMessage.value = ''
   try {

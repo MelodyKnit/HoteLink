@@ -39,7 +39,10 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { userApi } from '@hotelink/api'
-import { PageHeader, DataTable, StatusBadge, Pagination } from '@hotelink/ui'
+import { PageHeader, DataTable, StatusBadge, Pagination, useToast, useConfirm } from '@hotelink/ui'
+
+const { showToast } = useToast()
+const { confirm: confirmDialog } = useConfirm()
 
 const columns = [
   { key: 'avatar', label: '头像' },
@@ -81,9 +84,18 @@ async function loadList() {
 // 处理 changeStatus 业务流程。
 async function changeStatus(row: Record<string, unknown>, status: string) {
   const label = status === 'active' ? '启用' : '禁用'
-  if (!confirm(`确认${label}该用户？`)) return
-  await userApi.changeStatus({ user_id: row.id as number, status })
-  loadList()
+  if (!await confirmDialog(`确认${label}该用户？`, { type: status === 'active' ? 'warning' : 'danger' })) return
+  try {
+    const res = await userApi.changeStatus({ user_id: row.id as number, status })
+    if (res.code === 0) {
+      showToast(`用户已${label}`, 'success')
+      loadList()
+    } else {
+      showToast(res.message || `${label}失败`, 'error')
+    }
+  } catch {
+    showToast(`${label}失败，请重试`, 'error')
+  }
 }
 
 onMounted(loadList)

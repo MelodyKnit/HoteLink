@@ -81,7 +81,6 @@
       </template>
     </ModalDialog>
 
-    <Toast :visible="toastVisible" :message="toastMessage" :type="toastType" @close="closeToast" />
   </section>
 </template>
 
@@ -89,9 +88,10 @@
 import { ref, reactive, onMounted } from 'vue'
 import { orderApi } from '@hotelink/api'
 import { formatMoney, ORDER_STATUS_MAP, PAYMENT_STATUS_MAP, extractApiError } from '@hotelink/utils'
-import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, Toast, useToast, SelectField } from '@hotelink/ui'
+import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, useToast, useConfirm, SelectField } from '@hotelink/ui'
 
-const { toastVisible, toastMessage, toastType, showToast, closeToast } = useToast()
+const { showToast } = useToast()
+const { confirm: confirmDialog } = useConfirm()
 
 const columns = [
   { key: 'order_no', label: '订单号' },
@@ -149,7 +149,7 @@ async function loadList() {
 
 // 处理 confirmOrder 业务流程。
 async function confirmOrder(row: Record<string, unknown>) {
-  if (!confirm('确认此订单？')) return
+  if (!await confirmDialog('确认此订单？')) return
   try {
     const res = await orderApi.changeStatus({ order_id: row.id as number, target_status: 'confirmed' })
     if (res.code === 0) {

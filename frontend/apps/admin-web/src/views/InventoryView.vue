@@ -59,7 +59,6 @@
       </template>
     </ModalDialog>
 
-    <Toast :visible="toastVisible" :message="toastMessage" :type="toastType" @close="closeToast" />
   </section>
 </template>
 
@@ -67,9 +66,9 @@
 import { ref, reactive, onMounted } from 'vue'
 import { inventoryApi, roomTypeApi } from '@hotelink/api'
 import { formatMoney, formatDate, ROOM_STATUS_MAP, extractApiError } from '@hotelink/utils'
-import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, Toast, useToast, SelectField } from '@hotelink/ui'
+import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, useToast, SelectField } from '@hotelink/ui'
 
-const { toastVisible, toastMessage, toastType, showToast, closeToast } = useToast()
+const { showToast } = useToast()
 
 const calColumns = [
   { key: 'date', label: '日期' },

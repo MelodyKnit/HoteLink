@@ -171,6 +171,7 @@ export const orderApi = {
 export const reviewApi = {
   list: (params?: Record<string, unknown>) => get<PaginatedData>('/admin/reviews', params),
   reply: (data: { review_id: number; content: string }) => post('/admin/reviews/reply', data),
+  delete: (data: { review_id: number }) => post('/admin/reviews/delete', data),
 }
 
 // ========== Users ==========

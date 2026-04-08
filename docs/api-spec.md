@@ -1641,7 +1641,21 @@ Authorization: Bearer <access_token>
 }
 ```
 
-### 13.20 报表任务列表
+### 13.20 删除评价（仅系统管理员）
+
+`POST /api/v1/admin/reviews/delete`
+
+**请求体**
+
+```json
+{
+  "review_id": 5001
+}
+```
+
+**权限**：`system_admin`
+
+### 13.21 报表任务列表
 
 `GET /api/v1/admin/reports/tasks`
 
@@ -2259,6 +2273,7 @@ Authorization: Bearer <access_token>
 - `POST /api/v1/admin/orders/check-out`
 - `GET /api/v1/admin/reviews`
 - `POST /api/v1/admin/reviews/reply`
+- `POST /api/v1/admin/reviews/delete` \[系统管理员\]
 - `GET /api/v1/admin/reports/tasks`
 - `POST /api/v1/admin/reports/tasks/create`
 - `GET /api/v1/admin/users`

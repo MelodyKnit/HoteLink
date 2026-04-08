@@ -141,13 +141,16 @@
                 <span v-if="reviewCharCount < 50">（50字起）</span>
               </span>
             </div>
-            <textarea v-model="reviewContent" rows="4" maxlength="1000"
+            <textarea v-model="reviewContent" rows="4" maxlength="500"
               placeholder="分享您的入住体验，50字以上可获得积分奖励…"
               class="mt-1.5 w-full resize-none rounded-xl border border-gray-200 px-3 py-2.5 text-sm outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/20" />
-            <div class="mt-1 h-1 overflow-hidden rounded-full bg-gray-100">
-              <div class="h-full rounded-full transition-all duration-300"
-                :class="reviewCharCount >= 100 ? 'bg-green-500' : reviewCharCount >= 50 ? 'bg-brand' : 'bg-gray-300'"
-                :style="{ width: Math.min(reviewCharCount, 100) + '%' }" />
+            <div class="mt-1 flex items-center justify-between">
+              <div class="h-1 flex-1 overflow-hidden rounded-full bg-gray-100">
+                <div class="h-full rounded-full transition-all duration-300"
+                  :class="reviewCharCount >= 100 ? 'bg-green-500' : reviewCharCount >= 50 ? 'bg-brand' : 'bg-gray-300'"
+                  :style="{ width: Math.min(reviewCharCount / 500 * 100, 100) + '%' }" />
+              </div>
+              <span class="ml-2 text-xs text-gray-400">{{ reviewCharCount }}/500</span>
             </div>
           </div>
 

@@ -86,7 +86,9 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { userInvoiceApi } from '@hotelink/api'
-import { SelectField } from '@hotelink/ui'
+import { SelectField, useToast } from '@hotelink/ui'
+
+const { showToast } = useToast()
 
 const titles = ref<any[]>([])
 const invoices = ref<any[]>([])
@@ -112,13 +114,15 @@ async function handleAddTitle() {
 
 // 处理 Apply 交互逻辑。
 async function handleApply() {
-  if (!applyForm.value.invoice_title_id || !applyForm.value.order_id) { alert('请填写完整信息'); return }
+  if (!applyForm.value.invoice_title_id || !applyForm.value.order_id) { showToast('请填写完整信息', 'warning'); return }
   applying.value = true
   try {
     const res = await userInvoiceApi.apply(applyForm.value)
     if (res.code === 0) {
-      alert('申请已提交')
+      showToast('申请已提交', 'success')
       applyForm.value = { order_id: 0, invoice_title_id: 0 }
+    } else {
+      showToast((res as any).message || '申请失败', 'error')
     }
   } catch { /* ignore */ }
   applying.value = false

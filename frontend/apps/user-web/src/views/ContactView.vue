@@ -98,7 +98,9 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { SelectField } from '@hotelink/ui'
+import { SelectField, useToast } from '@hotelink/ui'
+
+const { showToast } = useToast()
 
 const feedback = ref({ type: '', content: '', contact: '' })
 const submitting = ref(false)
@@ -112,13 +114,13 @@ const addresses = [
 // 处理 submitFeedback 业务流程。
 async function submitFeedback() {
   if (!feedback.value.type || !feedback.value.content.trim()) {
-    alert('请选择反馈类型并填写内容')
+    showToast('请选择反馈类型并填写内容', 'warning')
     return
   }
   submitting.value = true
   // Simulate submit
   await new Promise(r => setTimeout(r, 1000))
-  alert('感谢您的反馈！我们会认真处理。')
+  showToast('感谢您的反馈！我们会认真处理。', 'success')
   feedback.value = { type: '', content: '', contact: '' }
   submitting.value = false
 }
