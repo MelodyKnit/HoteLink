@@ -21,7 +21,7 @@
           />
         </template>
         <template #col-member_level="{ value }">
-          {{ memberLevelMap[value] || value }}
+          {{ memberLevelMap[String(value)] || value }}
         </template>
         <template #col-status="{ value }">
           <StatusBadge :label="value === 'active' ? '正常' : '禁用'" :type="value === 'active' ? 'success' : 'danger'" />

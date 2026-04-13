@@ -4,29 +4,49 @@ const visible = ref(false)
 const confirmTitle = ref('确认操作')
 const confirmMessage = ref('')
 const confirmType = ref<'danger' | 'warning' | 'info'>('warning')
-let _resolve: ((val: boolean) => void) | null = null
+
+type ConfirmOptions = { title?: string; type?: 'danger' | 'warning' | 'info' }
+type ConfirmTask = {
+  message: string
+  options?: ConfirmOptions
+  resolve: (val: boolean) => void
+}
+
+const queue: ConfirmTask[] = []
+let currentTask: ConfirmTask | null = null
+
+function flushNextTask() {
+  if (currentTask || queue.length === 0) return
+  currentTask = queue.shift() || null
+  if (!currentTask) return
+  confirmMessage.value = currentTask.message
+  confirmTitle.value = currentTask.options?.title ?? '确认操作'
+  confirmType.value = currentTask.options?.type ?? 'warning'
+  visible.value = true
+}
 
 export function useConfirm() {
-  function confirm(message: string, options?: { title?: string; type?: 'danger' | 'warning' | 'info' }): Promise<boolean> {
-    confirmMessage.value = message
-    confirmTitle.value = options?.title ?? '确认操作'
-    confirmType.value = options?.type ?? 'warning'
-    visible.value = true
+  function confirm(message: string, options?: ConfirmOptions): Promise<boolean> {
     return new Promise((resolve) => {
-      _resolve = resolve
+      queue.push({ message, options, resolve })
+      flushNextTask()
     })
   }
 
-  function onOk() {
+  function settleCurrent(result: boolean) {
     visible.value = false
-    _resolve?.(true)
-    _resolve = null
+    if (!currentTask) return
+    currentTask.resolve(result)
+    currentTask = null
+    flushNextTask()
+  }
+
+  function onOk() {
+    settleCurrent(true)
   }
 
   function onCancel() {
-    visible.value = false
-    _resolve?.(false)
-    _resolve = null
+    settleCurrent(false)
   }
 
   return { confirmVisible: visible, confirmTitle, confirmMessage, confirmType, confirm, onOk, onCancel }

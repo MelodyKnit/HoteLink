@@ -103,7 +103,7 @@
         <div>
           <label class="mb-1 block text-sm font-medium text-slate-700">封面图</label>
           <div class="flex items-center gap-3">
-            <img v-if="form.cover_image" :src="form.cover_image" alt="封面" class="h-20 w-28 rounded-lg object-cover ring-1 ring-slate-200" />
+            <img v-if="form.cover_image" :src="buildImageThumbUrl(form.cover_image, 224, 160)" alt="封面" class="h-20 w-28 rounded-lg object-cover ring-1 ring-slate-200" loading="lazy" decoding="async" />
             <label class="cursor-pointer rounded-lg border-2 border-dashed border-slate-300 px-4 py-2 text-sm text-slate-500 hover:border-teal-400 hover:text-teal-600">
               {{ uploading ? '上传中…' : '选择图片' }}
               <input type="file" accept="image/*" class="hidden" :disabled="uploading" @change="handleCoverUpload" />
@@ -115,7 +115,7 @@
           <label class="mb-1 block text-sm font-medium text-slate-700">酒店图集</label>
           <div class="flex flex-wrap gap-2">
             <div v-for="(img, idx) in form.images" :key="idx" class="group relative">
-              <img :src="img" alt="图片" class="h-20 w-28 rounded-lg object-cover ring-1 ring-slate-200" />
+              <img :src="buildImageThumbUrl(img, 224, 160)" alt="图片" class="h-20 w-28 rounded-lg object-cover ring-1 ring-slate-200" loading="lazy" decoding="async" />
               <button type="button" class="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs text-white opacity-0 group-hover:opacity-100" @click="removeImage(idx)">×</button>
             </div>
             <label class="flex h-20 w-28 cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-slate-300 text-slate-400 hover:border-teal-400 hover:text-teal-600">
@@ -147,7 +147,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { hotelApi, commonApi } from '@hotelink/api'
-import { formatMoney, HOTEL_STATUS_MAP, extractApiError } from '@hotelink/utils'
+import { buildImageThumbUrl, formatMoney, HOTEL_STATUS_MAP, extractApiError } from '@hotelink/utils'
 import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, useToast, useConfirm, SelectField } from '@hotelink/ui'
 
 const { showToast } = useToast()

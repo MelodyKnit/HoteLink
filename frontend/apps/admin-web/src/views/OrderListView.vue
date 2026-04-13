@@ -18,19 +18,46 @@
 
     <div class="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
       <DataTable :columns="columns" :rows="list" :loading="loading">
+        <template #col-order_no="{ value }">
+          <span class="inline-block max-w-[220px] truncate align-middle" :title="String(value || '')">
+            {{ value || '-' }}
+          </span>
+        </template>
+        <template #col-hotel_name="{ value }">
+          <span class="inline-block max-w-[240px] truncate align-middle" :title="String(value || '')">
+            {{ value || '-' }}
+          </span>
+        </template>
+        <template #col-room_type_name="{ value }">
+          <span class="inline-block max-w-[140px] truncate align-middle" :title="String(value || '')">
+            {{ value || '-' }}
+          </span>
+        </template>
         <template #col-status="{ value }">
           <StatusBadge :label="ORDER_STATUS_MAP[value as string]?.label || String(value)" :type="statusType(value as string)" />
+        </template>
+        <template #col-lifecycle_warning="{ row }">
+          <router-link
+            v-if="row.is_lifecycle_anomaly"
+            :to="`/admin/orders/${row.id}`"
+            class="inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-600 transition hover:border-rose-300 hover:bg-rose-100"
+            title="存在异常，请进入详情查看"
+          >
+            <span class="h-1.5 w-1.5 rounded-full bg-rose-500" />
+            异常
+          </router-link>
+          <span v-else class="inline-flex items-center text-xs text-slate-300">—</span>
         </template>
         <template #col-payment_status="{ value }">
           <StatusBadge :label="PAYMENT_STATUS_MAP[value as string] || String(value)" :type="value === 'paid' ? 'success' : value === 'unpaid' ? 'warning' : 'default'" />
         </template>
         <template #col-pay_amount="{ value }">¥{{ formatMoney(value as number) }}</template>
         <template #actions="{ row }">
-          <div class="flex flex-wrap gap-2">
-            <router-link :to="`/admin/orders/${row.id}`" class="text-sm text-teal-600 hover:underline">详情</router-link>
-            <button v-if="row.status === 'paid'" class="text-sm text-indigo-600 hover:underline" @click="confirmOrder(row)">确认</button>
-            <button v-if="row.status === 'confirmed' || row.status === 'paid'" class="text-sm text-green-600 hover:underline" @click="openCheckIn(row)">入住</button>
-            <button v-if="row.status === 'checked_in'" class="text-sm text-orange-600 hover:underline" @click="openCheckOut(row)">退房</button>
+          <div class="flex min-w-[152px] flex-wrap gap-2">
+            <router-link :to="`/admin/orders/${row.id}`" class="inline-flex whitespace-nowrap text-sm text-teal-600 hover:underline">详情</router-link>
+            <button v-if="row.status === 'paid'" class="inline-flex whitespace-nowrap text-sm text-indigo-600 hover:underline" @click="confirmOrder(row)">确认</button>
+            <button v-if="row.status === 'confirmed' || row.status === 'paid'" class="inline-flex whitespace-nowrap text-sm text-green-600 hover:underline" @click="openCheckIn(row)">入住</button>
+            <button v-if="row.status === 'checked_in'" class="inline-flex whitespace-nowrap text-sm text-orange-600 hover:underline" @click="openCheckOut(row)">退房</button>
           </div>
         </template>
       </DataTable>
@@ -102,6 +129,7 @@ const columns = [
   { key: 'check_out_date', label: '离店日期' },
   { key: 'pay_amount', label: '金额' },
   { key: 'status', label: '订单状态' },
+  { key: 'lifecycle_warning', label: '异常' },
   { key: 'payment_status', label: '支付状态' },
 ]
 

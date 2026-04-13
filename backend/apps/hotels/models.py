@@ -14,7 +14,7 @@ class Hotel(models.Model):
         (STATUS_OFFLINE, "已下架"),
     ]
 
-    name = models.CharField(max_length=200)
+    name = models.CharField(max_length=200, unique=True)
     city = models.CharField(max_length=100, blank=True)
     address = models.CharField(max_length=255, blank=True)
     star = models.PositiveSmallIntegerField(default=3)
@@ -80,6 +80,9 @@ class RoomType(models.Model):
         verbose_name = "Room Type"
         verbose_name_plural = "Room Types"
         ordering = ["-id"]
+        constraints = [
+            models.UniqueConstraint(fields=["hotel", "name"], name="uniq_room_type_name_per_hotel"),
+        ]
 
     def __str__(self) -> str:
         return f"{self.hotel.name}-{self.name}"

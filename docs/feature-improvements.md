@@ -3,7 +3,9 @@
 > 编制日期：2026-04-08
 > 最近更新：2026-04-08
 > 文档目标：对 HoteLink 酒店预订管理平台进行全面审查，梳理可增强、可补全、可深化的功能方向，重点围绕 AI 能力利用进行拓展。
-> 关联文档：所有新增功能的完整接口设计已同步写入 [api-spec.md](./api-spec.md) §15-§16，标注为「规划中」。
+> 关联文档：[api-spec.md](./api-spec.md) 与 [api-inventory.md](./api-inventory.md) 用于查看当前接口实现状态。
+
+> 状态说明（2026-04-13）：本文件属于“历史规划清单”，其中部分条目已在当前代码实现。最新实现状态请以 [source-of-truth.md](./source-of-truth.md) 和 [api-inventory.md](./api-inventory.md) 为准。
 
 ---
 

@@ -790,7 +790,8 @@ async function getContent() {
 // ──────────────────────── Tab 7: Anomaly ────────────────────────
 const anomalyForm = reactive({ hotel_id: '' as string | number, date: '' })
 const anomalyLoading = ref(false)
-const anomalyResult = ref<{ anomalies: { type: string; level: string; description: string; value: unknown; threshold: unknown }[]; summary: string } | null>(null)
+type AnomalyResult = { anomalies: { type: string; level: string; description: string; value: unknown; threshold: unknown }[]; summary: string }
+const anomalyResult = ref<AnomalyResult | null>(null)
 
 async function getAnomalyReport() {
   anomalyLoading.value = true
@@ -801,7 +802,7 @@ async function getAnomalyReport() {
       date: anomalyForm.date || undefined,
     })
     if (res.code === 0 && res.data) {
-      anomalyResult.value = res.data as typeof anomalyResult.value
+      anomalyResult.value = res.data as AnomalyResult
     } else {
       showApiError(res, '异常检测失败')
     }
@@ -814,7 +815,8 @@ async function getAnomalyReport() {
 
 const orderAnomalyForm = reactive({ date: '' })
 const orderAnomalyLoading = ref(false)
-const orderAnomalyResult = ref<{ anomalies: { type: string; count: number }[]; summary: string } | null>(null)
+type OrderAnomalyResult = { anomalies: { type: string; count: number }[]; summary: string }
+const orderAnomalyResult = ref<OrderAnomalyResult | null>(null)
 
 async function getOrderAnomalySummary() {
   orderAnomalyLoading.value = true
@@ -822,7 +824,7 @@ async function getOrderAnomalySummary() {
   try {
     const res = await aiApi.orderAnomalySummary(orderAnomalyForm.date ? { date: orderAnomalyForm.date } : undefined)
     if (res.code === 0 && res.data) {
-      orderAnomalyResult.value = res.data as typeof orderAnomalyResult.value
+      orderAnomalyResult.value = res.data as OrderAnomalyResult
     } else {
       showApiError(res, '订单异常统计失败')
     }

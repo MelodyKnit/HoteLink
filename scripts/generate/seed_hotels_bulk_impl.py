@@ -54,6 +54,52 @@ def random_coord(city: str) -> tuple[float, float]:
     return round(lat, 6), round(lng, 6)
 
 
+def normalize_name(value: str) -> str:
+    return " ".join((value or "").strip().split())
+
+
+def pick_unique_hotel_name(base_name: str, used_names: set[str], serial_fallback: int) -> str:
+    normalized_base = normalize_name(base_name)
+    candidate = normalized_base
+    if candidate and candidate.casefold() not in used_names:
+        used_names.add(candidate.casefold())
+        return candidate
+
+    candidate = f"{normalized_base}-{serial_fallback}"
+    if candidate.casefold() not in used_names:
+        used_names.add(candidate.casefold())
+        return candidate
+
+    suffix = 2
+    while True:
+        candidate = f"{normalized_base}-{serial_fallback}-{suffix}"
+        key = candidate.casefold()
+        if key not in used_names:
+            used_names.add(key)
+            return candidate
+        suffix += 1
+
+
+def build_album(image_pool: list[str], start_idx: int, album_size: int = 4) -> list[str]:
+    if not image_pool:
+        return []
+    total = len(image_pool)
+    if total == 1:
+        return [image_pool[0]]
+
+    result: list[str] = []
+    step = max(total // max(album_size, 1), 1)
+    idx = start_idx % total
+    for _ in range(total):
+        url = image_pool[idx]
+        if url not in result:
+            result.append(url)
+            if len(result) >= album_size:
+                break
+        idx = (idx + step) % total
+    return result
+
+
 def run(command, *args, **options) -> Any:
     BookingOrder = importlib.import_module("apps.bookings.models").BookingOrder
     hotel_models = importlib.import_module("apps.hotels.models")
@@ -88,6 +134,8 @@ def run(command, *args, **options) -> Any:
         if not target.exists():
             shutil.copy2(img, target)
         copied_urls.append(f"{settings.MEDIA_URL}seed/hotels/{img.name}")
+    copied_urls = list(dict.fromkeys(copied_urls))
+    random.shuffle(copied_urls)
 
     if options.get("overwrite"):
         command.stdout.write(command.style.WARNING("overwrite=true: 清空现有酒店和房型数据"))
@@ -102,6 +150,7 @@ def run(command, *args, **options) -> Any:
 
     cities = list(CITY_CENTERS.keys())
     serial_start = Hotel.objects.count() + 1
+    used_hotel_names = {normalize_name(str(name)).casefold() for name in Hotel.objects.values_list("name", flat=True)}
     created = 0
     for i in range(count):
         city = random.choice(cities)
@@ -112,10 +161,16 @@ def run(command, *args, **options) -> Any:
         rating = round(random.uniform(4.1, 4.9), 1)
         star = random.choice([3, 4, 4, 5])
         cover = copied_urls[i % len(copied_urls)]
-        album = [copied_urls[(i + j) % len(copied_urls)] for j in range(3)]
+        album = build_album(copied_urls, start_idx=i * 3 + 1, album_size=4)
+        if cover in album:
+            album = [img for img in album if img != cover]
+        album.insert(0, cover)
+        album = album[:4]
+
+        final_name = pick_unique_hotel_name(name, used_hotel_names, serial_start + i)
 
         hotel = Hotel.objects.create(
-            name=f"{name}-{serial_start + i}",
+            name=final_name,
             city=city,
             address=f"{city}{area}{random.randint(1, 199)}号",
             star=star,
@@ -133,9 +188,14 @@ def run(command, *args, **options) -> Any:
 
         for room in ROOM_TYPES:
             base_price = int(room["base_price"] * random.uniform(0.9, 1.25))
+            room_name = normalize_name(str(room["name"]))
+            exists_same_room = RoomType.objects.filter(hotel=hotel, name__iexact=room_name).exists()
+            if exists_same_room:
+                command.stdout.write(command.style.WARNING(f"跳过重复房型：hotel={hotel.id} name={room_name}"))
+                continue
             RoomType.objects.create(
                 hotel=hotel,
-                name=room["name"],
+                name=room_name,
                 bed_type=room["bed_type"],
                 area=room["area"],
                 breakfast_count=room["breakfast_count"],
@@ -143,7 +203,7 @@ def run(command, *args, **options) -> Any:
                 max_guest_count=room["max_guest_count"],
                 stock=room["stock"],
                 status=RoomType.STATUS_ONLINE,
-                image=cover,
+                image=album[min(1, len(album) - 1)] if album else cover,
                 description=f"{room['name']}，舒适安静，适合入住。",
             )
 

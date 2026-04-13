@@ -1,10 +1,10 @@
 <template>
   <div class="overflow-x-auto">
-    <table class="w-full text-left text-sm">
+    <table class="w-full min-w-max text-left text-sm">
       <thead>
         <tr class="border-b border-slate-200 text-xs font-semibold uppercase text-slate-500">
           <th v-for="col in columns" :key="col.key" class="px-4 py-3 whitespace-nowrap">{{ col.label }}</th>
-          <th v-if="$slots.actions" class="px-4 py-3">操作</th>
+          <th v-if="$slots.actions" class="px-4 py-3 whitespace-nowrap">操作</th>
         </tr>
       </thead>
       <tbody>
@@ -21,7 +21,7 @@
               {{ row[col.key] ?? '-' }}
             </slot>
           </td>
-          <td v-if="$slots.actions" class="px-4 py-3">
+          <td v-if="$slots.actions" class="px-4 py-3 whitespace-nowrap">
             <slot name="actions" :row="row" />
           </td>
         </tr>

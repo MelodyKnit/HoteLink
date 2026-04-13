@@ -30,16 +30,16 @@
 
 ### 3.1 后端
 
-- **88 个 API 端点**已注册路由，覆盖：认证、公共查询、用户中心、订单、评价、收藏、优惠券、发票、积分、通知、AI 辅助、管理端经营管理
-- **17 个 Django Model**（跨 7 个业务 app）：hotels(3)、bookings(1)、payments(1)、crm(8)、operations(2)、reports(1)、users(1)
+- **103 条 API 路由**已注册（含 `/api/v1/` 根路由），覆盖：认证、公共查询、用户中心、订单、评价、收藏、优惠券、发票、积分、通知、AI 辅助、管理端经营管理
+- **21 个 Django Model**（跨 7 个业务 app）：hotels(3)、bookings(1)、payments(1)、crm(10)、operations(4)、reports(1)、users(1)
 - JWT 认证：注册、登录、管理员登录、令牌刷新
 - 完整的订单生命周期：创建 → 支付 → 入住 → 退房 → 评价
 - AI 多供应商接入：5 家供应商预设（DeepSeek / OpenAI / 智谱 / Moonshot / 通义千问），多轮对话 + 流式输出 + 意图识别 + 预订引导
 
 ### 3.2 前端
 
-- **用户端**：24 条路由 / 23 个视图页面，覆盖首页、酒店浏览、预订支付、订单管理、会员中心、AI 客服等
-- **管理端**：19 条路由 / 18 个视图页面，覆盖工作台、酒店管理、房型管理、库存管理、订单处理、报表、AI 配置等
+- **用户端**：26 条路由项 / 24 个视图页面，覆盖首页、酒店浏览、预订支付、订单管理、会员中心、AI 客服等
+- **管理端**：20 条路由项 / 19 个视图页面，覆盖工作台、酒店管理、房型管理、库存管理、订单处理、报表、AI 配置等
 - **共享包**：10 个 UI 组件 + 2 个 Composable + ~27 个 API 模块 + 2 个 Pinia Store
 - 用户端 AI 客服已支持 SSE 流式回答、Markdown 渲染、订房动作卡片
 
@@ -65,13 +65,13 @@
 
 | 论文功能 | 后端 API | 前端页面 | 状态 |
 |---------|---------|---------|------|
-| 个人资料 | `GET/PUT /api/v1/user/profile` | `ProfileView.vue` | ✅ 已实现 |
-| 收藏酒店 | `GET/POST/DELETE .../favorites` | `FavoriteListView.vue` | ✅ 已实现 |
+| 个人资料 | `GET /api/v1/user/profile` + `POST /api/v1/user/profile/update` | `ProfileView.vue` | ✅ 已实现 |
+| 收藏酒店 | `GET /api/v1/user/favorites` + `POST /add` + `POST /remove` | `FavoriteListView.vue` | ✅ 已实现 |
 | 订单列表 | `GET /api/v1/user/orders` | `OrderListView.vue` | ✅ 已实现 |
 | 订单详情 | `GET .../orders/detail` | `OrderDetailView.vue` | ✅ 已实现 |
 | 订单支付 | `POST .../orders/pay` | `PaymentView.vue` | ✅ 已实现 |
 | 订单取消 | `POST .../orders/cancel` | —（在订单详情内操作） | ✅ 已实现 |
-| 评价提交 | `POST .../reviews/submit` | `ReviewListView.vue` | ✅ 已实现 |
+| 评价提交 | `POST /api/v1/user/reviews/create` | `ReviewListView.vue` | ✅ 已实现 |
 | 积分明细 | `GET .../points/logs` | — | ✅ 后端已实现 |
 | 优惠券 | `GET /api/v1/user/coupons` | `CouponListView.vue` | ✅ 已实现 |
 | 发票 | `GET/POST .../invoices` | `InvoiceView.vue` | ✅ 已实现 |
@@ -80,10 +80,10 @@
 
 | 论文功能 | 后端 API | 前端页面 | 状态 |
 |---------|---------|---------|------|
-| 经营概览 | `GET /api/v1/admin/dashboard` | `DashboardView.vue` | ✅ 已实现 |
+| 经营概览 | `GET /api/v1/admin/dashboard/overview` | `DashboardView.vue` | ✅ 已实现 |
 | 酒店管理 | `CRUD /api/v1/admin/hotels` | `HotelListView.vue` | ✅ 已实现 |
 | 房型管理 | `CRUD /api/v1/admin/room-types` | `RoomTypeListView.vue` | ✅ 已实现 |
-| 价格库存管理 | `GET/PUT .../inventory` | `InventoryView.vue` | ✅ 已实现 |
+| 价格库存管理 | `GET /api/v1/admin/inventory/calendar` + `POST /api/v1/admin/inventory/update` | `InventoryView.vue` | ✅ 已实现 |
 | 订单管理 | `GET /api/v1/admin/orders` | `OrderListView.vue` | ✅ 已实现 |
 | 入住 / 退房 | `POST .../check-in` `check-out` | —（在订单页内操作） | ✅ 后端已实现 |
 | 评价回复 | `POST .../reviews/reply` | `ReviewListView.vue` | ✅ 已实现 |
@@ -100,7 +100,7 @@
 | Docker 化部署 | 开发环境 + 生产环境完整编排，Nginx 反向代理 |
 | AI 多供应商接入 | 5 家供应商预设，运行时切换，多轮对话，流式输出 |
 | AI 智能客服 | 用户端 `/ai-chat`，SSE 流式问答，预订引导，Markdown 渲染 |
-| AI 管理端辅助 | 经营摘要、评价摘要、回复建议接口（壳实现，可接入 LLM） |
+| AI 管理端辅助 | 经营摘要、评价摘要、回复建议、定价、经营报告、情感分析、文案生成等（已接入 AI 服务，含 fallback） |
 | 会员与优惠券体系 | 会员等级管理、优惠券模板、发放与核销 |
 | 通知系统 | 站内通知推送 + 已读管理 |
 | 系统重置 | 高危操作二次确认的全量数据重置 |
@@ -111,8 +111,8 @@
 - 管理端前台业务流程（新建预订、入住办理、退房结算、续住/换房）仅有后端基础接口，前端独立页面尚未开发
 - 管理端财务模块（财务总览、账单管理、支付记录、退款记录）尚未有独立前端页面
 - 角色权限细粒度管理（RBAC）尚未实现前端页面
-- Celery 异步任务已配置但未定义实际 task
-- 管理端 AI 辅助接口（`report-summary`、`review-summary`、`reply-suggestion`）当前返回模板/兜底文本，未实际调用 LLM
+- Celery 异步任务已落地（超时取消、批量巡检、生命周期异常巡检）
+- 管理端 AI 辅助接口（`report-summary`、`review-summary`、`reply-suggestion`）已接入 AI 服务；当 AI 不可用时会返回 fallback 结果
 
 ## 7. 当前文档约束
 

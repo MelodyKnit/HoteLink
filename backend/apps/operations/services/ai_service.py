@@ -115,6 +115,7 @@ class AIChatService:
             else:
                 answer = ""
         except Exception:
+            logger.exception("AI chat reply fallback triggered")
             answer = ""
 
         return {

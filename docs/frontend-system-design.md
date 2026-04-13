@@ -17,6 +17,8 @@
 > - AI 集成：[ai-integration.md](./ai-integration.md)
 > - 功能规划：[feature-improvements.md](./feature-improvements.md)
 
+> 状态说明（2026-04-13）：本文件包含“已实现 + 设计中”两类内容。路由与接口的最新实现口径请同时参考 [source-of-truth.md](./source-of-truth.md) 与 [api-inventory.md](./api-inventory.md)。
+
 实现状态标记：已实现 = 页面与路由均已落地，设计中 = 仅有设计规划
 
 说明：

@@ -91,15 +91,37 @@
       </div>
 
       <!-- Actions -->
-      <div class="sticky bottom-16 mt-6 flex gap-3 md:bottom-0">
-        <button v-if="order.status === 'pending_payment'" @click="goToPay"
-          class="flex-1 rounded-2xl bg-brand py-3 text-center text-sm font-semibold text-white hover:bg-brand-dark">去支付</button>
-        <button v-if="canCancel" @click="showCancelModal = true"
-          class="flex-1 rounded-2xl border border-red-200 py-3 text-center text-sm font-medium text-red-500 hover:bg-red-50">取消订单</button>
-        <button v-if="order.status === 'completed' && !order.has_review" @click="showReviewModal = true"
-          class="flex-1 rounded-2xl bg-brand py-3 text-center text-sm font-semibold text-white hover:bg-brand-dark">评价</button>
-        <router-link v-if="order.hotel_id || order.hotel" :to="`/hotels/${order.hotel_id || order.hotel}`"
-          class="flex-1 rounded-2xl border border-gray-200 py-3 text-center text-sm font-medium text-gray-600 hover:bg-gray-50">再次预订</router-link>
+      <div v-if="showActionBar" class="sticky bottom-16 z-20 mt-6 rounded-2xl bg-white/95 p-3 shadow-sm backdrop-blur md:bottom-4">
+        <div class="flex flex-wrap gap-2">
+          <button
+            v-if="order.status === 'pending_payment'"
+            @click="goToPay"
+            class="inline-flex h-11 min-w-[120px] flex-1 items-center justify-center whitespace-nowrap rounded-xl bg-brand px-4 text-center text-sm font-semibold text-white transition hover:bg-brand-dark"
+          >
+            去支付
+          </button>
+          <button
+            v-if="canCancel"
+            @click="showCancelModal = true"
+            class="inline-flex h-11 min-w-[120px] flex-1 items-center justify-center whitespace-nowrap rounded-xl border border-red-200 bg-red-50/30 px-4 text-center text-sm font-medium text-red-500 transition hover:bg-red-50"
+          >
+            取消订单
+          </button>
+          <button
+            v-if="order.status === 'completed' && !order.has_review"
+            @click="showReviewModal = true"
+            class="inline-flex h-11 min-w-[120px] flex-1 items-center justify-center whitespace-nowrap rounded-xl bg-brand px-4 text-center text-sm font-semibold text-white transition hover:bg-brand-dark"
+          >
+            评价
+          </button>
+          <router-link
+            v-if="showRebook && hotelDetailPath"
+            :to="hotelDetailPath"
+            class="inline-flex h-11 min-w-[120px] flex-1 items-center justify-center whitespace-nowrap rounded-xl border border-brand/30 bg-brand/5 px-4 text-center text-sm font-medium text-brand transition hover:bg-brand/10"
+          >
+            再次预订
+          </router-link>
+        </div>
       </div>
     </div>
 
@@ -174,7 +196,7 @@
             </div>
             <div class="mt-2 flex flex-wrap gap-2">
               <div v-for="(img, idx) in reviewImages" :key="idx" class="group relative h-20 w-20 overflow-hidden rounded-xl">
-                <img :src="img" class="h-full w-full object-cover" />
+                <img :src="buildImageThumbUrl(img, 160, 160)" class="h-full w-full object-cover" loading="lazy" decoding="async" />
                 <button type="button" @click="removeReviewImage(idx)"
                   class="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition group-hover:opacity-100">
                   <span class="text-xl text-white">×</span>
@@ -213,7 +235,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { userOrderApi, userReviewApi, commonApi } from '@hotelink/api'
-import { ORDER_STATUS_MAP, PAYMENT_METHOD_MAP, PAYMENT_STATUS_MAP, formatMoney } from '@hotelink/utils'
+import { ORDER_STATUS_MAP, PAYMENT_METHOD_MAP, PAYMENT_STATUS_MAP, buildImageThumbUrl, formatMoney } from '@hotelink/utils'
 import { OrderStepBar } from '@hotelink/ui'
 
 const route = useRoute()
@@ -251,6 +273,18 @@ const paymentStatusMap = PAYMENT_STATUS_MAP
 // 根据状态值返回对应展示信息。
 function statusLabel(s: string): string { return ORDER_STATUS_MAP[s]?.label || s || '未知' }
 const canCancel = computed(() => ['pending_payment', 'paid', 'confirmed'].includes(order.value.status))
+const hotelDetailId = computed(() => {
+  const parsed = Number(order.value.hotel_id ?? order.value.hotel ?? 0)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0
+})
+const hotelDetailPath = computed(() => (hotelDetailId.value ? `/hotels/${hotelDetailId.value}` : ''))
+const showRebook = computed(() => hotelDetailId.value > 0 && ['completed', 'cancelled', 'refunded'].includes(order.value.status))
+const showActionBar = computed(() => (
+  order.value.status === 'pending_payment'
+  || canCancel.value
+  || (order.value.status === 'completed' && !order.value.has_review)
+  || showRebook.value
+))
 
 // 处理 goToPay 业务流程。
 function goToPay() { router.push(`/payment/${orderId}`) }

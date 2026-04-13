@@ -184,6 +184,26 @@ CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://127.0.0.1:6379/1")
 # Celery 任务结果存储使用 Redis DB2
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://127.0.0.1:6379/2")
 CELERY_TIMEZONE = TIME_ZONE
+ORDER_TIMEOUT_SWEEP_INTERVAL_MINUTES = int(os.getenv("ORDER_TIMEOUT_SWEEP_INTERVAL_MINUTES", "5"))
+ORDER_TIMEOUT_SWEEP_BATCH_SIZE = int(os.getenv("ORDER_TIMEOUT_SWEEP_BATCH_SIZE", "500"))
+ORDER_LIFECYCLE_SWEEP_INTERVAL_MINUTES = int(os.getenv("ORDER_LIFECYCLE_SWEEP_INTERVAL_MINUTES", "5"))
+ORDER_LIFECYCLE_SWEEP_BATCH_SIZE = int(os.getenv("ORDER_LIFECYCLE_SWEEP_BATCH_SIZE", "500"))
+CELERY_BEAT_SCHEDULE = {
+    "order-timeout-sweep": {
+        "task": "apps.bookings.tasks.sweep_timeout_unpaid_orders",
+        "schedule": timedelta(minutes=max(1, ORDER_TIMEOUT_SWEEP_INTERVAL_MINUTES)),
+        "args": (max(1, ORDER_TIMEOUT_SWEEP_BATCH_SIZE),),
+    },
+    "order-lifecycle-sweep": {
+        "task": "apps.bookings.tasks.sweep_order_lifecycle_anomalies",
+        "schedule": timedelta(minutes=max(1, ORDER_LIFECYCLE_SWEEP_INTERVAL_MINUTES)),
+        "args": (max(1, ORDER_LIFECYCLE_SWEEP_BATCH_SIZE),),
+    },
+}
+
+MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "20"))
+FILE_UPLOAD_MAX_MEMORY_SIZE = MAX_UPLOAD_MB * 1024 * 1024
+DATA_UPLOAD_MAX_MEMORY_SIZE = MAX_UPLOAD_MB * 1024 * 1024
 
 # 日志配置：统一使用控制台输出，格式包含时间戳/级别/模块名；日志级别由 LOG_LEVEL 环境变量控制
 LOGGING = {

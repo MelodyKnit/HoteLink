@@ -7,7 +7,7 @@ import "../../../packages/styles/tailwind.css";
 import "../../../packages/styles/theme.less";
 import "./styles/index.less";
 
-configureApi({ loginRedirect: "/login" });
+configureApi({ loginRedirect: "/login", tokenNamespace: "user" });
 
 const app = createApp(App);
 

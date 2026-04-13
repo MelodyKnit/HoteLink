@@ -19,12 +19,40 @@
 
     <template v-else>
       <!-- Image gallery -->
-      <div class="relative h-56 overflow-hidden bg-gray-200 md:h-80">
-        <img v-if="hotel.images?.[currentImg]" :src="hotel.images[currentImg]" :alt="hotel.name" class="h-full w-full object-cover" />
+      <div
+        class="relative h-56 overflow-hidden bg-gray-200 md:h-80"
+        @touchstart="onGalleryTouchStart"
+        @touchmove="onGalleryTouchMove"
+        @touchend="onGalleryTouchEnd"
+        @touchcancel="onGalleryTouchEnd"
+      >
+        <div v-if="hotel.images?.length" class="flex h-full" :style="galleryTrackStyle">
+          <div v-for="(img, i) in hotel.images" :key="`${img}-${i}`" class="h-full w-full shrink-0">
+            <img
+              :src="img"
+              :alt="`${hotel.name} 图片 ${i + 1}`"
+              class="h-full w-full cursor-zoom-in select-none object-cover"
+              draggable="false"
+              @click="handleGalleryImageClick(i)"
+            />
+          </div>
+        </div>
         <div v-else class="flex h-full items-center justify-center text-5xl text-gray-300">🏨</div>
+        <p
+          v-if="hotel.images?.length > 1"
+          class="pointer-events-none absolute left-3 top-3 rounded-full bg-black/35 px-2.5 py-1 text-[11px] text-white/95 backdrop-blur"
+        >
+          左右滑动切换，点击看大图
+        </p>
         <div v-if="hotel.images?.length > 1" class="absolute bottom-3 left-0 right-0 flex justify-center gap-1.5">
-          <button v-for="(_, i) in hotel.images" :key="i" @click="currentImg = i"
-            class="h-1.5 w-6 rounded-full transition" :class="i === currentImg ? 'bg-white' : 'bg-white/40'" />
+          <button
+            v-for="(_, i) in hotel.images"
+            :key="i"
+            type="button"
+            class="h-1.5 w-6 rounded-full transition"
+            :class="i === currentImg ? 'bg-white' : 'bg-white/40'"
+            @click="jumpToImage(i)"
+          />
         </div>
       </div>
 
@@ -52,18 +80,51 @@
         <!-- Map -->
         <div class="mt-4 rounded-2xl bg-white p-5 shadow-sm">
           <h3 class="mb-3 font-semibold text-gray-800">地图位置</h3>
-          <div v-if="googleMapEmbedUrl" class="overflow-hidden rounded-xl border border-gray-100">
+          <div v-if="hasCoordinates" class="mb-3 grid w-full grid-cols-3 gap-1 rounded-xl bg-gray-100 p-1 sm:inline-grid sm:w-auto">
+            <button
+              type="button"
+              class="w-full rounded-lg px-3 py-1.5 text-center text-xs font-medium transition"
+              :class="mapProvider === 'amap' ? 'bg-[#00b578] text-white shadow-sm' : 'text-gray-600 hover:bg-white'"
+              @click="mapProvider = 'amap'"
+            >
+              高德
+            </button>
+            <button
+              type="button"
+              class="w-full rounded-lg px-3 py-1.5 text-center text-xs font-medium transition"
+              :class="mapProvider === 'baidu' ? 'bg-[#2f88ff] text-white shadow-sm' : 'text-gray-600 hover:bg-white'"
+              @click="mapProvider = 'baidu'"
+            >
+              百度
+            </button>
+            <button
+              type="button"
+              class="w-full rounded-lg px-3 py-1.5 text-center text-xs font-medium transition"
+              :class="mapProvider === 'google' ? 'bg-gray-800 text-white shadow-sm' : 'text-gray-600 hover:bg-white'"
+              @click="mapProvider = 'google'"
+            >
+              Google
+            </button>
+          </div>
+          <div v-if="currentMapEmbedUrl" class="overflow-hidden rounded-xl border border-gray-100">
             <iframe
-              :src="googleMapEmbedUrl"
+              :src="currentMapEmbedUrl"
+              :key="mapProvider"
               class="h-64 w-full"
               loading="lazy"
               referrerpolicy="no-referrer-when-downgrade"
             />
           </div>
-          <div v-if="hasCoordinates" class="mt-3 flex flex-wrap gap-2">
-            <a :href="baiduMapPageUrl" target="_blank" rel="noopener noreferrer" class="rounded-lg bg-[#2f88ff] px-3 py-1.5 text-xs font-medium text-white">百度地图打开</a>
-            <a :href="aMapPageUrl" target="_blank" rel="noopener noreferrer" class="rounded-lg bg-[#00b578] px-3 py-1.5 text-xs font-medium text-white">高德地图打开</a>
-            <a :href="googleMapPageUrl" target="_blank" rel="noopener noreferrer" class="rounded-lg bg-gray-800 px-3 py-1.5 text-xs font-medium text-white">Google 地图打开</a>
+          <div v-if="hasCoordinates" class="mt-3 flex justify-end">
+            <a
+              :href="currentMapOpenUrl"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="rounded-lg px-3 py-1.5 text-xs font-medium text-white"
+              :class="currentMapButtonClass"
+            >
+              {{ currentMapOpenLabel }}
+            </a>
           </div>
           <p v-else class="text-sm text-gray-500">该酒店暂未配置坐标，暂时无法展示地图。</p>
         </div>
@@ -93,7 +154,7 @@
               class="flex overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-gray-100"
             >
               <div class="hidden h-32 w-32 shrink-0 overflow-hidden bg-gray-200 sm:block">
-                <img v-if="room.image_url" :src="room.image_url" :alt="room.name" class="h-full w-full object-cover" />
+                <img v-if="room.image_url" :src="room.image_thumb || room.image_url" :alt="room.name" class="h-full w-full object-cover" loading="lazy" decoding="async" />
                 <div v-else class="flex h-full items-center justify-center text-2xl text-gray-300">🛏️</div>
               </div>
               <div class="flex flex-1 flex-col justify-between p-4">
@@ -142,14 +203,52 @@
         </div>
       </div>
     </template>
+
+    <div
+      v-if="imagePreviewVisible && hotel.images?.[previewImgIndex]"
+      class="fixed inset-0 z-[120] flex items-center justify-center bg-black/85 p-4"
+    >
+      <div class="absolute inset-0" @click="closeImagePreview" />
+      <button
+        type="button"
+        class="absolute right-4 top-4 z-20 flex h-10 w-10 items-center justify-center rounded-full bg-white/20 p-0 text-white transition hover:bg-white/30"
+        @click="closeImagePreview"
+      >
+        <svg viewBox="0 0 20 20" aria-hidden="true" class="h-4 w-4">
+          <path d="M5 5 L15 15 M15 5 L5 15" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2" />
+        </svg>
+      </button>
+      <div
+        class="relative z-10 flex h-full w-full items-center justify-center overflow-hidden"
+        style="touch-action: none;"
+        @wheel="onPreviewWheel"
+        @touchstart="onPreviewTouchStart"
+        @touchmove="onPreviewTouchMove"
+        @touchend="onPreviewTouchEnd"
+        @touchcancel="onPreviewTouchEnd"
+        @click.stop
+      >
+        <img
+          :src="hotel.images[previewImgIndex]"
+          :alt="`${hotel.name} 预览图`"
+          class="max-h-[88vh] max-w-[92vw] select-none rounded-lg object-contain will-change-transform"
+          :style="previewImageStyle"
+          draggable="false"
+          @dblclick.stop="togglePreviewZoom"
+        />
+      </div>
+      <p class="pointer-events-none absolute bottom-5 left-1/2 z-20 -translate-x-1/2 rounded-full bg-black/35 px-3 py-1 text-[11px] text-white/90 backdrop-blur">
+        左右滑动切图，滚轮或双指缩放
+      </p>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { publicApi, userFavoriteApi, getToken } from '@hotelink/api'
-import { BED_TYPE_MAP } from '@hotelink/utils'
+import { BED_TYPE_MAP, buildImageThumbUrl } from '@hotelink/utils'
 
 const route = useRoute()
 const router = useRouter()
@@ -157,6 +256,26 @@ const loading = ref(true)
 const hotel = ref<any>({})
 const reviews = ref<any[]>([])
 const currentImg = ref(0)
+const imagePreviewVisible = ref(false)
+const previewImgIndex = ref(0)
+const galleryTouchStartX = ref(0)
+const galleryTouchDeltaX = ref(0)
+const galleryWidth = ref(1)
+const galleryTouchActive = ref(false)
+const galleryTouchMoved = ref(false)
+const previewScale = ref(1)
+const previewPanX = ref(0)
+const previewPanY = ref(0)
+const previewTouchStartX = ref(0)
+const previewTouchStartY = ref(0)
+const previewTouchDeltaX = ref(0)
+const previewTouchDeltaY = ref(0)
+const previewTouchActive = ref(false)
+const previewPinchStartDistance = ref(0)
+const previewPinchStartScale = ref(1)
+const galleryAutoPlayTimer = ref<ReturnType<typeof setInterval> | null>(null)
+const GALLERY_AUTO_PLAY_INTERVAL_MS = 5000
+const mapProvider = ref<'amap' | 'baidu' | 'google'>('amap')
 const isFav = ref(false)
 const error = ref('')
 const bedTypeMap = BED_TYPE_MAP
@@ -177,11 +296,23 @@ const hasCoordinates = computed(() => {
   return Number.isFinite(lat) && Number.isFinite(lng)
 })
 
-const googleMapEmbedUrl = computed(() => {
+const aMapBaseParams = computed(() => {
   const lat = Number(hotel.value?.latitude)
   const lng = Number(hotel.value?.longitude)
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return ''
-  return `https://www.google.com/maps?q=${lat},${lng}&z=15&output=embed`
+  const name = encodeURIComponent(String(hotel.value?.name || '酒店'))
+  const src = encodeURIComponent('HoteLink')
+  return `position=${lng},${lat}&name=${name}&src=${src}&coordinate=gaode&callnative=0`
+})
+
+const aMapEmbedUrl = computed(() => {
+  if (!aMapBaseParams.value) return ''
+  return `https://uri.amap.com/marker?${aMapBaseParams.value}`
+})
+
+const aMapPageUrl = computed(() => {
+  if (!aMapBaseParams.value) return '#'
+  return `https://uri.amap.com/marker?${aMapBaseParams.value}`
 })
 
 const baiduMapPageUrl = computed(() => {
@@ -193,12 +324,11 @@ const baiduMapPageUrl = computed(() => {
   return `https://api.map.baidu.com/marker?location=${lat},${lng}&title=${title}&content=${content}&output=html`
 })
 
-const aMapPageUrl = computed(() => {
+const googleMapEmbedUrl = computed(() => {
   const lat = Number(hotel.value?.latitude)
   const lng = Number(hotel.value?.longitude)
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return '#'
-  const name = encodeURIComponent(String(hotel.value?.name || '酒店'))
-  return `https://uri.amap.com/marker?position=${lng},${lat}&name=${name}`
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return ''
+  return `https://www.google.com/maps?q=${lat},${lng}&z=15&output=embed`
 })
 
 const googleMapPageUrl = computed(() => {
@@ -207,6 +337,78 @@ const googleMapPageUrl = computed(() => {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return '#'
   return `https://www.google.com/maps?q=${lat},${lng}`
 })
+
+const currentMapEmbedUrl = computed(() => {
+  if (mapProvider.value === 'baidu') return baiduMapPageUrl.value
+  if (mapProvider.value === 'google') return googleMapEmbedUrl.value
+  return aMapEmbedUrl.value
+})
+
+const currentMapOpenUrl = computed(() => {
+  if (mapProvider.value === 'baidu') return baiduMapPageUrl.value
+  if (mapProvider.value === 'google') return googleMapPageUrl.value
+  return aMapPageUrl.value
+})
+
+const currentMapOpenLabel = computed(() => {
+  if (mapProvider.value === 'baidu') return '百度地图打开'
+  if (mapProvider.value === 'google') return 'Google 地图打开'
+  return '高德地图打开'
+})
+
+const currentMapButtonClass = computed(() => {
+  if (mapProvider.value === 'baidu') return 'bg-[#2f88ff]'
+  if (mapProvider.value === 'google') return 'bg-gray-800'
+  return 'bg-[#00b578]'
+})
+
+const galleryTrackStyle = computed(() => {
+  const baseOffsetPercent = -currentImg.value * 100
+  const dragOffsetPercent = galleryTouchActive.value
+    ? (galleryTouchDeltaX.value / Math.max(galleryWidth.value, 1)) * 100
+    : 0
+  return {
+    transform: `translate3d(${baseOffsetPercent + dragOffsetPercent}%, 0, 0)`,
+    transition: galleryTouchActive.value ? 'none' : 'transform 280ms ease',
+  }
+})
+
+const previewImageStyle = computed(() => ({
+  transform: `translate3d(${previewPanX.value}px, ${previewPanY.value}px, 0) scale(${previewScale.value})`,
+  transition: previewTouchActive.value || previewPinchStartDistance.value > 0 ? 'none' : 'transform 180ms ease',
+}))
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value))
+}
+
+function touchDistance(a: Touch, b: Touch): number {
+  const dx = a.clientX - b.clientX
+  const dy = a.clientY - b.clientY
+  return Math.hypot(dx, dy)
+}
+
+function stopGalleryAutoPlay() {
+  if (!galleryAutoPlayTimer.value) return
+  clearInterval(galleryAutoPlayTimer.value)
+  galleryAutoPlayTimer.value = null
+}
+
+function startGalleryAutoPlay() {
+  const total = hotel.value?.images?.length || 0
+  if (imagePreviewVisible.value || total <= 1) {
+    stopGalleryAutoPlay()
+    return
+  }
+  stopGalleryAutoPlay()
+  galleryAutoPlayTimer.value = setInterval(() => {
+    showNextImage()
+  }, GALLERY_AUTO_PLAY_INTERVAL_MS)
+}
+
+function restartGalleryAutoPlay() {
+  startGalleryAutoPlay()
+}
 
 function formatRating(value: unknown): string {
   const n = Number(value)
@@ -238,8 +440,196 @@ function normalizeHotelData(data: any) {
     room_types: roomTypes.map((room: any) => ({
       ...room,
       image_url: room?.image_url || room?.image || cover || '',
+      image_thumb: buildImageThumbUrl(room?.image_url || room?.image || cover || '', 256, 256) || room?.image_thumb || room?.image_url || room?.image || cover || '',
     })),
   }
+}
+
+function showPrevImage() {
+  const total = hotel.value?.images?.length || 0
+  if (total <= 1) return
+  currentImg.value = (currentImg.value - 1 + total) % total
+}
+
+function showNextImage() {
+  const total = hotel.value?.images?.length || 0
+  if (total <= 1) return
+  currentImg.value = (currentImg.value + 1) % total
+}
+
+function jumpToImage(index: number) {
+  currentImg.value = index
+  restartGalleryAutoPlay()
+}
+
+function onGalleryTouchStart(event: TouchEvent) {
+  const total = hotel.value?.images?.length || 0
+  if (total <= 1 || event.touches.length !== 1) return
+  stopGalleryAutoPlay()
+  galleryTouchStartX.value = event.touches[0].clientX
+  galleryTouchDeltaX.value = 0
+  galleryTouchMoved.value = false
+  galleryTouchActive.value = true
+  galleryWidth.value = (event.currentTarget as HTMLElement)?.clientWidth || 1
+}
+
+function onGalleryTouchMove(event: TouchEvent) {
+  if (!galleryTouchActive.value || event.touches.length !== 1) return
+  galleryTouchDeltaX.value = event.touches[0].clientX - galleryTouchStartX.value
+  if (Math.abs(galleryTouchDeltaX.value) > 8) {
+    galleryTouchMoved.value = true
+  }
+}
+
+function onGalleryTouchEnd() {
+  if (!galleryTouchActive.value) return
+  const threshold = Math.min(110, galleryWidth.value * 0.2)
+  let changed = false
+  if (galleryTouchDeltaX.value > threshold) {
+    showPrevImage()
+    changed = true
+  } else if (galleryTouchDeltaX.value < -threshold) {
+    showNextImage()
+    changed = true
+  }
+  galleryTouchDeltaX.value = 0
+  galleryTouchActive.value = false
+  if (changed) restartGalleryAutoPlay()
+  else startGalleryAutoPlay()
+}
+
+function handleGalleryImageClick(index: number) {
+  if (galleryTouchMoved.value) {
+    galleryTouchMoved.value = false
+    return
+  }
+  openImagePreview(index)
+}
+
+function resetPreviewTransform() {
+  previewScale.value = 1
+  previewPanX.value = 0
+  previewPanY.value = 0
+}
+
+function openImagePreview(index: number) {
+  const total = hotel.value?.images?.length || 0
+  if (total <= 0) return
+  previewImgIndex.value = index
+  imagePreviewVisible.value = true
+  resetPreviewTransform()
+  stopGalleryAutoPlay()
+}
+
+function closeImagePreview() {
+  imagePreviewVisible.value = false
+  resetPreviewTransform()
+  startGalleryAutoPlay()
+}
+
+function showPrevPreviewImage() {
+  const total = hotel.value?.images?.length || 0
+  if (total <= 1) return
+  previewImgIndex.value = (previewImgIndex.value - 1 + total) % total
+  currentImg.value = previewImgIndex.value
+  resetPreviewTransform()
+}
+
+function showNextPreviewImage() {
+  const total = hotel.value?.images?.length || 0
+  if (total <= 1) return
+  previewImgIndex.value = (previewImgIndex.value + 1) % total
+  currentImg.value = previewImgIndex.value
+  resetPreviewTransform()
+}
+
+function togglePreviewZoom() {
+  if (previewScale.value > 1) {
+    resetPreviewTransform()
+  } else {
+    previewScale.value = 2
+  }
+}
+
+function onPreviewWheel(event: WheelEvent) {
+  event.preventDefault()
+  const step = event.deltaY < 0 ? 0.2 : -0.2
+  previewScale.value = clamp(previewScale.value + step, 1, 4)
+  if (previewScale.value === 1) {
+    previewPanX.value = 0
+    previewPanY.value = 0
+  }
+}
+
+function onPreviewTouchStart(event: TouchEvent) {
+  if (event.touches.length === 2) {
+    previewPinchStartDistance.value = touchDistance(event.touches[0], event.touches[1])
+    previewPinchStartScale.value = previewScale.value
+    previewTouchActive.value = false
+    return
+  }
+  if (event.touches.length !== 1) return
+  previewTouchActive.value = true
+  previewTouchStartX.value = event.touches[0].clientX
+  previewTouchStartY.value = event.touches[0].clientY
+  previewTouchDeltaX.value = 0
+  previewTouchDeltaY.value = 0
+}
+
+function onPreviewTouchMove(event: TouchEvent) {
+  if (event.touches.length === 2) {
+    const distance = touchDistance(event.touches[0], event.touches[1])
+    if (!previewPinchStartDistance.value) {
+      previewPinchStartDistance.value = distance
+      previewPinchStartScale.value = previewScale.value
+      return
+    }
+    previewScale.value = clamp((distance / previewPinchStartDistance.value) * previewPinchStartScale.value, 1, 4)
+    if (previewScale.value === 1) {
+      previewPanX.value = 0
+      previewPanY.value = 0
+    }
+    event.preventDefault()
+    return
+  }
+
+  if (!previewTouchActive.value || event.touches.length !== 1) return
+
+  const touch = event.touches[0]
+  const deltaX = touch.clientX - previewTouchStartX.value
+  const deltaY = touch.clientY - previewTouchStartY.value
+
+  if (previewScale.value > 1) {
+    previewPanX.value += deltaX
+    previewPanY.value += deltaY
+    previewTouchStartX.value = touch.clientX
+    previewTouchStartY.value = touch.clientY
+    event.preventDefault()
+    return
+  }
+
+  previewTouchDeltaX.value = deltaX
+  previewTouchDeltaY.value = deltaY
+  if (Math.abs(deltaX) > Math.abs(deltaY)) {
+    event.preventDefault()
+  }
+}
+
+function onPreviewTouchEnd() {
+  if (previewScale.value === 1 && previewTouchActive.value) {
+    const threshold = 55
+    if (Math.abs(previewTouchDeltaX.value) > threshold && Math.abs(previewTouchDeltaX.value) > Math.abs(previewTouchDeltaY.value)) {
+      if (previewTouchDeltaX.value > 0) {
+        showPrevPreviewImage()
+      } else {
+        showNextPreviewImage()
+      }
+    }
+  }
+  previewTouchActive.value = false
+  previewTouchDeltaX.value = 0
+  previewTouchDeltaY.value = 0
+  previewPinchStartDistance.value = 0
 }
 
 // 切换Fav显示状态。
@@ -285,13 +675,20 @@ async function loadHotelDetail() {
       const hotelRes = hotelResult.value
       if (hotelRes.code === 0 && hotelRes.data) {
         hotel.value = normalizeHotelData(hotelRes.data)
+        const total = hotel.value?.images?.length || 0
+        if (currentImg.value >= total) {
+          currentImg.value = 0
+        }
+        startGalleryAutoPlay()
       } else {
         hotel.value = {}
         error.value = hotelRes.message || '酒店详情加载失败'
+        stopGalleryAutoPlay()
       }
     } else {
       hotel.value = {}
       error.value = '酒店详情加载超时，请稍后重试'
+      stopGalleryAutoPlay()
     }
 
     if (reviewResult.status === 'fulfilled') {
@@ -304,20 +701,69 @@ async function loadHotelDetail() {
     hotel.value = {}
     reviews.value = []
     error.value = '酒店详情加载失败，请稍后重试'
+    stopGalleryAutoPlay()
   } finally {
     loading.value = false
   }
 }
 
 watch(
+  () => imagePreviewVisible.value,
+  (visible) => {
+    if (visible) {
+      stopGalleryAutoPlay()
+    } else {
+      startGalleryAutoPlay()
+    }
+  }
+)
+
+watch(
+  () => hotel.value?.images?.length || 0,
+  (length) => {
+    if (length <= 1) {
+      stopGalleryAutoPlay()
+      currentImg.value = 0
+      previewImgIndex.value = 0
+      return
+    }
+    if (currentImg.value >= length) {
+      currentImg.value = 0
+    }
+    if (previewImgIndex.value >= length) {
+      previewImgIndex.value = 0
+    }
+    if (!imagePreviewVisible.value) {
+      startGalleryAutoPlay()
+    }
+  }
+)
+
+watch(
   () => route.params.id,
   () => {
     const parsed = Number(route.params.id)
     if (Number.isFinite(parsed)) {
+      stopGalleryAutoPlay()
       currentImg.value = 0
+      galleryTouchStartX.value = 0
+      galleryTouchDeltaX.value = 0
+      galleryTouchMoved.value = false
+      galleryTouchActive.value = false
+      imagePreviewVisible.value = false
+      previewImgIndex.value = 0
+      resetPreviewTransform()
+      previewTouchActive.value = false
+      previewTouchDeltaX.value = 0
+      previewTouchDeltaY.value = 0
+      previewPinchStartDistance.value = 0
       loadHotelDetail()
     }
   },
   { immediate: true }
 )
+
+onBeforeUnmount(() => {
+  stopGalleryAutoPlay()
+})
 </script>

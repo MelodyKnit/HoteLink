@@ -17,36 +17,100 @@ export interface PaginatedData<T = unknown> {
   total_pages: number
 }
 
-const TOKEN_KEY = 'hotelink_access_token'
-const REFRESH_KEY = 'hotelink_refresh_token'
+const TOKEN_KEY_PREFIX = 'hotelink_access_token'
+const REFRESH_KEY_PREFIX = 'hotelink_refresh_token'
 
 let _loginRedirect = '/admin/login'
+let _tokenNamespace = 'admin'
+const AUTH_LOGIN_ENDPOINTS = ['/public/auth/login', '/public/auth/admin-login', '/public/auth/register']
+const AUTH_REFRESH_ENDPOINT = '/public/auth/refresh'
+const AUTH_LOGOUT_ENDPOINT = '/user/auth/logout'
+
+const authHttp = axios.create({ baseURL: '/api/v1', timeout: 30000 })
+let refreshInFlight: Promise<string | null> | null = null
+
+function normalizeNamespace(value?: string): string {
+  const normalized = (value || '').trim().toLowerCase()
+  if (!normalized) return 'admin'
+  const safe = normalized.replace(/[^a-z0-9_-]/g, '')
+  return safe || 'admin'
+}
+
+function tokenKey(): string {
+  return `${TOKEN_KEY_PREFIX}_${_tokenNamespace}`
+}
+
+function refreshKey(): string {
+  return `${REFRESH_KEY_PREFIX}_${_tokenNamespace}`
+}
 
 // 处理 configureApi 业务流程。
-export function configureApi(options: { loginRedirect?: string }) {
+export function configureApi(options: { loginRedirect?: string; tokenNamespace?: string } = {}) {
   if (options.loginRedirect) _loginRedirect = options.loginRedirect
+  if (options.tokenNamespace) _tokenNamespace = normalizeNamespace(options.tokenNamespace)
 }
 
 // 处理 getToken 业务流程。
 export function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY)
+  return localStorage.getItem(tokenKey())
 }
 
 // 设置 Tokens 状态。
 export function setTokens(access: string, refresh: string) {
-  localStorage.setItem(TOKEN_KEY, access)
-  localStorage.setItem(REFRESH_KEY, refresh)
+  localStorage.setItem(tokenKey(), access)
+  localStorage.setItem(refreshKey(), refresh)
 }
 
 // 清理 Tokens 状态。
 export function clearTokens() {
-  localStorage.removeItem(TOKEN_KEY)
-  localStorage.removeItem(REFRESH_KEY)
+  localStorage.removeItem(tokenKey())
+  localStorage.removeItem(refreshKey())
+}
+
+function isAuthLoginEndpoint(url?: string): boolean {
+  if (!url) return false
+  return AUTH_LOGIN_ENDPOINTS.some((endpoint) => url.includes(endpoint))
+}
+
+function isAuthRefreshEndpoint(url?: string): boolean {
+  return !!url && url.includes(AUTH_REFRESH_ENDPOINT)
+}
+
+function isAuthLogoutEndpoint(url?: string): boolean {
+  return !!url && url.includes(AUTH_LOGOUT_ENDPOINT)
+}
+
+async function refreshAccessToken(): Promise<string | null> {
+  const refreshToken = getRefreshToken()
+  if (!refreshToken) return null
+
+  if (!refreshInFlight) {
+    refreshInFlight = authHttp
+      .post<ApiResult<{ access_token: string; token_type: string }>>(AUTH_REFRESH_ENDPOINT, { refresh_token: refreshToken })
+      .then((resp) => {
+        const body = resp.data
+        if (body.code === 0 && body.data?.access_token) {
+          setTokens(body.data.access_token, refreshToken)
+          return body.data.access_token
+        }
+        return null
+      })
+      .catch(() => null)
+      .finally(() => {
+        refreshInFlight = null
+      })
+  }
+
+  return refreshInFlight
+}
+
+function buildFallbackResponse(serverCode: number, serverMessage: string): ApiResult {
+  return { code: serverCode, message: serverMessage, data: null }
 }
 
 // 处理 getRefreshToken 业务流程。
 export function getRefreshToken(): string | null {
-  return localStorage.getItem(REFRESH_KEY)
+  return localStorage.getItem(refreshKey())
 }
 
 // 创建 Http 资源。
@@ -62,26 +126,56 @@ function createHttp(baseURL: string): AxiosInstance {
   })
 
   instance.interceptors.response.use(
-    (resp: AxiosResponse<ApiResult>) => {
+    async (resp: AxiosResponse<ApiResult>) => {
       const body = resp.data
       if (body.code === 4011 || body.code === 4012) {
+        const requestUrl = resp.config.url || ''
+        if (isAuthLoginEndpoint(requestUrl) || isAuthRefreshEndpoint(requestUrl)) {
+          return resp
+        }
+
+        const refreshed = await refreshAccessToken()
+        if (refreshed) {
+          return instance.request(resp.config)
+        }
+
         clearTokens()
-        window.location.href = _loginRedirect
+        if (!isAuthLoginEndpoint(requestUrl)) {
+          window.location.href = _loginRedirect
+        }
       }
       return resp
     },
-    (error) => {
-      if (error.response?.status === 401) {
-        clearTokens()
-        window.location.href = _loginRedirect
-      }
+    async (error) => {
+      const originalRequest = error.config as (InternalAxiosRequestConfig & { _retry?: boolean }) | undefined
+      const requestUrl = originalRequest?.url || ''
       const serverMessage: string =
         error.response?.data?.message ||
         error.response?.data?.detail ||
         error.message ||
         '请求失败'
+
+      if (error.response?.status === 401) {
+        if (isAuthLoginEndpoint(requestUrl)) {
+          const fallback = buildFallbackResponse(error.response?.data?.code ?? 4010, serverMessage)
+          return Promise.resolve({ data: fallback })
+        }
+
+        if (originalRequest && !originalRequest._retry && !isAuthRefreshEndpoint(requestUrl)) {
+          originalRequest._retry = true
+          const refreshed = await refreshAccessToken()
+          if (refreshed) {
+            return instance.request(originalRequest)
+          }
+        }
+
+        clearTokens()
+        if (isAuthRefreshEndpoint(requestUrl) || isAuthLogoutEndpoint(requestUrl) || !isAuthLoginEndpoint(requestUrl)) {
+          window.location.href = _loginRedirect
+        }
+      }
       const serverCode: number = error.response?.data?.code ?? error.response?.status ?? 5000
-      const fallback: ApiResult = { code: serverCode, message: serverMessage, data: null }
+      const fallback: ApiResult = buildFallbackResponse(serverCode, serverMessage)
       return Promise.resolve({ data: fallback })
     }
   )
@@ -122,7 +216,7 @@ export const authApi = {
   logout: (refresh_token: string) =>
     post('/user/auth/logout', { refresh_token }),
   me: () =>
-    get<{ id: number; username: string; nickname: string; mobile: string; email: string; role: string; status: string; member_level: string }>('/user/auth/me'),
+    get<{ id: number; username: string; nickname: string; mobile: string; email: string; role: string; status: string; member_level: string; avatar?: string }>('/user/auth/me'),
 }
 
 // ========== Dashboard ==========
@@ -319,7 +413,7 @@ export const publicApi = {
 // ========== User Auth ==========
 export const userAuthApi = {
   login: (data: { username: string; password: string }) =>
-    post<{ access_token: string; refresh_token: string; token_type: string; expires_in: number; user: { id: number; username: string; role: string; nickname?: string; member_level?: string } }>('/public/auth/login', data),
+    post<{ access_token: string; refresh_token: string; token_type: string; expires_in: number; user: { id: number; username: string; role: string; nickname?: string; member_level?: string; avatar?: string; points?: number } }>('/public/auth/login', data),
   register: (data: { username: string; password: string; confirm_password: string; mobile: string; email?: string }) =>
     post<{ user_id: number; username: string }>('/public/auth/register', data),
   me: () => get<{ id: number; username: string; nickname: string; mobile: string; email: string; role: string; status: string; member_level: string; avatar?: string; gender?: string; birthday?: string }>('/user/auth/me'),
@@ -395,8 +489,8 @@ export const userNoticeApi = {
 
 // ========== User AI Chat ==========
 export const userAiApi = {
-  chat: (data: { scene: string; question: string; hotel_id?: number; order_id?: number; booking_context?: Record<string, unknown> }) =>
-    post<{ answer: string; scene: string; booking_assistant?: Record<string, unknown> | null }>('/user/ai/chat', data),
+  chat: (data: { scene: string; question: string; hotel_id?: number; order_id?: number; session_id?: number; booking_context?: Record<string, unknown> }) =>
+    post<{ answer: string; scene: string; session_id?: number; booking_assistant?: Record<string, unknown> | null }>('/user/ai/chat', data),
   recommendations: (data: { scene?: string; hotel_id?: number; keyword?: string; limit?: number }) =>
     post<{ scene: string; recommendations: { id: number; name: string; city: string; star: number; cover_image: string; min_price: number; rating: number; reason: string }[] }>('/user/ai/recommendations', data as Record<string, unknown>),
   hotelCompare: (data: { hotel_ids: number[]; check_in_date?: string; check_out_date?: string }) =>
@@ -406,7 +500,7 @@ export const userAiApi = {
   sessionMessages: (session_id: number) => get<{ items: { id: number; role: string; content: string; tokens_used: number; created_at: string }[] }>(`/user/ai/sessions/${session_id}/messages`),
 
   async *chatStream(
-    data: { scene: string; question: string; hotel_id?: number; order_id?: number; booking_context?: Record<string, unknown> }
+    data: { scene: string; question: string; hotel_id?: number; order_id?: number; session_id?: number; booking_context?: Record<string, unknown> }
   ): AsyncGenerator<Record<string, unknown>> {
     const token = getToken()
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }

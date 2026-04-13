@@ -1,5 +1,5 @@
 <template>
-  <div class="flex h-screen flex-col bg-gradient-to-br from-gray-50 to-gray-100">
+  <div class="flex min-h-[100dvh] flex-col bg-gradient-to-br from-gray-50 to-gray-100">
     <!-- Header -->
     <header class="flex h-14 items-center justify-between border-b border-gray-200 bg-white px-4 shadow-sm">
       <button @click="$router.back()" class="rounded-lg p-1 text-gray-600 hover:bg-gray-100">← 返回</button>
@@ -38,7 +38,7 @@
             <p class="text-sm">还没有历史聊天记录</p>
           </div>
           <div v-else class="space-y-2">
-            <div v-for="(history, idx) in chatHistories" :key="idx" 
+            <div v-for="(history, idx) in chatHistories" :key="`${history.timestamp}-${idx}`" 
               class="group flex items-start justify-between gap-2 rounded-lg p-3 bg-gray-50 hover:bg-gray-100 transition">
               <div class="flex-1 min-w-0">
                 <p class="text-xs text-gray-500">{{ formatHistoryTime(history.timestamp) }}</p>
@@ -84,7 +84,7 @@
 
     <!-- Messages -->
     <div ref="chatBox" class="flex-1 space-y-4 overflow-y-auto p-4">
-      <div v-for="(msg, i) in messages" :key="i"
+      <div v-for="msg in messages" :key="msg.id"
         class="flex animate-fadeIn" :class="msg.role === 'user' ? 'justify-end' : 'justify-start'">
         <div class="max-w-[85%] rounded-2xl px-4 py-3 text-sm"
           :class="msg.role === 'user' ? 'bg-brand text-white rounded-br-sm shadow-md' : 'bg-white text-gray-700 shadow-md rounded-bl-sm'">
@@ -173,7 +173,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick, onMounted, watch, computed } from 'vue'
+import { ref, nextTick, onBeforeUnmount, onMounted, watch, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useRoute } from 'vue-router'
 import { marked } from 'marked'
@@ -188,6 +188,7 @@ const showMenu = ref(false)
 const showHistoryPanel = ref(false)
 const showClearConfirm = ref(false)
 const chatHistories = ref<ChatHistory[]>([])
+const backendSessionId = ref<number | null>(null)
 
 interface ChatHistory {
   timestamp: number
@@ -195,6 +196,7 @@ interface ChatHistory {
   preview: string
   messageCount: number
   bookingContext: BookingContext
+  backendSessionId?: number | null
 }
 
 interface BookingContext {
@@ -222,10 +224,52 @@ interface BookingAssistant {
 }
 
 interface Msg {
+  id: string
   role: 'user' | 'assistant'
   content: string
   loading?: boolean
   bookingAssistant?: BookingAssistant | null
+}
+
+let msgSeed = 0
+function createMsgId(role: 'user' | 'assistant'): string {
+  msgSeed += 1
+  const prefix = role === 'user' ? 'u' : 'a'
+  return `${prefix}-${Date.now()}-${msgSeed}`
+}
+
+function createMessage(
+  role: 'user' | 'assistant',
+  content: string,
+  extras?: { loading?: boolean; bookingAssistant?: BookingAssistant | null }
+): Msg {
+  return {
+    id: createMsgId(role),
+    role,
+    content,
+    loading: extras?.loading,
+    bookingAssistant: extras?.bookingAssistant,
+  }
+}
+
+function normalizeMessages(raw: unknown): Msg[] {
+  if (!Array.isArray(raw)) return []
+  const normalized: Msg[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    const record = item as Partial<Msg>
+    if ((record.role !== 'user' && record.role !== 'assistant') || typeof record.content !== 'string') {
+      continue
+    }
+    normalized.push({
+      id: typeof record.id === 'string' && record.id ? record.id : createMsgId(record.role),
+      role: record.role,
+      content: record.content,
+      loading: record.loading === true ? true : undefined,
+      bookingAssistant: record.bookingAssistant || null,
+    })
+  }
+  return normalized
 }
 
 const isBookingMode = route.path === '/ai-booking'
@@ -240,10 +284,7 @@ const defaultWelcome = isBookingMode
   : '您好！我是 HoteLink 的智能助理 💬\n\n有什么我可以帮您的吗？（预订、取消、退款、会员权益...）'
 
 const messages = ref<Msg[]>([
-  {
-    role: 'assistant',
-    content: defaultWelcome,
-  },
+  createMessage('assistant', defaultWelcome),
 ])
 
 const bookingContext = ref<BookingContext>({})
@@ -319,6 +360,7 @@ function saveCurrentChatToHistory() {
     preview,
     messageCount: messages.value.length,
     bookingContext: { ...bookingContext.value },
+    backendSessionId: backendSessionId.value,
   }
 
   const existing = loadHistories()
@@ -334,7 +376,18 @@ function loadHistories(): ChatHistory[] {
   const raw = localStorage.getItem(historyStorageKey)
   if (!raw) return []
   try {
-    return JSON.parse(raw) as ChatHistory[]
+    const parsed = JSON.parse(raw) as ChatHistory[]
+    if (!Array.isArray(parsed)) return []
+    return parsed.map((item) => ({
+      ...item,
+      messages: normalizeMessages(item?.messages),
+      bookingContext: (item?.bookingContext && typeof item.bookingContext === 'object')
+        ? item.bookingContext
+        : {},
+      backendSessionId: Number.isFinite(Number(item?.backendSessionId))
+        ? Number(item?.backendSessionId)
+        : null,
+    }))
   } catch {
     return []
   }
@@ -345,8 +398,9 @@ function restoreHistory(idx: number) {
   const history = chatHistories.value[idx]
   if (!history) return
 
-  messages.value = history.messages.filter(m => !m.loading)
+  messages.value = normalizeMessages(history.messages).filter(m => !m.loading)
   bookingContext.value = { ...history.bookingContext }
+  backendSessionId.value = Number.isFinite(Number(history.backendSessionId)) ? Number(history.backendSessionId) : null
   showHistoryPanel.value = false
   scrollBottom()
   
@@ -370,12 +424,10 @@ function confirmClear() {
 // 清空当前聊天
 function clearChat() {
   messages.value = [
-    {
-      role: 'assistant',
-      content: defaultWelcome,
-    },
+    createMessage('assistant', defaultWelcome),
   ]
   bookingContext.value = {}
+  backendSessionId.value = null
   input.value = ''
   showClearConfirm.value = false
   scrollBottom()
@@ -385,6 +437,7 @@ function saveSessionState() {
   const payload = {
     messages: messages.value,
     bookingContext: bookingContext.value,
+    backendSessionId: backendSessionId.value,
   }
   sessionStorage.setItem(sessionKey, JSON.stringify(payload))
 }
@@ -393,13 +446,15 @@ function restoreSessionState() {
   const raw = sessionStorage.getItem(sessionKey)
   if (!raw) return false
   try {
-    const parsed = JSON.parse(raw) as { messages?: Msg[]; bookingContext?: BookingContext }
-    if (Array.isArray(parsed.messages) && parsed.messages.length) {
-      messages.value = parsed.messages.filter((m) => !m.loading)
+    const parsed = JSON.parse(raw) as { messages?: Msg[]; bookingContext?: BookingContext; backendSessionId?: number | null }
+    const restoredMessages = normalizeMessages(parsed.messages)
+    if (restoredMessages.length) {
+      messages.value = restoredMessages.filter((m) => !m.loading)
     }
     if (parsed.bookingContext && typeof parsed.bookingContext === 'object') {
       bookingContext.value = parsed.bookingContext
     }
+    backendSessionId.value = Number.isFinite(Number(parsed.backendSessionId)) ? Number(parsed.backendSessionId) : null
     return true
   } catch {
     return false
@@ -415,8 +470,19 @@ function escapeHtml(text: string): string {
     .replace(/'/g, '&#39;')
 }
 
+function sanitizeRenderedMarkdown(html: string): string {
+  return html.replace(/href="([^"]*)"/gi, (_, href: string) => {
+    const normalized = href.trim()
+    if (/^(https?:|mailto:|tel:|\/)/i.test(normalized)) {
+      return `href="${normalized}" target="_blank" rel="noopener noreferrer"`
+    }
+    return 'href="#"'
+  })
+}
+
 function renderMd(text: string): string {
-  return marked.parse(escapeHtml(text)) as string
+  const html = marked.parse(escapeHtml(text)) as string
+  return sanitizeRenderedMarkdown(html)
 }
 
 function mergeBookingContext(contextPatch?: Record<string, unknown>): BookingContext {
@@ -483,11 +549,11 @@ async function sendMessage(text?: string, contextPatch?: Record<string, unknown>
   const carryBookingContext = shouldCarryBookingContext(msg, contextPatch)
   const nextBookingContext = carryBookingContext ? mergeBookingContext(contextPatch) : undefined
   input.value = ''
-  messages.value.push({ role: 'user', content: msg })
+  messages.value.push(createMessage('user', msg))
   scrollBottom()
 
   // Loading placeholder until first token arrives
-  messages.value.push({ role: 'assistant', content: '', loading: true })
+  messages.value.push(createMessage('assistant', '', { loading: true }))
   scrollBottom()
   sending.value = true
 
@@ -498,10 +564,15 @@ async function sendMessage(text?: string, contextPatch?: Record<string, unknown>
       scene,
       question: msg,
       hotel_id: nextBookingContext?.selected_hotel_id || undefined,
+      session_id: backendSessionId.value || undefined,
       booking_context: nextBookingContext,
     })) {
       if (event.type === 'meta') {
         pendingBookingAssistant = (event.booking_assistant as BookingAssistant) || null
+        const incomingSessionId = Number(event.session_id)
+        if (Number.isFinite(incomingSessionId) && incomingSessionId > 0) {
+          backendSessionId.value = incomingSessionId
+        }
         if (pendingBookingAssistant?.context) {
           bookingContext.value = { ...pendingBookingAssistant.context }
         }
@@ -510,9 +581,13 @@ async function sendMessage(text?: string, contextPatch?: Record<string, unknown>
 
       const chunk = typeof event.content === 'string' ? event.content : ''
       const isDone = event.done === true || event.type === 'done'
+      const incomingSessionId = Number(event.session_id)
+      if (Number.isFinite(incomingSessionId) && incomingSessionId > 0) {
+        backendSessionId.value = incomingSessionId
+      }
       if (!receivedAny) {
         messages.value.pop()
-        messages.value.push({ role: 'assistant', content: '', bookingAssistant: pendingBookingAssistant })
+        messages.value.push(createMessage('assistant', '', { bookingAssistant: pendingBookingAssistant }))
         receivedAny = true
       }
       if (chunk) {
@@ -527,7 +602,7 @@ async function sendMessage(text?: string, contextPatch?: Record<string, unknown>
     }
   } catch (err) {
     if (!receivedAny) messages.value.pop()
-    messages.value.push({ role: 'assistant', content: generateFallback(msg) })
+    messages.value.push(createMessage('assistant', generateFallback(msg)))
     if (!carryBookingContext) {
       bookingContext.value = {}
     }
@@ -572,14 +647,22 @@ watch(messages, () => {
 }, { deep: true })
 
 watch(bookingContext, saveSessionState, { deep: true })
+watch(backendSessionId, saveSessionState)
+
+function handleBeforeUnload() {
+  if (messages.value.length > 1) {
+    saveCurrentChatToHistory()
+  }
+}
 
 // 在离开页面时保存聊天到历史
 onMounted(() => {
-  window.addEventListener('beforeunload', () => {
-    if (messages.value.length > 1) {
-      saveCurrentChatToHistory()
-    }
-  })
+  window.addEventListener('beforeunload', handleBeforeUnload)
+})
+
+onBeforeUnmount(() => {
+  handleBeforeUnload()
+  window.removeEventListener('beforeunload', handleBeforeUnload)
 })
 </script>
 

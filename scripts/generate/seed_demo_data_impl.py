@@ -27,8 +27,9 @@ def run(command, *args, **options):
     SystemNotice = importlib.import_module("apps.operations.models").SystemNotice
     UserProfile = importlib.import_module("apps.users.models").UserProfile
 
-    admin_user, _ = User.objects.get_or_create(username="admin", defaults={"email": "admin@example.com"})
-    admin_user.set_password("Password123")
+    admin_user, admin_created = User.objects.get_or_create(username="admin", defaults={"email": "admin@example.com"})
+    if admin_created:
+        admin_user.set_password("Password123")
     admin_user.is_staff = True
     admin_user.save()
 
@@ -38,8 +39,9 @@ def run(command, *args, **options):
     admin_profile.status = UserProfile.STATUS_ACTIVE
     admin_profile.save()
 
-    demo_user, _ = User.objects.get_or_create(username="zhangsan", defaults={"email": "zhangsan@example.com"})
-    demo_user.set_password("Password123")
+    demo_user, demo_created = User.objects.get_or_create(username="zhangsan", defaults={"email": "zhangsan@example.com"})
+    if demo_created:
+        demo_user.set_password("Password123")
     demo_user.save()
 
     demo_profile, _ = UserProfile.objects.get_or_create(user=demo_user)

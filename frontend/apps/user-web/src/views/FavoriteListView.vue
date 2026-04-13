@@ -22,7 +22,7 @@
         <div v-for="hotel in hotels" :key="hotel.id"
           class="flex gap-3 overflow-hidden rounded-2xl bg-white p-3 shadow-sm">
           <router-link :to="`/hotels/${hotel.id}`" class="h-24 w-28 flex-shrink-0 overflow-hidden rounded-xl">
-            <img :src="hotel.cover || 'https://placehold.co/280x240/0f766e/white?text=Hotel'" class="h-full w-full object-cover" />
+            <img :src="hotel.cover_thumb || hotel.cover || 'https://placehold.co/280x240/0f766e/white?text=Hotel'" class="h-full w-full object-cover" loading="lazy" decoding="async" />
           </router-link>
           <div class="flex flex-1 flex-col justify-between">
             <div>
@@ -44,10 +44,27 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { userFavoriteApi } from '@hotelink/api'
+import { buildImageThumbUrl } from '@hotelink/utils'
 
 const loading = ref(true)
 const hotels = ref<any[]>([])
 const error = ref('')
+
+function normalizeFavoriteItem(item: any) {
+  const rawHotel = item?.hotel && typeof item.hotel === 'object' ? item.hotel : item
+  const hotelId = Number(rawHotel?.id ?? item?.hotel_id ?? item?.id)
+  const cover = String(rawHotel?.cover_image || rawHotel?.cover || '')
+  return {
+    id: Number.isFinite(hotelId) && hotelId > 0 ? hotelId : 0,
+    name: rawHotel?.name || '',
+    city: rawHotel?.city || '',
+    address: rawHotel?.address || '',
+    star_level: Number(rawHotel?.star_level ?? rawHotel?.star ?? 0),
+    min_price: rawHotel?.min_price ?? '--',
+    cover,
+    cover_thumb: buildImageThumbUrl(cover, 224, 192) || rawHotel?.cover_thumb || cover,
+  }
+}
 
 // 删除 Fav 数据。
 async function removeFav(id: number) {
@@ -60,7 +77,12 @@ async function removeFav(id: number) {
 onMounted(async () => {
   try {
     const res = await userFavoriteApi.list()
-    if (res.code === 0 && res.data) hotels.value = res.data.items || res.data
+    if (res.code === 0 && res.data) {
+      const rawItems = (res.data as any).items || res.data || []
+      hotels.value = Array.isArray(rawItems)
+        ? rawItems.map(normalizeFavoriteItem).filter((item) => item.id > 0)
+        : []
+    }
   } catch {
     hotels.value = []
     error.value = '收藏数据加载失败，请稍后重试'

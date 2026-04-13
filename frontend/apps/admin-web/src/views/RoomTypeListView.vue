@@ -109,7 +109,7 @@
         <div class="sm:col-span-2">
           <label class="mb-1 block text-sm font-medium">房型图片</label>
           <div class="flex items-center gap-3">
-            <img v-if="form.image" :src="form.image" alt="房型图" class="h-20 w-28 rounded-lg object-cover ring-1 ring-slate-200" />
+            <img v-if="form.image" :src="buildImageThumbUrl(form.image, 224, 160)" alt="房型图" class="h-20 w-28 rounded-lg object-cover ring-1 ring-slate-200" loading="lazy" decoding="async" />
             <label class="cursor-pointer rounded-lg border-2 border-dashed border-slate-300 px-4 py-2 text-sm text-slate-500 hover:border-teal-400 hover:text-teal-600">
               {{ uploading ? '上传中…' : '选择图片' }}
               <input type="file" accept="image/*" class="hidden" :disabled="uploading" @change="handleImageUpload" />
@@ -132,7 +132,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { roomTypeApi, hotelApi, commonApi } from '@hotelink/api'
-import { formatMoney, BED_TYPE_MAP, extractApiError } from '@hotelink/utils'
+import { buildImageThumbUrl, formatMoney, BED_TYPE_MAP, extractApiError } from '@hotelink/utils'
 import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, useToast, useConfirm, SelectField } from '@hotelink/ui'
 
 const { showToast } = useToast()

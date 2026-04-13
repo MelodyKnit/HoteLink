@@ -38,12 +38,14 @@ apps/api/views.py —— 项目所有 REST API 视图类。
 """
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
 import hashlib
 
+from django.db import transaction
 from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model
 from django.core.files.storage import default_storage
@@ -110,6 +112,7 @@ from apps.api.serializers import (
     OrderUpdateSerializer,
     PasswordChangeSerializer,
     PointsLogSerializer,
+    PaymentRecordSerializer,
     ProfileUpdateSerializer,
     RegisterSerializer,
     ReplyReviewSerializer,
@@ -139,6 +142,7 @@ from apps.reports.models import ReportTask
 from apps.users.models import UserProfile
 
 User = get_user_model()
+logger = logging.getLogger(__name__)
 
 
 def ensure_profile(user: User) -> UserProfile:
@@ -160,26 +164,33 @@ def add_points(user, points: int, log_type: str, description: str, order=None):
     """给用户增加积分并记录日志，自动触发会员升级。"""
     if points == 0:
         return
-    profile = ensure_profile(user)
-    profile.points = max(0, profile.points + points)
-    profile.save(update_fields=["points", "updated_at"])
-    PointsLog.objects.create(
-        user=user,
-        log_type=log_type,
-        points=points,
-        balance=profile.points,
-        description=description,
-        order=order,
-    )
-    old_level = profile.member_level
-    if profile.refresh_level() and old_level != profile.member_level:
-        level_name = dict(UserProfile.MEMBER_LEVEL_CHOICES).get(profile.member_level, profile.member_level)
-        SystemNotice.objects.create(
+    with transaction.atomic():
+        defaults = {
+            "nickname": user.username,
+            "mobile": "",
+            "role": UserProfile.ROLE_SYSTEM_ADMIN if user.is_superuser else UserProfile.ROLE_USER,
+            "status": UserProfile.STATUS_ACTIVE,
+        }
+        profile, _ = UserProfile.objects.select_for_update().get_or_create(user=user, defaults=defaults)
+        profile.points = max(0, profile.points + points)
+        profile.save(update_fields=["points", "updated_at"])
+        PointsLog.objects.create(
             user=user,
-            notice_type=SystemNotice.TYPE_MEMBER,
-            title="会员升级啦！",
-            content=f"恭喜您升级为{level_name}，享受更多专属权益！",
+            log_type=log_type,
+            points=points,
+            balance=profile.points,
+            description=description,
+            order=order,
         )
+        old_level = profile.member_level
+        if profile.refresh_level() and old_level != profile.member_level:
+            level_name = dict(UserProfile.MEMBER_LEVEL_CHOICES).get(profile.member_level, profile.member_level)
+            SystemNotice.objects.create(
+                user=user,
+                notice_type=SystemNotice.TYPE_MEMBER,
+                title="会员升级啦！",
+                content=f"恭喜您升级为{level_name}，享受更多专属权益！",
+            )
 
 
 def get_page_params(request) -> tuple[int, int]:
@@ -230,6 +241,98 @@ def get_thumb_size_by_mode(mode: str | None) -> tuple[int, int]:
     if mode == "standard":
         return 56, 40
     return 56, 40
+
+
+ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+ALLOWED_IMAGE_FORMATS = {
+    "JPEG": ".jpg",
+    "PNG": ".png",
+    "WEBP": ".webp",
+    "GIF": ".gif",
+}
+
+
+def get_max_upload_bytes() -> int:
+    max_upload_mb = int(getattr(settings, "MAX_UPLOAD_MB", 20))
+    return max_upload_mb * 1024 * 1024
+
+
+def validate_image_upload(file_obj) -> tuple[bool, str | None, str | None]:
+    max_upload_bytes = get_max_upload_bytes()
+    size = int(getattr(file_obj, "size", 0) or 0)
+    if size <= 0:
+        return False, "上传文件不能为空", None
+    if size > max_upload_bytes:
+        return False, f"文件大小不能超过 {max_upload_bytes // (1024 * 1024)}MB", None
+
+    suffix = Path(getattr(file_obj, "name", "")).suffix.lower()
+    if suffix not in ALLOWED_IMAGE_EXTENSIONS:
+        return False, "仅支持 JPG、PNG、WebP、GIF 图片", None
+
+    try:
+        file_obj.seek(0)
+        with Image.open(file_obj) as image:
+            image.verify()
+        file_obj.seek(0)
+        with Image.open(file_obj) as image:
+            image_format = (image.format or "").upper()
+    except (UnidentifiedImageError, OSError, ValueError):
+        return False, "上传文件不是有效图片", None
+    finally:
+        try:
+            file_obj.seek(0)
+        except Exception:
+            pass
+
+    normalized_ext = ALLOWED_IMAGE_FORMATS.get(image_format)
+    if not normalized_ext:
+        return False, "仅支持 JPG、PNG、WebP、GIF 图片", None
+    return True, None, normalized_ext
+
+
+def build_safe_upload_path(prefix: str, extension: str, owner: str | int | None = None) -> str:
+    now = timezone.localtime()
+    random_name = get_random_string(20, allowed_chars="abcdefghijklmnopqrstuvwxyz0123456789")
+    date_path = now.strftime("%Y/%m")
+    owner_path = f"{owner}/" if owner is not None and owner != "" else ""
+    return f"{prefix}/{owner_path}{date_path}/{random_name}{extension}"
+
+
+def normalize_display_name(value: str) -> str:
+    text = (value or "").strip()
+    return " ".join(text.split())
+
+
+def find_duplicate_hotel(name: str, exclude_id: int | None = None):
+    normalized_name = normalize_display_name(name)
+    if not normalized_name:
+        return None
+    queryset = Hotel.objects.filter(name__iexact=normalized_name)
+    if exclude_id:
+        queryset = queryset.exclude(id=exclude_id)
+    return queryset.only("id", "name").first()
+
+
+def find_duplicate_room_type(hotel_id: int, room_name: str, exclude_id: int | None = None):
+    normalized_name = normalize_display_name(room_name)
+    if not normalized_name:
+        return None
+    queryset = RoomType.objects.filter(hotel_id=hotel_id, name__iexact=normalized_name)
+    if exclude_id:
+        queryset = queryset.exclude(id=exclude_id)
+    return queryset.only("id", "name").first()
+
+
+def is_order_checkout_overdue(order: BookingOrder, *, today=None) -> bool:
+    current_day = today or timezone.localdate()
+    check_out_date = getattr(order, "check_out_date", None)
+    return bool(check_out_date and check_out_date < current_day)
+
+
+def append_order_operator_remark(order: BookingOrder, message: str) -> bool:
+    from apps.bookings.tasks import append_operator_remark
+
+    return append_operator_remark(order, message)
 
 
 def mask_mobile(mobile: str) -> str:
@@ -289,6 +392,71 @@ def fallback_ai_reply(scene: str) -> str:
         "hotel_compare": "暂无对比结果，请稍后重试。",
     }
     return _FALLBACKS.get(scene, f"当前为 {scene} 场景的占位回复。")
+
+
+def persist_ai_chat_turn(
+    *,
+    user: User,
+    scene: str,
+    question: str,
+    answer: str,
+    session_id: int | None = None,
+) -> ChatSession:
+    """持久化一轮 AI 对话（用户问题 + 助手回复），并维护会话统计。"""
+    normalized_question = (question or "").strip()
+    normalized_answer = (answer or "").strip()
+    now = timezone.now()
+
+    session = None
+    if session_id:
+        session = ChatSession.objects.filter(id=session_id, user=user).first()
+
+    if session is None:
+        title_source = normalized_question or normalized_answer or "新会话"
+        session = ChatSession.objects.create(
+            user=user,
+            scene=scene,
+            title=title_source[:200],
+            message_count=0,
+            last_message_at=now,
+        )
+    else:
+        update_fields = []
+        if session.scene != scene:
+            session.scene = scene
+            update_fields.append("scene")
+        if not session.title and normalized_question:
+            session.title = normalized_question[:200]
+            update_fields.append("title")
+        if update_fields:
+            update_fields.append("updated_at")
+            session.save(update_fields=update_fields)
+
+    pending_messages = []
+    if normalized_question:
+        pending_messages.append(
+            ChatMessage(
+                session=session,
+                role=ChatMessage.ROLE_USER,
+                content=normalized_question,
+            )
+        )
+    if normalized_answer:
+        pending_messages.append(
+            ChatMessage(
+                session=session,
+                role=ChatMessage.ROLE_ASSISTANT,
+                content=normalized_answer,
+            )
+        )
+    if pending_messages:
+        ChatMessage.objects.bulk_create(pending_messages)
+
+    message_count = ChatMessage.objects.filter(session=session).count()
+    session.message_count = message_count
+    session.last_message_at = now
+    session.save(update_fields=["message_count", "last_message_at", "updated_at"])
+    return session
 
 
 def get_dict_payload() -> dict:
@@ -356,9 +524,7 @@ class SystemInitCheckView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request):
-        has_admin = UserProfile.objects.filter(
-            role__in=[UserProfile.ROLE_SYSTEM_ADMIN, UserProfile.ROLE_HOTEL_ADMIN]
-        ).exists()
+        has_admin = UserProfile.objects.filter(role=UserProfile.ROLE_SYSTEM_ADMIN).exists()
         return api_response(data={"initialized": has_admin})
 
 
@@ -368,9 +534,7 @@ class SystemInitSetupView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        has_admin = UserProfile.objects.filter(
-            role__in=[UserProfile.ROLE_SYSTEM_ADMIN, UserProfile.ROLE_HOTEL_ADMIN]
-        ).exists()
+        has_admin = UserProfile.objects.filter(role=UserProfile.ROLE_SYSTEM_ADMIN).exists()
         if has_admin:
             return api_response(code=4030, message="系统已初始化，无法重复创建", data=None, status_code=403)
 
@@ -526,9 +690,16 @@ class CommonUploadView(APIView):
             return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         file_obj = serializer.validated_data["file"]
         scene = serializer.validated_data["scene"]
-        path = default_storage.save(f"uploads/{scene}/{file_obj.name}", file_obj)
-        file_url = f"/media/{path}"
-        return api_response(data={"file_name": file_obj.name, "file_url": file_url, "scene": scene})
+        valid, error_message, extension = validate_image_upload(file_obj)
+        if not valid:
+            return api_response(code=4001, message=error_message or "上传失败", data=None, status_code=400)
+
+        path = default_storage.save(
+            build_safe_upload_path(prefix=f"uploads/{scene}", extension=extension or ".jpg"),
+            file_obj,
+        )
+        file_url = f"{settings.MEDIA_URL}{path}"
+        return api_response(data={"file_name": Path(path).name, "file_url": file_url, "scene": scene})
 
 
 class CommonImageThumbView(APIView):
@@ -572,7 +743,10 @@ class CommonImageThumbView(APIView):
         except (UnidentifiedImageError, OSError):
             return api_response(code=4001, message="invalid image", data=None, status_code=400)
 
-        cache_path.write_bytes(content)
+        try:
+            cache_path.write_bytes(content)
+        except OSError:
+            logger.warning("thumbnail cache write failed for %s", source_path, exc_info=True)
         resp = HttpResponse(content, content_type="image/jpeg")
         resp["Cache-Control"] = "public, max-age=604800, immutable"
         return resp
@@ -763,9 +937,15 @@ class UserProfileAvatarView(APIView):
         file_obj = request.FILES.get("avatar")
         if not file_obj:
             return api_response(code=4002, message="缺少 avatar", data=None, status_code=400)
-        path = default_storage.save(f"avatars/{request.user.id}/{file_obj.name}", file_obj)
+        valid, error_message, extension = validate_image_upload(file_obj)
+        if not valid:
+            return api_response(code=4001, message=error_message or "头像上传失败", data=None, status_code=400)
+        path = default_storage.save(
+            build_safe_upload_path(prefix="avatars", owner=request.user.id, extension=extension or ".jpg"),
+            file_obj,
+        )
         profile = ensure_profile(request.user)
-        profile.avatar = f"/media/{path}"
+        profile.avatar = f"{settings.MEDIA_URL}{path}"
         profile.save(update_fields=["avatar", "updated_at"])
         return api_response(data={"avatar": profile.avatar})
 
@@ -974,9 +1154,11 @@ class UserOrdersCreateView(APIView):
         )
 
         # 自动取消未支付订单
-        from apps.bookings.tasks import auto_cancel_unpaid_order
         cancel_minutes = PlatformConfig.load().order_auto_cancel_minutes
-        auto_cancel_unpaid_order.apply_async(args=[order.id], countdown=cancel_minutes * 60)
+        from apps.bookings.tasks import auto_cancel_unpaid_order
+        transaction.on_commit(
+            lambda: auto_cancel_unpaid_order.apply_async(args=[order.id], countdown=cancel_minutes * 60)
+        )
 
         return api_response(
             data={
@@ -1026,6 +1208,23 @@ class UserOrdersPayView(APIView):
             return api_response(code=4040, message="订单不存在", data=None, status_code=404)
         if order.payment_status == BookingOrder.PAYMENT_PAID:
             return api_response(code=4093, message="订单已支付", data=None, status_code=409)
+        if order.status != BookingOrder.STATUS_PENDING_PAYMENT:
+            return api_response(code=4093, message="当前订单状态不允许支付", data=None, status_code=409)
+
+        cancel_minutes = PlatformConfig.load().order_auto_cancel_minutes
+        timeout_deadline = order.created_at + timedelta(minutes=cancel_minutes)
+        if timezone.now() >= timeout_deadline:
+            from apps.bookings.tasks import cancel_timeout_unpaid_order
+
+            with transaction.atomic():
+                locked_order = BookingOrder.objects.select_for_update().filter(id=order.id, user=request.user).first()
+                if not locked_order:
+                    return api_response(code=4040, message="订单不存在", data=None, status_code=404)
+                cancelled = cancel_timeout_unpaid_order(locked_order, cancel_minutes=cancel_minutes)
+            if cancelled:
+                return api_response(code=4093, message="订单已超时未支付，已自动取消，请重新下单", data=None, status_code=409)
+            # 若并发窗口内已被他人支付/取消，统一返回状态冲突
+            return api_response(code=4093, message="当前订单状态不允许支付", data=None, status_code=409)
 
         payment = PaymentRecord.objects.create(
             order=order,
@@ -1035,9 +1234,12 @@ class UserOrdersPayView(APIView):
             amount=order.pay_amount,
             paid_at=timezone.now(),
         )
+        paid_at = payment.paid_at or timezone.now()
         order.payment_status = BookingOrder.PAYMENT_PAID
         order.status = BookingOrder.STATUS_PAID
-        order.save(update_fields=["payment_status", "status", "updated_at"])
+        if not order.paid_at:
+            order.paid_at = paid_at
+        order.save(update_fields=["payment_status", "status", "paid_at", "updated_at"])
 
         # 支付成功后奖励积分：每消费10元=1积分 × 会员倍率
         profile = ensure_profile(request.user)
@@ -1076,8 +1278,9 @@ class UserOrdersCancelView(APIView):
         if order.status in {BookingOrder.STATUS_COMPLETED, BookingOrder.STATUS_CANCELLED, BookingOrder.STATUS_CHECKED_IN}:
             return api_response(code=4093, message="当前状态不允许取消", data=None, status_code=409)
         order.status = BookingOrder.STATUS_CANCELLED
+        order.cancelled_at = timezone.now()
         order.operator_remark = data.get("reason", "")
-        order.save(update_fields=["status", "operator_remark", "updated_at"])
+        order.save(update_fields=["status", "cancelled_at", "operator_remark", "updated_at"])
         return api_response(data={"order_id": order.id, "status": order.status})
 
 
@@ -1281,53 +1484,58 @@ class UserClaimCouponView(APIView):
         serializer = ClaimCouponSerializer(data=request.data)
         if not serializer.is_valid():
             return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
-        tpl = CouponTemplate.objects.filter(id=serializer.validated_data["template_id"]).first()
-        if not tpl:
-            return api_response(code=4040, message="优惠券不存在", data=None, status_code=404)
-        today = timezone.localdate()
-        if tpl.status != CouponTemplate.STATUS_ACTIVE or today < tpl.valid_start or today > tpl.valid_end:
-            return api_response(code=4001, message="优惠券活动已结束", data=None, status_code=400)
-        if tpl.remaining <= 0:
-            return api_response(code=4001, message="优惠券已领完", data=None, status_code=400)
-        profile = ensure_profile(request.user)
-        if tpl.required_level:
-            thresholds = UserProfile.MEMBER_THRESHOLDS
-            if thresholds.get(profile.member_level, 0) < thresholds.get(tpl.required_level, 0):
-                level_name = dict(UserProfile.MEMBER_LEVEL_CHOICES).get(tpl.required_level, tpl.required_level)
-                return api_response(code=4001, message=f"需要达到{level_name}才能领取", data=None, status_code=400)
-        claimed = UserCoupon.objects.filter(user=request.user, template=tpl).count()
-        if claimed >= tpl.per_user_limit:
-            return api_response(code=4001, message="已达领取上限", data=None, status_code=400)
-        if tpl.points_cost > 0:
-            if profile.points < tpl.points_cost:
-                return api_response(code=4001, message=f"积分不足，需要 {tpl.points_cost} 积分", data=None, status_code=400)
-            add_points(request.user, -tpl.points_cost, PointsLog.TYPE_COUPON_EXCHANGE, f"兑换优惠券「{tpl.name}」")
+        with transaction.atomic():
+            tpl = CouponTemplate.objects.select_for_update().filter(id=serializer.validated_data["template_id"]).first()
+            if not tpl:
+                return api_response(code=4040, message="优惠券不存在", data=None, status_code=404)
 
-        valid_start = today
-        valid_end = today + timedelta(days=tpl.valid_days)
-        if valid_end > tpl.valid_end:
-            valid_end = tpl.valid_end
-        coupon = UserCoupon.objects.create(
-            user=request.user,
-            template=tpl,
-            name=tpl.name,
-            coupon_type=tpl.coupon_type,
-            amount=tpl.amount,
-            discount=tpl.discount,
-            min_amount=tpl.min_amount,
-            valid_start=valid_start,
-            valid_end=valid_end,
-        )
-        tpl.claimed_count += 1
-        tpl.save(update_fields=["claimed_count", "updated_at"])
-        coupon_type_name = "折扣券" if tpl.coupon_type == CouponTemplate.TYPE_DISCOUNT else "满减券"
-        SystemNotice.objects.create(
-            user=request.user,
-            notice_type=SystemNotice.TYPE_COUPON,
-            title=f"优惠券已到账",
-            content=f"您已成功领取「{tpl.name}」{coupon_type_name}，有效期至 {valid_end.strftime('%Y-%m-%d')}，快去使用吧！",
-        )
-        return api_response(data=UserCouponSerializer(coupon).data)
+            today = timezone.localdate()
+            if tpl.status != CouponTemplate.STATUS_ACTIVE or today < tpl.valid_start or today > tpl.valid_end:
+                return api_response(code=4001, message="优惠券活动已结束", data=None, status_code=400)
+            if tpl.remaining <= 0:
+                return api_response(code=4001, message="优惠券已领完", data=None, status_code=400)
+
+            profile = ensure_profile(request.user)
+            if tpl.required_level:
+                thresholds = UserProfile.MEMBER_THRESHOLDS
+                if thresholds.get(profile.member_level, 0) < thresholds.get(tpl.required_level, 0):
+                    level_name = dict(UserProfile.MEMBER_LEVEL_CHOICES).get(tpl.required_level, tpl.required_level)
+                    return api_response(code=4001, message=f"需要达到{level_name}才能领取", data=None, status_code=400)
+
+            claimed = UserCoupon.objects.filter(user=request.user, template=tpl).count()
+            if claimed >= tpl.per_user_limit:
+                return api_response(code=4001, message="已达领取上限", data=None, status_code=400)
+
+            if tpl.points_cost > 0:
+                if profile.points < tpl.points_cost:
+                    return api_response(code=4001, message=f"积分不足，需要 {tpl.points_cost} 积分", data=None, status_code=400)
+                add_points(request.user, -tpl.points_cost, PointsLog.TYPE_COUPON_EXCHANGE, f"兑换优惠券「{tpl.name}」")
+
+            valid_start = today
+            valid_end = today + timedelta(days=tpl.valid_days)
+            if valid_end > tpl.valid_end:
+                valid_end = tpl.valid_end
+            coupon = UserCoupon.objects.create(
+                user=request.user,
+                template=tpl,
+                name=tpl.name,
+                coupon_type=tpl.coupon_type,
+                amount=tpl.amount,
+                discount=tpl.discount,
+                min_amount=tpl.min_amount,
+                valid_start=valid_start,
+                valid_end=valid_end,
+            )
+            tpl.claimed_count += 1
+            tpl.save(update_fields=["claimed_count", "updated_at"])
+            coupon_type_name = "折扣券" if tpl.coupon_type == CouponTemplate.TYPE_DISCOUNT else "满减券"
+            SystemNotice.objects.create(
+                user=request.user,
+                notice_type=SystemNotice.TYPE_COUPON,
+                title=f"优惠券已到账",
+                content=f"您已成功领取「{tpl.name}」{coupon_type_name}，有效期至 {valid_end.strftime('%Y-%m-%d')}，快去使用吧！",
+            )
+            return api_response(data=UserCouponSerializer(coupon).data)
 
 
 class UserOrderAvailableCouponsView(APIView):
@@ -1415,11 +1623,19 @@ class UserAIChatView(APIView):
             return api_response(code=4002, message=str(exc), data=None, status_code=400)
 
         answer = result["answer"] or fallback_ai_reply(result["scene"])
+        session = persist_ai_chat_turn(
+            user=request.user,
+            scene=result["scene"],
+            question=data["question"],
+            answer=answer,
+            session_id=data.get("session_id"),
+        )
         return api_response(
             data={
                 "answer": answer,
                 "scene": result["scene"],
                 "booking_assistant": result.get("booking_assistant"),
+                "session_id": session.id,
             }
         )
 
@@ -1450,38 +1666,26 @@ class UserAIChatStreamView(APIView):
             return api_response(code=4002, message=str(exc), data=None, status_code=400)
 
         scene = result["scene"]
+        answer = result["answer"] or fallback_ai_reply(scene)
         booking_assistant = result.get("booking_assistant")
+        session = persist_ai_chat_turn(
+            user=request.user,
+            scene=scene,
+            question=data["question"],
+            answer=answer,
+            session_id=data.get("session_id"),
+        )
 
         def event_stream():
             try:
+                meta_payload = {"type": "meta", "scene": scene, "session_id": session.id}
                 if booking_assistant is not None:
-                    yield f"data: {json.dumps({'type': 'meta', 'scene': scene, 'booking_assistant': booking_assistant}, ensure_ascii=False)}\n\n"
-                    answer = result["answer"] or fallback_ai_reply(scene)
-                    for chunk in service.iter_text_chunks(answer):
-                        yield f"data: {json.dumps({'type': 'chunk', 'content': chunk, 'done': False}, ensure_ascii=False)}\n\n"
-                    yield f"data: {json.dumps({'type': 'done', 'content': '', 'done': True}, ensure_ascii=False)}\n\n"
-                    return
+                    meta_payload["booking_assistant"] = booking_assistant
+                yield f"data: {json.dumps(meta_payload, ensure_ascii=False)}\n\n"
 
-                if not service.is_available():
-                    fallback = fallback_ai_reply(scene)
-                    yield f"data: {json.dumps({'type': 'chunk', 'content': fallback, 'done': False}, ensure_ascii=False)}\n\n"
-                    yield f"data: {json.dumps({'type': 'done', 'content': '', 'done': True})}\n\n"
-                    return
-
-                _, messages = service.build_customer_service_messages(
-                    user=request.user,
-                    scene=scene,
-                    question=data["question"],
-                    hotel_id=data.get("hotel_id"),
-                    order_id=data.get("order_id"),
-                )
-                stream = service.stream_chat_completion(messages, temperature=0.2)
-                for chunk in stream:
-                    delta = chunk.choices[0].delta if chunk.choices else None
-                    token = (delta.content or "") if delta else ""
-                    done = (chunk.choices[0].finish_reason is not None) if chunk.choices else False
-                    event_type = 'done' if done else 'chunk'
-                    yield f"data: {json.dumps({'type': event_type, 'content': token, 'done': done}, ensure_ascii=False)}\n\n"
+                for chunk in service.iter_text_chunks(answer):
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk, 'done': False}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'done', 'content': '', 'done': True, 'session_id': session.id}, ensure_ascii=False)}\n\n"
             except Exception:
                 fallback = fallback_ai_reply(scene)
                 yield f"data: {json.dumps({'type': 'chunk', 'content': fallback, 'done': False}, ensure_ascii=False)}\n\n"
@@ -1583,6 +1787,23 @@ class AdminHotelsView(APIView):
             serializer = HotelCreateSerializer(data=request.data)
             if not serializer.is_valid():
                 return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
+            normalized_name = normalize_display_name(serializer.validated_data.get("name", ""))
+            if not normalized_name:
+                return api_response(
+                    code=4001,
+                    message="酒店名称不能为空",
+                    data={"errors": {"name": ["酒店名称不能为空"]}},
+                    status_code=400,
+                )
+            duplicate = find_duplicate_hotel(normalized_name)
+            if duplicate:
+                return api_response(
+                    code=4090,
+                    message="酒店名称已存在，请勿重复创建",
+                    data={"errors": {"name": ["酒店名称已存在"]}},
+                    status_code=409,
+                )
+            serializer.validated_data["name"] = normalized_name
             hotel = serializer.save()
             return api_response(data=HotelSimpleSerializer(hotel).data)
         if request.path.endswith("/update"):
@@ -1592,6 +1813,24 @@ class AdminHotelsView(APIView):
             hotel = Hotel.objects.filter(pk=serializer.validated_data["hotel_id"]).first()
             if not hotel:
                 return api_response(code=4040, message="酒店不存在", data=None, status_code=404)
+            if "name" in serializer.validated_data:
+                normalized_name = normalize_display_name(serializer.validated_data.get("name", ""))
+                if not normalized_name:
+                    return api_response(
+                        code=4001,
+                        message="酒店名称不能为空",
+                        data={"errors": {"name": ["酒店名称不能为空"]}},
+                        status_code=400,
+                    )
+                duplicate = find_duplicate_hotel(normalized_name, exclude_id=hotel.id)
+                if duplicate:
+                    return api_response(
+                        code=4090,
+                        message="酒店名称已存在，请勿重复创建",
+                        data={"errors": {"name": ["酒店名称已存在"]}},
+                        status_code=409,
+                    )
+                serializer.validated_data["name"] = normalized_name
             for field, value in serializer.validated_data.items():
                 if field != "hotel_id":
                     setattr(hotel, field, value)
@@ -1641,6 +1880,24 @@ class AdminRoomTypesView(APIView):
             serializer = RoomTypeCreateSerializer(data=request.data)
             if not serializer.is_valid():
                 return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
+            hotel_id = int(serializer.validated_data["hotel"].id)
+            normalized_name = normalize_display_name(serializer.validated_data.get("name", ""))
+            if not normalized_name:
+                return api_response(
+                    code=4001,
+                    message="房型名称不能为空",
+                    data={"errors": {"name": ["房型名称不能为空"]}},
+                    status_code=400,
+                )
+            duplicate = find_duplicate_room_type(hotel_id=hotel_id, room_name=normalized_name)
+            if duplicate:
+                return api_response(
+                    code=4090,
+                    message="该酒店下已存在同名房型，请勿重复创建",
+                    data={"errors": {"name": ["该酒店下已存在同名房型"]}},
+                    status_code=409,
+                )
+            serializer.validated_data["name"] = normalized_name
             room_type = serializer.save()
             return api_response(data=RoomTypeSerializer(room_type).data)
         if request.path.endswith("/update"):
@@ -1650,6 +1907,29 @@ class AdminRoomTypesView(APIView):
             room_type = RoomType.objects.filter(pk=serializer.validated_data["room_type_id"]).first()
             if not room_type:
                 return api_response(code=4040, message="房型不存在", data=None, status_code=404)
+            next_hotel_id = int(serializer.validated_data.get("hotel", room_type.hotel).id)
+            if "name" in serializer.validated_data:
+                normalized_name = normalize_display_name(serializer.validated_data.get("name", ""))
+                if not normalized_name:
+                    return api_response(
+                        code=4001,
+                        message="房型名称不能为空",
+                        data={"errors": {"name": ["房型名称不能为空"]}},
+                        status_code=400,
+                    )
+                duplicate = find_duplicate_room_type(
+                    hotel_id=next_hotel_id,
+                    room_name=normalized_name,
+                    exclude_id=room_type.id,
+                )
+                if duplicate:
+                    return api_response(
+                        code=4090,
+                        message="该酒店下已存在同名房型，请勿重复创建",
+                        data={"errors": {"name": ["该酒店下已存在同名房型"]}},
+                        status_code=409,
+                    )
+                serializer.validated_data["name"] = normalized_name
             for field, value in serializer.validated_data.items():
                 if field != "room_type_id":
                     setattr(room_type, field, value)
@@ -1670,29 +1950,33 @@ class AdminInventoryView(APIView):
         room_type_id = request.query_params.get("room_type_id")
         start_date = parse_date(request.query_params.get("start_date", ""))
         end_date = parse_date(request.query_params.get("end_date", ""))
-        if room_type_id and start_date and end_date and start_date <= end_date:
-            existing = RoomInventory.objects.filter(
-                room_type_id=room_type_id,
-                date__gte=start_date,
-                date__lte=end_date,
-            ).exists()
-            if not existing:
-                room_type = RoomType.objects.filter(pk=room_type_id).first()
+        if room_type_id and start_date and end_date and start_date > end_date:
+            return api_response(code=4001, message="开始日期不能晚于结束日期", data=None, status_code=400)
+
+        if room_type_id and start_date and end_date:
+            with transaction.atomic():
+                room_type = RoomType.objects.select_for_update().filter(pk=room_type_id).first()
                 if room_type:
-                    to_create = []
-                    current = start_date
-                    while current <= end_date:
-                        to_create.append(
-                            RoomInventory(
-                                room_type_id=room_type.id,
-                                date=current,
-                                price=room_type.base_price,
-                                stock=room_type.stock,
-                                status=RoomInventory.STATUS_AVAILABLE,
+                    existing = RoomInventory.objects.filter(
+                        room_type_id=room_type_id,
+                        date__gte=start_date,
+                        date__lte=end_date,
+                    ).exists()
+                    if not existing:
+                        to_create = []
+                        current = start_date
+                        while current <= end_date:
+                            to_create.append(
+                                RoomInventory(
+                                    room_type_id=room_type.id,
+                                    date=current,
+                                    price=room_type.base_price,
+                                    stock=room_type.stock,
+                                    status=RoomInventory.STATUS_AVAILABLE,
+                                )
                             )
-                        )
-                        current += timedelta(days=1)
-                    RoomInventory.objects.bulk_create(to_create, ignore_conflicts=True)
+                            current += timedelta(days=1)
+                        RoomInventory.objects.bulk_create(to_create)
         queryset = RoomInventory.objects.all()
         if room_type_id:
             queryset = queryset.filter(room_type_id=room_type_id)
@@ -1752,7 +2036,9 @@ class AdminOrdersDetailView(APIView):
         order = BookingOrder.objects.filter(id=order_id).select_related("hotel", "room_type").first()
         if not order:
             return api_response(code=4040, message="订单不存在", data=None, status_code=404)
-        return api_response(data=BookingOrderSerializer(order).data)
+        payload = BookingOrderSerializer(order).data
+        payload["payments"] = PaymentRecordSerializer(order.payments.order_by("-id"), many=True).data
+        return api_response(data=payload)
 
 
 class AdminOrdersChangeStatusView(APIView):
@@ -1767,8 +2053,62 @@ class AdminOrdersChangeStatusView(APIView):
         if not order:
             return api_response(code=4040, message="订单不存在", data=None, status_code=404)
         target_status = serializer.validated_data["target_status"]
+        today = timezone.localdate()
+
+        closed_statuses = {
+            BookingOrder.STATUS_COMPLETED,
+            BookingOrder.STATUS_CANCELLED,
+            BookingOrder.STATUS_REFUNDED,
+        }
+        if order.status in closed_statuses and target_status != order.status:
+            return api_response(code=4093, message="当前订单已关闭，无法再变更状态", data=None, status_code=409)
+        if target_status == BookingOrder.STATUS_PENDING_PAYMENT:
+            return api_response(code=4093, message="不支持手动回退为待支付状态", data=None, status_code=409)
+
+        if target_status == BookingOrder.STATUS_CONFIRMED and order.status != BookingOrder.STATUS_PAID:
+            return api_response(code=4093, message="仅已支付订单可确认", data=None, status_code=409)
+        if target_status == BookingOrder.STATUS_CHECKED_IN:
+            if order.status not in {BookingOrder.STATUS_PAID, BookingOrder.STATUS_CONFIRMED}:
+                return api_response(code=4093, message="当前订单状态不允许办理入住", data=None, status_code=409)
+            if order.payment_status != BookingOrder.PAYMENT_PAID:
+                return api_response(code=4093, message="订单未支付，无法办理入住", data=None, status_code=409)
+            if is_order_checkout_overdue(order, today=today):
+                return api_response(code=4093, message="订单已超过离店日期，无法办理入住，请人工核查", data=None, status_code=409)
+
+        should_mark_direct_complete = False
+        if target_status == BookingOrder.STATUS_COMPLETED:
+            if order.status not in {BookingOrder.STATUS_CHECKED_IN, BookingOrder.STATUS_PAID, BookingOrder.STATUS_CONFIRMED}:
+                return api_response(code=4093, message="当前订单状态不允许直接完结", data=None, status_code=409)
+            if order.payment_status != BookingOrder.PAYMENT_PAID:
+                return api_response(code=4093, message="订单未支付，无法完结", data=None, status_code=409)
+            if order.status in {BookingOrder.STATUS_PAID, BookingOrder.STATUS_CONFIRMED}:
+                if not is_order_checkout_overdue(order, today=today):
+                    return api_response(code=4093, message="未到离店日期，请先办理入住后再退房", data=None, status_code=409)
+                should_mark_direct_complete = True
+
         order.status = target_status
-        order.save(update_fields=["status", "updated_at"])
+        update_fields = ["status", "updated_at"]
+        now = timezone.now()
+        if target_status == BookingOrder.STATUS_PAID and not order.paid_at:
+            order.paid_at = now
+            update_fields.append("paid_at")
+        if target_status == BookingOrder.STATUS_CONFIRMED and not order.confirmed_at:
+            order.confirmed_at = now
+            update_fields.append("confirmed_at")
+        if target_status == BookingOrder.STATUS_CHECKED_IN and not order.checked_in_at:
+            order.checked_in_at = now
+            update_fields.append("checked_in_at")
+        if target_status == BookingOrder.STATUS_COMPLETED and not order.completed_at:
+            order.completed_at = now
+            update_fields.append("completed_at")
+        if target_status == BookingOrder.STATUS_CANCELLED and not order.cancelled_at:
+            order.cancelled_at = now
+            update_fields.append("cancelled_at")
+        if should_mark_direct_complete:
+            note = f"系统提示：离店日 {order.check_out_date} 已过，人工直接完结（未登记入住）"
+            if append_order_operator_remark(order, note):
+                update_fields.append("operator_remark")
+        order.save(update_fields=update_fields)
         # 发送订单状态变更通知
         _notice_map = {
             BookingOrder.STATUS_CONFIRMED: (
@@ -1803,10 +2143,23 @@ class AdminOrdersCheckInView(APIView):
         order = BookingOrder.objects.filter(id=data["order_id"]).select_related("user").first()
         if not order:
             return api_response(code=4040, message="订单不存在", data=None, status_code=404)
+
+        if order.status not in {BookingOrder.STATUS_PAID, BookingOrder.STATUS_CONFIRMED}:
+            return api_response(code=4093, message="当前订单状态不允许办理入住", data=None, status_code=409)
+        if order.payment_status != BookingOrder.PAYMENT_PAID:
+            return api_response(code=4093, message="订单未支付，无法办理入住", data=None, status_code=409)
+        if is_order_checkout_overdue(order):
+            return api_response(code=4093, message="订单已超过离店日期，无法办理入住，请人工核查", data=None, status_code=409)
+
+        order_remark = (data.get("operator_remark", "") or "").strip()
         order.status = BookingOrder.STATUS_CHECKED_IN
+        if not order.checked_in_at:
+            order.checked_in_at = timezone.now()
         order.room_no = data["room_no"]
-        order.operator_remark = data.get("operator_remark", "")
-        order.save(update_fields=["status", "room_no", "operator_remark", "updated_at"])
+        update_fields = ["status", "checked_in_at", "room_no", "updated_at"]
+        if order_remark and append_order_operator_remark(order, order_remark):
+            update_fields.append("operator_remark")
+        order.save(update_fields=update_fields)
         SystemNotice.objects.create(
             user=order.user,
             notice_type=SystemNotice.TYPE_ORDER,
@@ -1828,9 +2181,39 @@ class AdminOrdersCheckOutView(APIView):
         order = BookingOrder.objects.filter(id=data["order_id"]).select_related("user").first()
         if not order:
             return api_response(code=4040, message="订单不存在", data=None, status_code=404)
+
+        if order.status in {
+            BookingOrder.STATUS_COMPLETED,
+            BookingOrder.STATUS_CANCELLED,
+            BookingOrder.STATUS_REFUNDED,
+            BookingOrder.STATUS_REFUNDING,
+        }:
+            return api_response(code=4093, message="当前订单状态不允许办理退房", data=None, status_code=409)
+        if order.status not in {BookingOrder.STATUS_CHECKED_IN, BookingOrder.STATUS_PAID, BookingOrder.STATUS_CONFIRMED}:
+            return api_response(code=4093, message="当前订单状态不允许办理退房", data=None, status_code=409)
+        if order.payment_status != BookingOrder.PAYMENT_PAID:
+            return api_response(code=4093, message="订单未支付，无法办理退房", data=None, status_code=409)
+
+        overdue_without_checkin = order.status in {BookingOrder.STATUS_PAID, BookingOrder.STATUS_CONFIRMED}
+        if overdue_without_checkin and not is_order_checkout_overdue(order):
+            return api_response(code=4093, message="未到离店日期，请先办理入住", data=None, status_code=409)
+
+        previous_status = order.status
+        manual_remark = (data.get("operator_remark", "") or "").strip()
+        update_fields = ["status", "completed_at", "updated_at"]
         order.status = BookingOrder.STATUS_COMPLETED
-        order.operator_remark = data.get("operator_remark", "")
-        order.save(update_fields=["status", "operator_remark", "updated_at"])
+        if not order.completed_at:
+            order.completed_at = timezone.now()
+        remark_updated = False
+        if manual_remark and append_order_operator_remark(order, manual_remark):
+            remark_updated = True
+        if overdue_without_checkin:
+            note = f"系统提示：离店日 {order.check_out_date} 已过，补录退房（未登记入住）"
+            if append_order_operator_remark(order, note):
+                remark_updated = True
+        if remark_updated:
+            update_fields.append("operator_remark")
+        order.save(update_fields=update_fields)
         SystemNotice.objects.create(
             user=order.user,
             notice_type=SystemNotice.TYPE_ORDER,
@@ -1838,7 +2221,8 @@ class AdminOrdersCheckOutView(APIView):
             content=f"订单 {order.order_no} 已办理退房，感谢您的入住，期待再次欢迎您！",
         )
         # 退房完成后奖励积分
-        add_points(order.user, 20, PointsLog.TYPE_CONSUME_REWARD, f"订单 {order.order_no} 入住奖励", order=order)
+        if previous_status == BookingOrder.STATUS_CHECKED_IN:
+            add_points(order.user, 20, PointsLog.TYPE_CONSUME_REWARD, f"订单 {order.order_no} 入住奖励", order=order)
         return api_response(data={"order_id": order.id, "status": order.status})
 
 
@@ -2824,7 +3208,7 @@ class UserAIRecommendationsView(APIView):
         limit = data.get("limit", 6)
 
         def _fallback():
-            hotels = Hotel.objects.filter(status="published").order_by("-created_at")[:limit]
+            hotels = Hotel.objects.filter(status=Hotel.STATUS_ONLINE).order_by("-created_at")[:limit]
             return [
                 {
                     "id": h.id, "name": h.name, "city": h.city, "star": h.star,
@@ -2868,40 +3252,97 @@ class UserAIHotelCompareView(APIView):
     """用户 AI 对比接口：对 2-3 家酒店进行多维度智能对比分析。"""
     permission_classes = [IsAuthenticated]
 
+    def _serialize_hotels(self, hotels):
+        serialized = []
+        for hotel in hotels:
+            room_types = list(
+                hotel.room_types.filter(status=RoomType.STATUS_ONLINE).order_by("base_price")[:3]
+            )
+            serialized.append({
+                "id": hotel.id,
+                "name": hotel.name,
+                "city": hotel.city,
+                "star": hotel.star,
+                "rating": float(hotel.rating),
+                "min_price": float(hotel.min_price),
+                "address": hotel.address,
+                "description": (hotel.description or "")[:200],
+                "room_types": [
+                    {
+                        "name": room.name,
+                        "bed_type": room.get_bed_type_display(),
+                        "area": room.area,
+                        "price": float(room.base_price),
+                    }
+                    for room in room_types
+                ],
+            })
+        return serialized
+
+    def _build_fallback_result(self, hotels, recommendation: str):
+        return {
+            "scene": "hotel_compare",
+            "hotels": self._serialize_hotels(hotels),
+            "comparison": None,
+            "ai_summary": "",
+            "recommendation": recommendation,
+            "dimensions": [],
+            "winner_id": None,
+            "winner_reason": "",
+            "ai_generated": False,
+        }
+
     def post(self, request):
         serializer = AIHotelCompareSerializer(data=request.data)
         if not serializer.is_valid():
             return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
+
         data = serializer.validated_data
         hotel_ids = data["hotel_ids"]
-        hotels = Hotel.objects.filter(id__in=hotel_ids, status="published")
-        if hotels.count() < 2:
-            return api_response(code=4040, message="有效酒店数量不足，请检查酒店 ID", data=None, status_code=404)
+
+        hotels_by_id = {
+            hotel.id: hotel
+            for hotel in Hotel.objects.filter(
+                id__in=hotel_ids, status=Hotel.STATUS_ONLINE
+            ).prefetch_related("room_types")
+        }
+        hotels = [hotels_by_id[hid] for hid in hotel_ids if hid in hotels_by_id]
+        if len(hotels) < 2:
+            return api_response(
+                code=4001,
+                message="可对比酒店不足，只有上架酒店可参与对比",
+                data={"errors": {"hotel_ids": ["至少需要 2 家上架酒店"]}},
+                status_code=400,
+            )
+
         service = AIChatService()
         if not service.is_available():
-            return api_response(data={"scene": "hotel_compare", "comparison": None, "message": fallback_ai_reply("hotel_compare")})
+            return api_response(data=self._build_fallback_result(hotels, fallback_ai_reply("hotel_compare")))
+
         try:
             result = service.generate_hotel_compare(
-                hotel_ids=hotel_ids,
+                hotel_ids=[hotel.id for hotel in hotels],
                 check_in_date=data.get("check_in_date"),
                 check_out_date=data.get("check_out_date"),
             )
-            # 直接展开结果，让前端可以无嵌套地访问 recommendation
+            serialized_hotels = result.get("hotels") if isinstance(result.get("hotels"), list) else []
+            if not serialized_hotels:
+                serialized_hotels = self._serialize_hotels(hotels)
+
             return api_response(data={
                 "scene": "hotel_compare",
-                "hotels": result.get("hotels", []),
+                "hotels": serialized_hotels,
+                "comparison": result.get("comparison"),
                 "ai_summary": result.get("ai_summary", ""),
-                "recommendation": result.get("recommendation", ""),
+                "recommendation": result.get("recommendation") or fallback_ai_reply("hotel_compare"),
+                "dimensions": result.get("dimensions", []),
+                "winner_id": result.get("winner_id"),
+                "winner_reason": result.get("winner_reason", ""),
                 "ai_generated": result.get("ai_generated", False),
             })
         except Exception:
-            return api_response(data={
-                "scene": "hotel_compare",
-                "hotels": [],
-                "ai_summary": "",
-                "recommendation": fallback_ai_reply("hotel_compare"),
-                "ai_generated": False,
-            })
+            logger.exception("AI 酒店对比失败，hotel_ids=%s", hotel_ids)
+            return api_response(data=self._build_fallback_result(hotels, fallback_ai_reply("hotel_compare")))
 
 
 class UserAISessionsView(APIView):

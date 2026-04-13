@@ -19,6 +19,20 @@
         <OrderStepBar :status="order.status as string" :timestamps="orderTimestamps" />
       </div>
 
+      <div
+        v-if="lifecycleWarningText"
+        class="mb-6 rounded-2xl border border-rose-200 bg-gradient-to-r from-rose-50 via-white to-rose-50/40 p-5 shadow-sm"
+      >
+        <div class="flex items-start gap-3">
+          <div class="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-rose-100 text-xs font-bold text-rose-600">!</div>
+          <div class="min-w-0">
+            <h3 class="text-sm font-semibold text-rose-700">订单异常提醒</h3>
+            <p class="mt-1 text-sm leading-6 text-rose-600 break-words">{{ lifecycleWarningText }}</p>
+            <p class="mt-2 text-xs text-rose-400">该提示由系统自动识别，请结合订单操作备注进行人工核查。</p>
+          </div>
+        </div>
+      </div>
+
       <div class="grid gap-6 lg:grid-cols-2">
         <!-- 订单基本信息 -->
         <div class="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
@@ -138,6 +152,13 @@ const orderTimestamps = computed<Record<string, string | undefined>>(() => ({
   cancelled:       order.value?.cancelled_at as string | undefined,
 }))
 
+const lifecycleWarningText = computed(() => {
+  const warning = String(order.value?.lifecycle_warning || '').trim()
+  if (warning) return warning
+  const remark = String(order.value?.operator_remark || '').trim()
+  return remark.includes('异常提醒') ? remark : ''
+})
+
 // 根据状态值返回对应展示信息。
 function statusType(status: string) {
   if (status === 'checked_in' || status === 'completed') return 'success' as const
@@ -152,7 +173,14 @@ async function loadDetail() {
   const id = Number(route.params.id)
   const res = await orderApi.detail(id)
   if (res.code === 0 && res.data) {
-    order.value = res.data as Record<string, unknown>
+    const detail = res.data as Record<string, unknown>
+    order.value = detail
+    payments.value = Array.isArray((detail as { payments?: unknown[] }).payments)
+      ? ((detail as { payments?: PaymentItem[] }).payments || [])
+      : []
+  } else {
+    order.value = null
+    payments.value = []
   }
   loading.value = false
 }

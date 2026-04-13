@@ -9,29 +9,31 @@
           <input v-model="filters.keyword" type="text" placeholder="搜索酒店名、城市、商圈..." class="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm outline-none focus:border-brand" @keyup.enter="fetchList" />
         </div>
         <div class="grid grid-cols-2 gap-3 md:flex md:gap-3">
-          <input v-model="filters.check_in_date" type="date" class="rounded-lg border border-gray-200 px-3 py-2.5 text-sm outline-none focus:border-brand" />
-          <input v-model="filters.check_out_date" type="date" class="rounded-lg border border-gray-200 px-3 py-2.5 text-sm outline-none focus:border-brand" />
+          <input v-model="filters.check_in_date" type="date" class="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm outline-none focus:border-brand" />
+          <input v-model="filters.check_out_date" type="date" class="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm outline-none focus:border-brand" />
         </div>
-        <button type="button" @click="onSearch" class="rounded-xl bg-brand px-6 py-2.5 text-sm font-medium text-white transition hover:bg-brand-dark">搜索</button>
+        <button type="button" @click="onSearch" class="w-full rounded-xl bg-brand px-6 py-2.5 text-sm font-medium text-white transition hover:bg-brand-dark md:w-auto">搜索</button>
       </div>
 
       <!-- Filters row -->
-      <div class="mt-3 flex flex-wrap items-center gap-2">
-          <SelectField v-model="filters.star" size="sm">
+      <div class="mt-4 space-y-2">
+        <div class="grid grid-cols-2 gap-2 lg:grid-cols-[150px_180px]">
+          <SelectField v-model="filters.star" size="sm" class="w-full">
             <option value="">全部星级</option>
             <option v-for="s in [5,4,3,2]" :key="s" :value="s">{{ s }}星</option>
           </SelectField>
-          <SelectField v-model="filters.sort" size="sm">
+          <SelectField v-model="filters.sort" size="sm" class="w-full">
             <option value="default">默认排序</option>
             <option value="price_asc">价格低→高</option>
             <option value="price_desc">价格高→低</option>
             <option value="rating_desc">评分优先</option>
             <option value="popular_desc">人气优先</option>
           </SelectField>
-        <div class="flex gap-2">
-          <input v-model.number="filters.min_price" type="number" placeholder="最低价" class="w-20 rounded-lg border border-gray-200 px-2 py-1.5 text-xs outline-none focus:border-brand" />
-          <span class="text-gray-300">-</span>
-          <input v-model.number="filters.max_price" type="number" placeholder="最高价" class="w-20 rounded-lg border border-gray-200 px-2 py-1.5 text-xs outline-none focus:border-brand" />
+        </div>
+        <div class="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 lg:max-w-[260px]">
+          <input v-model.number="filters.min_price" type="number" placeholder="最低价" class="w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs outline-none focus:border-brand" />
+          <span class="text-center text-gray-300">—</span>
+          <input v-model.number="filters.max_price" type="number" placeholder="最高价" class="w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs outline-none focus:border-brand" />
         </div>
       </div>
     </div>
@@ -47,11 +49,16 @@
     </div>
 
     <div v-else class="space-y-4">
-      <router-link v-for="hotel in hotels" :key="hotel.id" :to="`/hotels/${hotel.id}`"
-        class="group flex overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-gray-100 transition hover:shadow-md"
+      <article
+        v-for="hotel in hotels"
+        :key="hotel.id"
+        class="group flex cursor-pointer overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-gray-100 transition hover:shadow-md"
+        tabindex="0"
+        @click="goHotelDetail(hotel.id)"
+        @keydown.enter.prevent="goHotelDetail(hotel.id)"
       >
         <div class="hidden h-36 w-44 shrink-0 overflow-hidden bg-gray-200 sm:block">
-          <img v-if="hotel.image_url" :src="hotel.image_url" :alt="hotel.name" class="h-full w-full object-cover transition group-hover:scale-105" />
+          <img v-if="hotel.image_url" :src="hotel.image_thumb || hotel.image_url" :alt="hotel.name" class="h-full w-full object-cover transition group-hover:scale-105" loading="lazy" decoding="async" />
           <div v-else class="flex h-full items-center justify-center text-3xl text-gray-300">🏨</div>
         </div>
         <div class="flex flex-1 flex-col justify-between p-4">
@@ -72,7 +79,7 @@
             </div>
             <div class="flex items-end gap-3">
               <button
-                @click.stop="$router.push({ path: '/hotel-compare', query: { id: hotel.id } })"
+                @click.stop.prevent="goHotelCompare(hotel.id)"
                 class="text-xs text-gray-400 hover:text-brand transition cursor-pointer"
               >AI 对比</button>
               <div class="text-right">
@@ -82,7 +89,7 @@
             </div>
           </div>
         </div>
-      </router-link>
+      </article>
     </div>
 
     <!-- Pagination -->
@@ -99,6 +106,7 @@ import { ref, reactive, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { publicApi } from '@hotelink/api'
 import { SelectField } from '@hotelink/ui'
+import { buildImageThumbUrl } from '@hotelink/utils'
 
 const route = useRoute()
 const router = useRouter()
@@ -126,9 +134,11 @@ function formatRating(value: unknown): string {
 }
 
 function mapHotel(item: any) {
+  const image = item?.image_url || item?.cover_image || ''
   return {
     ...item,
-    image_url: item?.image_url || item?.cover_image || '',
+    image_url: image,
+    image_thumb: buildImageThumbUrl(image, 352, 288) || item?.cover_thumb || image,
   }
 }
 
@@ -191,6 +201,14 @@ function onSearch() {
 function changePage(nextPage: number) {
   page.value = nextPage
   fetchList()
+}
+
+function goHotelDetail(id: number) {
+  router.push(`/hotels/${id}`)
+}
+
+function goHotelCompare(id: number) {
+  router.push({ path: '/hotel-compare', query: { id: String(id) } })
 }
 
 watch(

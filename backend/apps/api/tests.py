@@ -2,8 +2,10 @@
 
 from datetime import timedelta
 from decimal import Decimal
+from io import BytesIO
 from pathlib import Path
 import shutil
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import override_settings
@@ -12,10 +14,13 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.test import APITestCase
 
 from apps.bookings.models import BookingOrder
-from apps.crm.models import InvoiceTitle, UserCoupon
+from apps.bookings.tasks import sweep_order_lifecycle_anomalies
+from apps.crm.models import ChatMessage, ChatSession, InvoiceTitle, UserCoupon
 from apps.hotels.models import Hotel, RoomInventory, RoomType
+from apps.payments.models import PaymentRecord
 from apps.users.models import UserProfile
 from config.ai import _get_runtime_config_path
+from PIL import Image
 
 User = get_user_model()
 
@@ -190,16 +195,44 @@ class UserApiTests(ApiBaseTestCase):
         self.assertEqual(pay_response.status_code, 200)
         self.assertEqual(pay_response.json()["data"]["payment_status"], "paid")
 
+    def test_user_pay_timeout_order_should_auto_cancel(self):
+        """验证支付超时订单时会被自动取消，避免长期挂起。"""
+        self.login_user()
+        stale_created_at = timezone.now() - timedelta(minutes=45)
+        BookingOrder.objects.filter(id=self.order.id).update(created_at=stale_created_at)
+
+        pay_response = self.client.post(
+            "/api/v1/user/orders/pay",
+            {"order_id": self.order.id, "payment_method": "mock"},
+            format="json",
+        )
+        self.assertEqual(pay_response.status_code, 409)
+        self.assertEqual(pay_response.json()["code"], 4093)
+        self.assertIn("超时", pay_response.json()["message"])
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, BookingOrder.STATUS_CANCELLED)
+        self.assertEqual(self.order.payment_status, BookingOrder.PAYMENT_UNPAID)
+        self.assertIn("超过", self.order.operator_remark)
+
     def test_user_profile_upload_password_coupon_and_invoice(self):
         """验证头像上传、改密、优惠券和开票流程。"""
         self.login_user()
         test_media_root = Path(__file__).resolve().parents[3] / "test_media"
         if test_media_root.exists():
             shutil.rmtree(test_media_root)
+        avatar_buffer = BytesIO()
+        Image.new("RGB", (2, 2), color=(240, 240, 240)).save(avatar_buffer, format="PNG")
         with override_settings(MEDIA_ROOT=test_media_root):
             upload_response = self.client.post(
                 "/api/v1/user/profile/avatar",
-                {"avatar": SimpleUploadedFile("avatar.txt", b"avatar-content", content_type="text/plain")},
+                {
+                    "avatar": SimpleUploadedFile(
+                        "avatar.png",
+                        avatar_buffer.getvalue(),
+                        content_type="image/png",
+                    )
+                },
                 format="multipart",
             )
         if test_media_root.exists():
@@ -306,6 +339,59 @@ class UserApiTests(ApiBaseTestCase):
         self.assertIn('"type": "chunk"', payload)
         self.assertIn('"type": "done"', payload)
 
+    def test_user_ai_chat_should_persist_session_and_messages(self):
+        """验证 AI 对话会自动落库会话与消息。"""
+        self.login_user()
+        with patch(
+            "apps.api.views.AIChatService.reply_customer_service",
+            return_value={
+                "scene": "customer_service",
+                "answer": "这是测试回复",
+                "booking_assistant": None,
+            },
+        ):
+            response = self.client.post(
+                "/api/v1/user/ai/chat",
+                {"scene": "general", "question": "你好"},
+                format="json",
+            )
+        self.assertEqual(response.status_code, 200)
+        session_id = response.json()["data"].get("session_id")
+        self.assertTrue(session_id)
+
+        session = ChatSession.objects.filter(id=session_id, user=self.user).first()
+        self.assertIsNotNone(session)
+        self.assertEqual(session.message_count, 2)
+
+        messages = list(ChatMessage.objects.filter(session_id=session_id).order_by("id"))
+        self.assertEqual(len(messages), 2)
+        self.assertEqual(messages[0].role, ChatMessage.ROLE_USER)
+        self.assertEqual(messages[0].content, "你好")
+        self.assertEqual(messages[1].role, ChatMessage.ROLE_ASSISTANT)
+        self.assertEqual(messages[1].content, "这是测试回复")
+
+    def test_user_ai_chat_stream_should_not_invoke_second_llm_call(self):
+        """验证流式接口不会在同一轮对话重复调用模型。"""
+        self.login_user()
+        with patch(
+            "apps.api.views.AIChatService.reply_customer_service",
+            return_value={
+                "scene": "customer_service",
+                "answer": "流式测试回复",
+                "booking_assistant": None,
+            },
+        ), patch("apps.api.views.AIChatService.stream_chat_completion") as mocked_stream:
+            response = self.client.post(
+                "/api/v1/user/ai/chat/stream",
+                {"scene": "general", "question": "帮我查订单"},
+                format="json",
+            )
+        self.assertEqual(response.status_code, 200)
+        payload = b"".join(response.streaming_content).decode("utf-8")
+        self.assertIn('"type": "meta"', payload)
+        self.assertIn('"type": "chunk"', payload)
+        self.assertFalse(mocked_stream.called)
+
     def test_user_ai_chat_switch_city_overrides_previous_context(self):
         """验证用户改选城市时，订房助手会覆盖历史上下文并返回新城市酒店。"""
         self.login_user()
@@ -384,9 +470,196 @@ class UserApiTests(ApiBaseTestCase):
         if data["phase"] == "select_hotel":
             self.assertTrue(any(option["label"] == target_hotel.name for option in data["options"]))
 
+    def test_user_ai_hotel_compare_should_use_online_hotels_and_return_fallback_payload(self):
+        """验证酒店对比接口可识别上架酒店，并在 AI 不可用时返回稳定兜底结构。"""
+        self.login_user()
+        second_hotel = Hotel.objects.create(
+            name="HoteLink 广州天河店",
+            city="广州",
+            address="广州市天河区示例路 18 号",
+            star=4,
+            phone="020-12345678",
+            description="广州示例酒店",
+            rating=Decimal("4.6"),
+            min_price=Decimal("499.00"),
+            is_recommended=True,
+            status=Hotel.STATUS_ONLINE,
+        )
+        RoomType.objects.create(
+            hotel=second_hotel,
+            name="行政大床房",
+            bed_type=RoomType.BED_QUEEN,
+            area=38,
+            breakfast_count=2,
+            base_price=Decimal("499.00"),
+            max_guest_count=2,
+            stock=5,
+            status=RoomType.STATUS_ONLINE,
+        )
+
+        with patch("apps.api.views.AIChatService.is_available", return_value=False):
+            response = self.client.post(
+                "/api/v1/user/ai/hotel-compare",
+                {
+                    "hotel_ids": [self.hotel.id, second_hotel.id],
+                    "check_in_date": str(timezone.localdate() + timedelta(days=1)),
+                    "check_out_date": str(timezone.localdate() + timedelta(days=2)),
+                },
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["code"], 0)
+        self.assertEqual(payload["data"]["scene"], "hotel_compare")
+        self.assertEqual(len(payload["data"]["hotels"]), 2)
+        self.assertIn("recommendation", payload["data"])
+        self.assertIn("ai_generated", payload["data"])
+        self.assertFalse(payload["data"]["ai_generated"])
+
+    def test_user_ai_hotel_compare_should_reject_invalid_date_range(self):
+        """验证酒店对比接口会拦截退房日期早于或等于入住日期的请求。"""
+        self.login_user()
+        second_hotel = Hotel.objects.create(
+            name="HoteLink 杭州西湖店",
+            city="杭州",
+            address="杭州市西湖区示例路 6 号",
+            star=5,
+            phone="0571-12345678",
+            description="杭州示例酒店",
+            rating=Decimal("4.8"),
+            min_price=Decimal("699.00"),
+            is_recommended=True,
+            status=Hotel.STATUS_ONLINE,
+        )
+
+        response = self.client.post(
+            "/api/v1/user/ai/hotel-compare",
+            {
+                "hotel_ids": [self.hotel.id, second_hotel.id],
+                "check_in_date": "2026-05-20",
+                "check_out_date": "2026-05-20",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+        payload = response.json()
+        self.assertEqual(payload["code"], 4001)
+        self.assertIn("check_out_date", payload["data"]["errors"])
+
+    def test_user_ai_hotel_compare_should_reject_duplicate_hotel_ids(self):
+        """验证酒店对比接口会拒绝重复酒店 ID，避免无效对比。"""
+        self.login_user()
+        response = self.client.post(
+            "/api/v1/user/ai/hotel-compare",
+            {"hotel_ids": [self.hotel.id, self.hotel.id]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+        payload = response.json()
+        self.assertEqual(payload["code"], 4001)
+        self.assertIn("hotel_ids", payload["data"]["errors"])
+
 
 class AdminApiTests(ApiBaseTestCase):
     """管理端接口测试集合。"""
+    def test_admin_order_detail_should_include_payments_and_status_timestamps(self):
+        """验证管理端订单详情返回支付记录与关键状态时间字段。"""
+        self.login_admin()
+        paid_at = timezone.now()
+        BookingOrder.objects.filter(id=self.order.id).update(
+            status=BookingOrder.STATUS_PAID,
+            payment_status=BookingOrder.PAYMENT_PAID,
+            paid_at=paid_at,
+        )
+        PaymentRecord.objects.create(
+            order_id=self.order.id,
+            payment_no="PMTEST0001",
+            method="mock",
+            status=PaymentRecord.STATUS_PAID,
+            amount=Decimal("798.00"),
+            paid_at=paid_at,
+        )
+
+        response = self.client.get("/api/v1/admin/orders/detail", {"order_id": self.order.id})
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertIn("payments", data)
+        self.assertEqual(len(data["payments"]), 1)
+        self.assertEqual(data["payments"][0]["payment_no"], "PMTEST0001")
+        self.assertTrue(data.get("paid_at"))
+
+    def test_lifecycle_sweep_should_auto_complete_overdue_checked_in_order(self):
+        """验证生命周期巡检会自动完结离店日已过的在住订单。"""
+        today = timezone.localdate()
+        BookingOrder.objects.filter(id=self.order.id).update(
+            status=BookingOrder.STATUS_CHECKED_IN,
+            payment_status=BookingOrder.PAYMENT_PAID,
+            check_in_date=today - timedelta(days=3),
+            check_out_date=today - timedelta(days=1),
+            operator_remark="",
+        )
+
+        sweep_order_lifecycle_anomalies.run(batch_size=20)
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, BookingOrder.STATUS_COMPLETED)
+        self.assertIn("系统自动完结", self.order.operator_remark)
+
+    def test_lifecycle_sweep_should_mark_overdue_paid_order_as_anomaly(self):
+        """验证生命周期巡检会标记过期未入住的已支付订单。"""
+        today = timezone.localdate()
+        BookingOrder.objects.filter(id=self.order.id).update(
+            status=BookingOrder.STATUS_PAID,
+            payment_status=BookingOrder.PAYMENT_PAID,
+            check_in_date=today - timedelta(days=3),
+            check_out_date=today - timedelta(days=1),
+            operator_remark="",
+        )
+
+        sweep_order_lifecycle_anomalies.run(batch_size=20)
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, BookingOrder.STATUS_PAID)
+        self.assertIn("异常提醒", self.order.operator_remark)
+
+    def test_admin_check_in_should_reject_overdue_checkout_order(self):
+        """验证离店日已过的订单不可再办理入住。"""
+        self.login_admin()
+        today = timezone.localdate()
+        BookingOrder.objects.filter(id=self.order.id).update(
+            status=BookingOrder.STATUS_PAID,
+            payment_status=BookingOrder.PAYMENT_PAID,
+            check_in_date=today - timedelta(days=3),
+            check_out_date=today - timedelta(days=1),
+        )
+
+        response = self.client.post(
+            "/api/v1/admin/orders/check-in",
+            {"order_id": self.order.id, "room_no": "1808"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("超过离店日期", response.json()["message"])
+
+    def test_admin_order_list_should_return_lifecycle_warning(self):
+        """验证管理端订单列表返回生命周期异常提示字段。"""
+        self.login_admin()
+        today = timezone.localdate()
+        BookingOrder.objects.filter(id=self.order.id).update(
+            status=BookingOrder.STATUS_PAID,
+            payment_status=BookingOrder.PAYMENT_PAID,
+            check_in_date=today - timedelta(days=3),
+            check_out_date=today - timedelta(days=1),
+            operator_remark="",
+        )
+
+        response = self.client.get("/api/v1/admin/orders", {"status": BookingOrder.STATUS_PAID})
+        self.assertEqual(response.status_code, 200)
+        item = response.json()["data"]["items"][0]
+        self.assertTrue(item["is_lifecycle_anomaly"])
+        self.assertIn("离店日", item["lifecycle_warning"])
+
     def test_admin_dashboard_inventory_and_settings(self):
         """验证管理端总览、库存更新和设置接口。"""
         self.login_admin()
@@ -416,6 +689,49 @@ class AdminApiTests(ApiBaseTestCase):
         ai_settings = self.client.get("/api/v1/admin/ai/settings")
         self.assertEqual(ai_settings.status_code, 200)
         self.assertIn("active_provider", ai_settings.json()["data"])
+
+    def test_admin_hotel_and_room_create_should_reject_duplicates(self):
+        """验证酒店与房型重复创建会返回明确错误。"""
+        self.login_admin()
+
+        duplicate_hotel_response = self.client.post(
+            "/api/v1/admin/hotels/create",
+            {
+                "name": self.hotel.name,
+                "city": "北京",
+                "address": "北京市朝阳区重复路 2 号",
+                "star": 4,
+                "phone": "010-77778888",
+                "description": "重复酒店测试",
+                "rating": "4.6",
+                "min_price": "488.00",
+                "status": "online",
+            },
+            format="json",
+        )
+        self.assertEqual(duplicate_hotel_response.status_code, 409)
+        self.assertEqual(duplicate_hotel_response.json()["code"], 4090)
+        self.assertIn("name", duplicate_hotel_response.json()["data"]["errors"])
+
+        duplicate_room_response = self.client.post(
+            "/api/v1/admin/room-types/create",
+            {
+                "hotel": self.hotel.id,
+                "name": self.room_type.name,
+                "bed_type": self.room_type.bed_type,
+                "area": self.room_type.area,
+                "breakfast_count": self.room_type.breakfast_count,
+                "base_price": str(self.room_type.base_price),
+                "max_guest_count": self.room_type.max_guest_count,
+                "stock": self.room_type.stock,
+                "status": self.room_type.status,
+                "description": "重复房型测试",
+            },
+            format="json",
+        )
+        self.assertEqual(duplicate_room_response.status_code, 409)
+        self.assertEqual(duplicate_room_response.json()["code"], 4090)
+        self.assertIn("name", duplicate_room_response.json()["data"]["errors"])
 
     def test_admin_can_create_employee(self):
         """验证管理员创建员工账号流程。"""

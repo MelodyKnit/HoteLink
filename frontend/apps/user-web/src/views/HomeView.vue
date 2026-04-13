@@ -89,7 +89,7 @@
           class="group shrink-0 w-52 overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-gray-100 transition hover:shadow-lg"
         >
           <div class="relative h-32 overflow-hidden bg-gray-200">
-            <img v-if="hotel.cover_image" :src="hotel.cover_image" :alt="hotel.name" class="h-full w-full object-cover transition group-hover:scale-105" />
+            <img v-if="hotel.cover_image" :src="hotel.cover_thumb || hotel.cover_image" :alt="hotel.name" class="h-full w-full object-cover transition group-hover:scale-105" loading="lazy" decoding="async" />
             <div v-else class="flex h-full items-center justify-center text-2xl text-gray-300">🏨</div>
             <div class="absolute right-2 top-2 rounded-full bg-white/90 px-1.5 py-0.5 text-xs font-semibold text-orange-600">¥{{ hotel.min_price }}<span class="text-gray-400 font-normal">起</span></div>
           </div>
@@ -118,7 +118,7 @@
           class="group overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-gray-100 transition hover:shadow-lg"
         >
           <div class="relative h-44 overflow-hidden bg-gray-200">
-            <img v-if="hotel.image_url" :src="hotel.image_url" :alt="hotel.name" class="h-full w-full object-cover transition group-hover:scale-105" />
+            <img v-if="hotel.image_url" :src="hotel.image_thumb || hotel.image_url" :alt="hotel.name" class="h-full w-full object-cover transition group-hover:scale-105" loading="lazy" decoding="async" />
             <div v-else class="flex h-full items-center justify-center text-3xl text-gray-300">🏨</div>
             <div class="absolute right-3 top-3 rounded-full bg-white/90 px-2 py-0.5 text-xs font-semibold text-orange-600">
               ¥{{ hotel.min_price }}<span class="font-normal text-gray-400">起</span>
@@ -189,7 +189,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { publicApi, userAiApi } from '@hotelink/api'
 import { useUserAuthStore } from '@hotelink/store'
-import { formatDate } from '@hotelink/utils'
+import { buildImageThumbUrl, formatDate } from '@hotelink/utils'
 
 const router = useRouter()
 const auth = useUserAuthStore()
@@ -210,10 +210,29 @@ function formatRating(value: unknown): string {
   return Number.isFinite(n) ? n.toFixed(1) : '暂无'
 }
 
+function getHomeThumbSize(scene: 'ai' | 'recommend'): { width: number; height: number } {
+  const dpr = typeof window !== 'undefined' ? Math.min(2, Math.max(1, window.devicePixelRatio || 1)) : 1
+  const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 1280
+
+  if (scene === 'ai') {
+    return { width: Math.round(208 * dpr), height: Math.round(128 * dpr) }
+  }
+
+  const cardWidth = viewportWidth < 640 ? 360 : (viewportWidth < 1024 ? 300 : 320)
+  return { width: Math.round(cardWidth * dpr), height: Math.round(176 * dpr) }
+}
+
+function buildHomeThumb(url: string, scene: 'ai' | 'recommend'): string {
+  const { width, height } = getHomeThumbSize(scene)
+  return buildImageThumbUrl(url, width, height) || url
+}
+
 function mapHotel(item: any) {
+  const image = item?.image_url || item?.cover_image || ''
   return {
     ...item,
-    image_url: item?.image_url || item?.cover_image || '',
+    image_url: image,
+    image_thumb: buildHomeThumb(image, 'recommend'),
   }
 }
 
@@ -240,7 +259,10 @@ async function refreshRecommendations() {
   try {
     const res = await userAiApi.recommendations({ scene: 'home', limit: 6 })
     if (res.code === 0 && res.data) {
-      aiRecommendations.value = (res.data as any).recommendations || []
+      aiRecommendations.value = ((res.data as any).recommendations || []).map((item: any) => ({
+        ...item,
+        cover_thumb: buildHomeThumb(String(item?.cover_image || ''), 'ai'),
+      }))
     }
   } catch { /* silent */ }
 }

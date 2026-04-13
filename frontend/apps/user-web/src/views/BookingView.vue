@@ -33,11 +33,31 @@
         <div class="grid grid-cols-2 gap-3">
           <div>
             <label class="mb-1 block text-xs text-gray-400">入住日期</label>
-            <input v-model="checkInDate" type="date" :min="today" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
+            <input
+              v-model="checkInDate"
+              type="date"
+              :min="today"
+              class="w-full rounded-lg border px-3 py-2 text-sm outline-none transition"
+              :class="fieldErrors.check_in_date ? 'border-red-300 bg-red-50/70 focus:border-red-400' : 'border-gray-200 focus:border-brand'"
+              @input="clearFieldError('check_in_date')"
+              @blur="validateDateFields"
+            />
+            <p v-if="fieldErrors.check_in_date" class="mt-1 text-xs text-red-500">{{ fieldErrors.check_in_date }}</p>
+            <p v-else class="mt-1 text-xs text-gray-400">当天最早可下单当天入住。</p>
           </div>
           <div>
             <label class="mb-1 block text-xs text-gray-400">离店日期</label>
-            <input v-model="checkOutDate" type="date" :min="checkInDate || today" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
+            <input
+              v-model="checkOutDate"
+              type="date"
+              :min="checkInDate || today"
+              class="w-full rounded-lg border px-3 py-2 text-sm outline-none transition"
+              :class="fieldErrors.check_out_date ? 'border-red-300 bg-red-50/70 focus:border-red-400' : 'border-gray-200 focus:border-brand'"
+              @input="clearFieldError('check_out_date')"
+              @blur="validateDateFields"
+            />
+            <p v-if="fieldErrors.check_out_date" class="mt-1 text-xs text-red-500">{{ fieldErrors.check_out_date }}</p>
+            <p v-else class="mt-1 text-xs text-gray-400">离店日期需要晚于入住日期。</p>
           </div>
         </div>
       </div>
@@ -72,6 +92,7 @@
               </button>
             </div>
             <p v-if="fieldErrors.guest_name" class="mt-1 text-xs text-red-500">{{ fieldErrors.guest_name }}</p>
+            <p v-else class="mt-1 text-xs text-gray-400">建议填写与入住证件一致的姓名，现场核验会更顺畅。</p>
           </div>
           <div>
             <label class="mb-1 block text-xs text-gray-400">手机号码 *</label>
@@ -82,8 +103,11 @@
               maxlength="11"
               class="w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition"
               :class="fieldErrors.guest_mobile ? 'border-red-400 bg-red-50/60 focus:border-red-500' : 'border-gray-200 focus:border-brand'"
+              @input="handleGuestMobileInput"
+              @blur="validateGuestMobileField"
             />
             <p v-if="fieldErrors.guest_mobile" class="mt-1 text-xs text-red-500">{{ fieldErrors.guest_mobile }}</p>
+            <p v-else class="mt-1 text-xs text-gray-400">用于酒店联系与入住通知，请填写可正常接听的号码。</p>
           </div>
           <div>
             <label class="mb-1 block text-xs text-gray-400">入住人数</label>
@@ -97,7 +121,20 @@
       <!-- Remark -->
       <div class="surface-card mt-4 rounded-2xl p-5">
         <h4 class="mb-3 font-semibold text-gray-800">备注</h4>
-        <textarea v-model="form.remark" rows="2" placeholder="如有特殊需求请备注（选填）" class="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm outline-none focus:border-brand" />
+        <textarea
+          v-model="form.remark"
+          rows="2"
+          placeholder="如有特殊需求请备注（选填）"
+          class="w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition"
+          :class="fieldErrors.remark ? 'border-red-300 bg-red-50/70 focus:border-red-400' : 'border-gray-200 focus:border-brand'"
+          @input="clearFieldError('remark')"
+          @blur="validateRemarkField"
+        />
+        <div class="mt-1 flex items-center justify-between">
+          <p v-if="fieldErrors.remark" class="text-xs text-red-500">{{ fieldErrors.remark }}</p>
+          <p v-else class="text-xs text-gray-400">例如：需要安静房间、晚到保留、无烟偏好等。</p>
+          <span class="text-xs" :class="form.remark.length > 255 ? 'text-red-500' : 'text-gray-400'">{{ form.remark.length }}/255</span>
+        </div>
       </div>
 
       <!-- Coupon Selection -->
@@ -161,7 +198,7 @@
         <div v-if="error" class="feedback-error-card flex items-start gap-2 rounded-xl px-3 py-2.5 text-sm text-red-700">
           <span class="mt-0.5 text-base">⚠</span>
           <div>
-            <p class="font-semibold">提交失败</p>
+            <p class="font-semibold">还有信息需要调整</p>
             <p class="text-xs text-red-600">{{ error }}</p>
           </div>
         </div>
@@ -177,7 +214,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { userOrderApi, userCouponApi, userProfileApi } from '@hotelink/api'
-import { formatDate } from '@hotelink/utils'
+import { extractApiError, extractApiFieldErrors, formatDate, isValidChineseMobile } from '@hotelink/utils'
 import { SelectField } from '@hotelink/ui'
 
 const GUEST_HISTORY_KEY = 'hotelink_guest_history'
@@ -196,7 +233,8 @@ const checkInDate = ref(today)
 const checkOutDate = ref(formatDate(tomorrow))
 const submitting = ref(false)
 const error = ref('')
-const fieldErrors = ref<{ guest_name?: string; guest_mobile?: string }>({})
+type BookingField = 'check_in_date' | 'check_out_date' | 'guest_name' | 'guest_mobile' | 'remark'
+const fieldErrors = ref<Partial<Record<BookingField, string>>>({})
 const guestHistory = ref<Array<{ guest_name: string; guest_mobile: string; masked_mobile: string }>>([])
 const guestSuggestionOpen = ref(false)
 let guestSuggestionCloseTimer: number | null = null
@@ -346,6 +384,7 @@ function handleGuestNameFocus() {
 }
 
 function handleGuestNameInput() {
+  clearFieldError('guest_name')
   guestSuggestionOpen.value = true
 }
 
@@ -353,25 +392,107 @@ function handleGuestNameBlur() {
   guestSuggestionCloseTimer = window.setTimeout(() => {
     guestSuggestionOpen.value = false
   }, 120)
+  validateGuestNameField()
+}
+
+function clearFieldError(field: BookingField) {
+  if (fieldErrors.value[field]) {
+    fieldErrors.value = { ...fieldErrors.value, [field]: undefined }
+  }
+  if (error.value) {
+    error.value = ''
+  }
+}
+
+function validateDateFields() {
+  const nextErrors = { ...fieldErrors.value }
+  nextErrors.check_in_date = undefined
+  nextErrors.check_out_date = undefined
+
+  if (!checkInDate.value) {
+    nextErrors.check_in_date = '请选择入住日期'
+  } else if (checkInDate.value < today) {
+    nextErrors.check_in_date = '入住日期不能早于今天'
+  }
+
+  if (!checkOutDate.value) {
+    nextErrors.check_out_date = '请选择离店日期'
+  } else if (checkInDate.value && checkOutDate.value <= checkInDate.value) {
+    nextErrors.check_out_date = '离店日期需要晚于入住日期'
+  }
+
+  fieldErrors.value = nextErrors
+}
+
+function validateGuestNameField() {
+  const name = form.value.guest_name.trim()
+  fieldErrors.value = {
+    ...fieldErrors.value,
+    guest_name: !name ? '请输入入住人姓名' : name.length > 100 ? '入住人姓名不能超过 100 个字符' : undefined,
+  }
+}
+
+function handleGuestMobileInput() {
+  form.value.guest_mobile = form.value.guest_mobile.replace(/\D/g, '').slice(0, 11)
+  clearFieldError('guest_mobile')
+}
+
+function validateGuestMobileField() {
+  const mobile = form.value.guest_mobile.trim()
+  fieldErrors.value = {
+    ...fieldErrors.value,
+    guest_mobile: !mobile ? '请输入手机号' : isValidChineseMobile(mobile) ? undefined : '请输入有效的 11 位手机号',
+  }
+}
+
+function validateRemarkField() {
+  fieldErrors.value = {
+    ...fieldErrors.value,
+    remark: form.value.remark.length > 255 ? '备注不能超过 255 个字符' : undefined,
+  }
 }
 
 function validateForm(): boolean {
-  const nextErrors: { guest_name?: string; guest_mobile?: string } = {}
-  if (!form.value.guest_name.trim()) {
-    nextErrors.guest_name = '请输入入住人姓名'
-  }
-  if (!form.value.guest_mobile.trim()) {
-    nextErrors.guest_mobile = '请输入手机号'
-  } else if (!/^1\d{10}$/.test(form.value.guest_mobile.trim())) {
-    nextErrors.guest_mobile = '手机号格式不正确'
-  }
-  fieldErrors.value = nextErrors
-  if (nextErrors.guest_name) {
-    error.value = nextErrors.guest_name
+  const nextErrors: Partial<Record<BookingField, string>> = {}
+  validateDateFields()
+
+  if (!hotelId || !roomTypeId) {
+    error.value = '房型信息缺失，请返回上一页重新选择'
     return false
   }
-  if (nextErrors.guest_mobile) {
-    error.value = nextErrors.guest_mobile
+
+  if (!checkInDate.value) {
+    nextErrors.check_in_date = '请选择入住日期'
+  } else if (checkInDate.value < today) {
+    nextErrors.check_in_date = '入住日期不能早于今天'
+  }
+
+  if (!checkOutDate.value) {
+    nextErrors.check_out_date = '请选择离店日期'
+  } else if (checkOutDate.value <= checkInDate.value) {
+    nextErrors.check_out_date = '离店日期需要晚于入住日期'
+  }
+
+  if (!form.value.guest_name.trim()) {
+    nextErrors.guest_name = '请输入入住人姓名'
+  } else if (form.value.guest_name.trim().length > 100) {
+    nextErrors.guest_name = '入住人姓名不能超过 100 个字符'
+  }
+
+  if (!form.value.guest_mobile.trim()) {
+    nextErrors.guest_mobile = '请输入手机号'
+  } else if (!isValidChineseMobile(form.value.guest_mobile.trim())) {
+    nextErrors.guest_mobile = '请输入有效的 11 位手机号'
+  }
+
+  if (form.value.remark.length > 255) {
+    nextErrors.remark = '备注不能超过 255 个字符'
+  }
+
+  fieldErrors.value = nextErrors
+  const firstError = Object.values(nextErrors).find(Boolean)
+  if (firstError) {
+    error.value = firstError
     return false
   }
   return true
@@ -410,7 +531,17 @@ async function handleSubmit() {
         },
       })
     } else {
-      error.value = res.message || '提交失败'
+      fieldErrors.value = {
+        ...fieldErrors.value,
+        ...extractApiFieldErrors(res, {
+          check_in_date: '入住日期',
+          check_out_date: '离店日期',
+          guest_mobile: '手机号',
+          guest_name: '入住人姓名',
+          remark: '备注',
+        }),
+      }
+      error.value = extractApiError(res, '提交失败，请稍后重试')
     }
   } catch {
     error.value = '网络错误，请重试'

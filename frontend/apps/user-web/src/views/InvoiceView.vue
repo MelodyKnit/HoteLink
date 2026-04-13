@@ -6,11 +6,10 @@
     </header>
 
     <div class="mx-auto max-w-2xl px-4 py-4 pb-24 md:pb-4">
-      <!-- Invoice Titles -->
       <div class="rounded-2xl bg-white p-4 shadow-sm">
         <div class="flex items-center justify-between">
           <h3 class="font-semibold text-gray-800">发票抬头</h3>
-          <button @click="showAddModal = true" class="text-xs text-brand hover:underline">+ 添加</button>
+          <button @click="openAddModal" class="text-xs text-brand hover:underline">+ 添加</button>
         </div>
         <div v-if="titles.length === 0" class="py-6 text-center text-sm text-gray-400">暂无抬头信息</div>
         <div v-else class="mt-3 space-y-2">
@@ -24,7 +23,6 @@
         </div>
       </div>
 
-      <!-- Invoice Records -->
       <div class="mt-4 rounded-2xl bg-white p-4 shadow-sm">
         <h3 class="font-semibold text-gray-800">开票记录</h3>
         <div v-if="invoices.length === 0" class="py-6 text-center text-sm text-gray-400">暂无开票记录</div>
@@ -42,24 +40,42 @@
         </div>
       </div>
 
-      <!-- Apply Section -->
       <div class="mt-4 rounded-2xl bg-white p-4 shadow-sm">
         <h3 class="mb-3 font-semibold text-gray-800">申请开票</h3>
         <div class="space-y-3">
-          <SelectField v-model.number="applyForm.invoice_title_id" class="w-full">
-            <option :value="0">选择抄头</option>
-            <option v-for="t in titles" :key="t.id" :value="t.id">{{ t.title }}</option>
-          </SelectField>
-          <input v-model.number="applyForm.order_id" placeholder="订单号" type="number" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
-          <button @click="handleApply" :disabled="applying"
-            class="w-full rounded-xl bg-brand py-2.5 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-50">
+          <div>
+            <SelectField v-model.number="applyForm.invoice_title_id" class="w-full">
+              <option :value="0">选择抬头</option>
+              <option v-for="t in titles" :key="t.id" :value="t.id">{{ t.title }}</option>
+            </SelectField>
+            <p v-if="applyErrors.invoice_title_id" class="mt-1 text-xs text-red-500">{{ applyErrors.invoice_title_id }}</p>
+          </div>
+
+          <div>
+            <input
+              v-model.number="applyForm.order_id"
+              placeholder="订单号"
+              type="number"
+              class="w-full rounded-lg border px-3 py-2 text-sm outline-none transition"
+              :class="applyErrors.order_id ? 'border-red-300 bg-red-50/70 focus:border-red-400' : 'border-gray-200 focus:border-brand'"
+              @input="clearApplyError('order_id')"
+              @blur="validateApplyField('order_id')"
+            />
+            <p v-if="applyErrors.order_id" class="mt-1 text-xs text-red-500">{{ applyErrors.order_id }}</p>
+            <p v-else class="mt-1 text-xs text-gray-400">请输入已完成支付的订单编号，避免重复申请。</p>
+          </div>
+
+          <button
+            @click="handleApply"
+            :disabled="applying"
+            class="w-full rounded-xl bg-brand py-2.5 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-50"
+          >
             {{ applying ? '提交中...' : '提交申请' }}
           </button>
         </div>
       </div>
     </div>
 
-    <!-- Add title modal -->
     <Teleport to="body">
       <div v-if="showAddModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" @click.self="showAddModal = false">
         <div class="w-full max-w-sm rounded-2xl bg-white p-6">
@@ -69,9 +85,45 @@
               <label class="flex items-center gap-1 text-sm"><input type="radio" v-model="titleForm.invoice_type" value="personal" class="accent-brand" /> 个人</label>
               <label class="flex items-center gap-1 text-sm"><input type="radio" v-model="titleForm.invoice_type" value="company" class="accent-brand" /> 企业</label>
             </div>
-            <input v-model="titleForm.title" placeholder="抬头名称" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
-            <input v-if="titleForm.invoice_type === 'company'" v-model="titleForm.tax_no" placeholder="税号" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
-            <input v-model="titleForm.email" placeholder="接收邮箱" type="email" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
+
+            <div>
+              <input
+                v-model="titleForm.title"
+                placeholder="抬头名称"
+                class="w-full rounded-lg border px-3 py-2 text-sm outline-none transition"
+                :class="titleErrors.title ? 'border-red-300 bg-red-50/70 focus:border-red-400' : 'border-gray-200 focus:border-brand'"
+                @input="clearTitleError('title')"
+                @blur="validateTitleField('title')"
+              />
+              <p v-if="titleErrors.title" class="mt-1 text-xs text-red-500">{{ titleErrors.title }}</p>
+            </div>
+
+            <div v-if="titleForm.invoice_type === 'company'">
+              <input
+                v-model="titleForm.tax_no"
+                placeholder="税号"
+                class="w-full rounded-lg border px-3 py-2 text-sm outline-none transition"
+                :class="titleErrors.tax_no ? 'border-red-300 bg-red-50/70 focus:border-red-400' : 'border-gray-200 focus:border-brand'"
+                @input="handleTaxNoInput"
+                @blur="validateTitleField('tax_no')"
+              />
+              <p v-if="titleErrors.tax_no" class="mt-1 text-xs text-red-500">{{ titleErrors.tax_no }}</p>
+              <p v-else class="mt-1 text-xs text-gray-400">企业抬头需填写 15-20 位税号。</p>
+            </div>
+
+            <div>
+              <input
+                v-model="titleForm.email"
+                placeholder="接收邮箱"
+                type="email"
+                class="w-full rounded-lg border px-3 py-2 text-sm outline-none transition"
+                :class="titleErrors.email ? 'border-red-300 bg-red-50/70 focus:border-red-400' : 'border-gray-200 focus:border-brand'"
+                @input="clearTitleError('email')"
+                @blur="validateTitleField('email')"
+              />
+              <p v-if="titleErrors.email" class="mt-1 text-xs text-red-500">{{ titleErrors.email }}</p>
+              <p v-else class="mt-1 text-xs text-gray-400">开票完成后会发送到这个邮箱，请确认可正常接收。</p>
+            </div>
           </div>
           <div class="mt-4 flex gap-3">
             <button @click="showAddModal = false" class="flex-1 rounded-xl border py-2.5 text-sm text-gray-600">取消</button>
@@ -87,6 +139,10 @@
 import { ref, onMounted } from 'vue'
 import { userInvoiceApi } from '@hotelink/api'
 import { SelectField, useToast } from '@hotelink/ui'
+import { extractApiError, extractApiFieldErrors, isValidEmailAddress, isValidTaxNumber } from '@hotelink/utils'
+
+type TitleField = 'title' | 'tax_no' | 'email'
+type ApplyField = 'order_id' | 'invoice_title_id'
 
 const { showToast } = useToast()
 
@@ -98,34 +154,166 @@ const applying = ref(false)
 
 const titleForm = ref({ invoice_type: 'personal', title: '', tax_no: '', email: '' })
 const applyForm = ref({ order_id: 0, invoice_title_id: 0 })
+const titleErrors = ref<Partial<Record<TitleField, string>>>({})
+const applyErrors = ref<Partial<Record<ApplyField, string>>>({})
+
+function openAddModal() {
+  showAddModal.value = true
+  titleForm.value = { invoice_type: 'personal', title: '', tax_no: '', email: '' }
+  titleErrors.value = {}
+}
+
+function clearTitleError(field: TitleField) {
+  if (titleErrors.value[field]) {
+    titleErrors.value = { ...titleErrors.value, [field]: undefined }
+  }
+}
+
+function clearApplyError(field: ApplyField) {
+  if (applyErrors.value[field]) {
+    applyErrors.value = { ...applyErrors.value, [field]: undefined }
+  }
+}
+
+function handleTaxNoInput() {
+  titleForm.value.tax_no = titleForm.value.tax_no.replace(/\s/g, '').toUpperCase()
+  clearTitleError('tax_no')
+}
+
+function getTitleFieldError(field: TitleField): string {
+  switch (field) {
+    case 'title':
+      if (!titleForm.value.title.trim()) return '请输入抬头名称'
+      return titleForm.value.title.trim().length > 100 ? '抬头名称不能超过 100 个字符' : ''
+    case 'tax_no':
+      if (titleForm.value.invoice_type !== 'company') return ''
+      if (!titleForm.value.tax_no.trim()) return '企业抬头请填写税号'
+      return isValidTaxNumber(titleForm.value.tax_no) ? '' : '税号格式不正确，请检查后重试'
+    case 'email':
+      if (!titleForm.value.email.trim()) return '请输入接收邮箱'
+      return isValidEmailAddress(titleForm.value.email) ? '' : '邮箱格式不正确'
+    default:
+      return ''
+  }
+}
+
+function validateTitleField(field: TitleField) {
+  titleErrors.value = {
+    ...titleErrors.value,
+    [field]: getTitleFieldError(field) || undefined,
+  }
+}
+
+function validateTitleForm(): boolean {
+  const nextErrors: Partial<Record<TitleField, string>> = {}
+  titleForm.value.title = titleForm.value.title.trim()
+  titleForm.value.email = titleForm.value.email.trim()
+  titleForm.value.tax_no = titleForm.value.tax_no.trim().toUpperCase()
+
+  ;(['title', 'tax_no', 'email'] as TitleField[]).forEach((field) => {
+    const message = getTitleFieldError(field)
+    if (message) {
+      nextErrors[field] = message
+    }
+  })
+
+  titleErrors.value = nextErrors
+  return Object.keys(nextErrors).length === 0
+}
+
+function getApplyFieldError(field: ApplyField): string {
+  switch (field) {
+    case 'invoice_title_id':
+      return applyForm.value.invoice_title_id > 0 ? '' : '请选择发票抬头'
+    case 'order_id':
+      return applyForm.value.order_id > 0 ? '' : '请输入有效的订单号'
+    default:
+      return ''
+  }
+}
+
+function validateApplyField(field: ApplyField) {
+  applyErrors.value = {
+    ...applyErrors.value,
+    [field]: getApplyFieldError(field) || undefined,
+  }
+}
+
+function validateApplyForm(): boolean {
+  const nextErrors: Partial<Record<ApplyField, string>> = {}
+  ;(['invoice_title_id', 'order_id'] as ApplyField[]).forEach((field) => {
+    const message = getApplyFieldError(field)
+    if (message) {
+      nextErrors[field] = message
+    }
+  })
+  applyErrors.value = nextErrors
+  return Object.keys(nextErrors).length === 0
+}
 
 // 处理 AddTitle 交互逻辑。
 async function handleAddTitle() {
-  if (!titleForm.value.title.trim()) return
+  if (!validateTitleForm()) {
+    showToast(Object.values(titleErrors.value).find(Boolean) || '请检查抬头信息', 'warning')
+    return
+  }
+
   addingTitle.value = true
   try {
     const res = await userInvoiceApi.createTitle(titleForm.value)
-    if (res.code === 0 && res.data) titles.value.push(res.data)
-    showAddModal.value = false
-    titleForm.value = { invoice_type: 'personal', title: '', tax_no: '', email: '' }
-  } catch { /* ignore */ }
-  addingTitle.value = false
+    if (res.code === 0 && res.data) {
+      titles.value.push(res.data)
+      showToast('发票抬头已保存', 'success')
+      showAddModal.value = false
+      titleForm.value = { invoice_type: 'personal', title: '', tax_no: '', email: '' }
+      titleErrors.value = {}
+    } else {
+      titleErrors.value = {
+        ...titleErrors.value,
+        ...extractApiFieldErrors(res, {
+          email: '邮箱',
+          tax_no: '税号',
+          title: '抬头名称',
+        }),
+      }
+      showToast(extractApiError(res, '保存失败，请检查填写内容'), 'error')
+    }
+  } catch {
+    showToast('保存失败，请稍后重试', 'error')
+  } finally {
+    addingTitle.value = false
+  }
 }
 
 // 处理 Apply 交互逻辑。
 async function handleApply() {
-  if (!applyForm.value.invoice_title_id || !applyForm.value.order_id) { showToast('请填写完整信息', 'warning'); return }
+  if (!validateApplyForm()) {
+    showToast(Object.values(applyErrors.value).find(Boolean) || '请检查开票信息', 'warning')
+    return
+  }
+
   applying.value = true
   try {
     const res = await userInvoiceApi.apply(applyForm.value)
     if (res.code === 0) {
       showToast('申请已提交', 'success')
       applyForm.value = { order_id: 0, invoice_title_id: 0 }
+      applyErrors.value = {}
     } else {
-      showToast((res as any).message || '申请失败', 'error')
+      applyErrors.value = {
+        ...applyErrors.value,
+        ...extractApiFieldErrors(res, {
+          invoice_title_id: '发票抬头',
+          order_id: '订单',
+        }),
+      }
+      showToast(extractApiError(res, '申请失败，请稍后重试'), 'error')
     }
-  } catch { /* ignore */ }
-  applying.value = false
+  } catch {
+    showToast('申请失败，请稍后重试', 'error')
+  } finally {
+    applying.value = false
+  }
 }
 
 onMounted(async () => {

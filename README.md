@@ -478,10 +478,15 @@ python scripts/generate/seed_demo_data.py
 conda run -n Website python scripts/generate/seed_demo_data.py
 ```
 
-初始化后可直接使用：
+首次初始化后可直接使用：
 
 - 管理员账号：`admin / Password123`
 - 普通用户账号：`zhangsan / Password123`
+
+说明：
+
+- 从当前版本开始，`seed_demo_data` 仅在账号首次创建时写入默认密码。
+- 如果数据库中已存在 `admin` 或 `zhangsan`，再次执行 seed 不会覆盖其现有密码。
 
 ## 后端测试与检查
 

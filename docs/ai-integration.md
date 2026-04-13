@@ -5,8 +5,9 @@
 本文件用于说明项目中的 AI 能力如何接入、当前落地情况、配置方式，以及如何保证密钥与隐私安全。
 
 > 关联文档：
-> - 新增 AI 功能接口设计：[api-spec.md](./api-spec.md) §15
-> - AI 功能改进规划：[feature-improvements.md](./feature-improvements.md) §一
+> - API 规范：[api-spec.md](./api-spec.md)
+> - AI 功能改进规划：[feature-improvements.md](./feature-improvements.md)
+> - 路由源码清单：[api-inventory.md](./api-inventory.md)
 
 ## 2. 当前接入方式
 
@@ -108,15 +109,15 @@ build_ai_client(provider) → OpenAI compatible client
 
 | 功能 | 接口 | 实现状态 |
 |------|------|----------|
-| 智能客服问答 | `POST /api/v1/user/ai/chat` | 完整实现，调用 LLM |
-| 流式客服问答 | `POST /api/v1/user/ai/chat/stream` | SSE 流式输出 |
+| 智能客服问答 | `POST /api/v1/user/ai/chat` | 完整实现，调用 LLM；自动写入 `ChatSession/ChatMessage` |
+| 流式客服问答 | `POST /api/v1/user/ai/chat/stream` | SSE 输出；单次调用只执行一次回复生成并持久化 |
 | AI 订房编排 | 同上，订房意图检测后自动切入 | 多轮对话状态机 |
 | FAQ 问答 | 客服场景内支持 | 通过 Prompt 约束 |
 | 入住须知解释 | 客服场景内支持 | 通过上下文注入 |
-| AI 推荐酒店 | `GET /api/v1/user/ai/recommendations` | 调用 LLM，不可用时降级为热门酒店排序 |
+| AI 推荐酒店 | `POST /api/v1/user/ai/recommendations` | 调用 LLM，不可用时降级为热门酒店排序 |
 | AI 酒店对比 | `POST /api/v1/user/ai/hotel-compare` | 调用 LLM 生成多维度对比分析 |
-| AI 会话列表 | `GET /api/v1/user/ai/sessions` | 查看 / 删除历史对话 |
-| AI 会话消息 | `GET /api/v1/user/ai/sessions/:id/messages` | 查看对话历史记录 |
+| AI 会话列表 | `GET /api/v1/user/ai/sessions` | 查看 / 删除历史对话（由 chat/chat-stream 自动沉淀） |
+| AI 会话消息 | `GET /api/v1/user/ai/sessions/<int:session_id>/messages` | 查看对话历史记录 |
 
 #### 规划中
 
@@ -346,7 +347,7 @@ stateDiagram-v2
 
 ## 9. 后续扩展规划
 
-以下扩展的完整接口设计见 [api-spec.md](./api-spec.md) §15，功能描述见 [feature-improvements.md](./feature-improvements.md) §一。
+以下扩展能力的接口状态请以 [api-spec.md](./api-spec.md) 和 [api-inventory.md](./api-inventory.md) 为准，功能路线图见 [feature-improvements.md](./feature-improvements.md)。
 
 | 序号 | 功能 | 优先级 | 说明 |
 |------|------|--------|------|

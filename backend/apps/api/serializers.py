@@ -2,6 +2,7 @@
 
 from django.contrib.auth.models import User
 from django.conf import settings
+from django.utils import timezone
 from rest_framework import serializers
 from urllib.parse import quote, urlparse
 
@@ -177,12 +178,23 @@ class BookingOrderSerializer(serializers.ModelSerializer):
     hotel_id = serializers.IntegerField(read_only=True)
     room_type_id = serializers.IntegerField(read_only=True)
     payment_method = serializers.SerializerMethodField()
+    paid_at = serializers.SerializerMethodField()
     total_amount = serializers.SerializerMethodField()
     has_review = serializers.SerializerMethodField()
+    is_lifecycle_anomaly = serializers.SerializerMethodField()
+    lifecycle_warning = serializers.SerializerMethodField()
 
     def get_payment_method(self, obj):
         latest_payment = obj.payments.order_by("-id").first()
         return latest_payment.method if latest_payment else ""
+
+    def get_paid_at(self, obj):
+        if obj.paid_at:
+            return obj.paid_at
+        latest_payment = obj.payments.order_by("-id").first()
+        if latest_payment and latest_payment.paid_at:
+            return latest_payment.paid_at
+        return None
 
     def get_total_amount(self, obj):
         return obj.pay_amount
@@ -192,6 +204,17 @@ class BookingOrderSerializer(serializers.ModelSerializer):
             return obj.review is not None
         except Exception:
             return False
+
+    def get_is_lifecycle_anomaly(self, obj):
+        return bool(self.get_lifecycle_warning(obj))
+
+    def get_lifecycle_warning(self, obj):
+        today = timezone.localdate()
+        if obj.status == BookingOrder.STATUS_CHECKED_IN and obj.check_out_date < today:
+            return f"订单离店日 {obj.check_out_date} 已过，系统将自动完结"
+        if obj.status in {BookingOrder.STATUS_PAID, BookingOrder.STATUS_CONFIRMED} and obj.check_out_date < today:
+            return f"订单离店日 {obj.check_out_date} 已过，仍未办理入住/退房，请人工核查"
+        return ""
 
     class Meta:
         model = BookingOrder
@@ -207,6 +230,11 @@ class BookingOrderSerializer(serializers.ModelSerializer):
             "status",
             "payment_status",
             "payment_method",
+            "paid_at",
+            "confirmed_at",
+            "checked_in_at",
+            "completed_at",
+            "cancelled_at",
             "check_in_date",
             "check_out_date",
             "guest_name",
@@ -220,6 +248,8 @@ class BookingOrderSerializer(serializers.ModelSerializer):
             "pay_amount",
             "total_amount",
             "has_review",
+            "is_lifecycle_anomaly",
+            "lifecycle_warning",
             "created_at",
         ]
 
@@ -276,7 +306,7 @@ class RegisterSerializer(serializers.Serializer):
 class InitSetupSerializer(serializers.Serializer):
     """InitSetup 序列化器：用于接口参数校验或响应数据转换。"""
     username = serializers.CharField(max_length=150, min_length=3)
-    password = serializers.CharField(write_only=True, min_length=6)
+    password = serializers.CharField(write_only=True, min_length=8)
     confirm_password = serializers.CharField(write_only=True)
 
     def validate(self, attrs):
@@ -369,6 +399,9 @@ class HotelCreateSerializer(serializers.ModelSerializer):
             "is_recommended",
             "status",
         ]
+        extra_kwargs = {
+            "name": {"validators": []},
+        }
 
 
 class HotelUpdateSerializer(HotelCreateSerializer):
@@ -393,6 +426,10 @@ class RoomTypeCreateSerializer(serializers.ModelSerializer):
             "image",
             "description",
         ]
+        validators = []
+        extra_kwargs = {
+            "name": {"validators": []},
+        }
 
 
 class RoomTypeUpdateSerializer(RoomTypeCreateSerializer):
@@ -455,6 +492,7 @@ class AIChatSerializer(serializers.Serializer):
     question = serializers.CharField()
     hotel_id = serializers.IntegerField(required=False, allow_null=True)
     order_id = serializers.IntegerField(required=False, allow_null=True)
+    session_id = serializers.IntegerField(required=False, allow_null=True, min_value=1)
     booking_context = serializers.JSONField(required=False)
 
 
@@ -499,8 +537,15 @@ class PasswordChangeSerializer(serializers.Serializer):
 
 class UploadSerializer(serializers.Serializer):
     """Upload 序列化器：用于接口参数校验或响应数据转换。"""
+    ALLOWED_SCENES = ("hotel", "room_type", "review")
+
     file = serializers.FileField()
-    scene = serializers.CharField(max_length=50)
+    scene = serializers.ChoiceField(choices=ALLOWED_SCENES)
+
+    def validate_file(self, value):
+        if getattr(value, "size", 0) <= 0:
+            raise serializers.ValidationError("上传文件不能为空")
+        return value
 
 
 class InvoiceTitleSerializer(serializers.ModelSerializer):
@@ -754,6 +799,19 @@ class AIHotelCompareSerializer(serializers.Serializer):
     )
     check_in_date = serializers.DateField(required=False, allow_null=True)
     check_out_date = serializers.DateField(required=False, allow_null=True)
+
+    def validate(self, attrs):
+        ids = attrs.get("hotel_ids", [])
+        deduped_ids = list(dict.fromkeys(ids))
+        if len(deduped_ids) < 2:
+            raise serializers.ValidationError({"hotel_ids": "至少需要 2 家不同的酒店进行对比"})
+        attrs["hotel_ids"] = deduped_ids
+
+        check_in_date = attrs.get("check_in_date")
+        check_out_date = attrs.get("check_out_date")
+        if check_in_date and check_out_date and check_out_date <= check_in_date:
+            raise serializers.ValidationError({"check_out_date": "退房日期必须晚于入住日期"})
+        return attrs
 
 
 class AICallLogSerializer(serializers.ModelSerializer):
