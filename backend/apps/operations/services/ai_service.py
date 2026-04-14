@@ -25,6 +25,12 @@ logger = logging.getLogger(__name__)
 class AIChatService:
     """AI 对话服务封装，支持多供应商切换、提示词渲染与上下文绑定。"""
 
+    USER_CHAT_SCENE_ALIASES = {
+        "customer_service": "customer_service",
+        "booking_assistant": "booking_assistant",
+        "general": "general",
+    }
+
     BOOKING_INTENT_KEYWORDS = (
         "订酒店",
         "想订",
@@ -33,7 +39,6 @@ class AIChatService:
         "预订",
         "订房",
         "订个房",
-        "订",
         "住酒店",
         "入住",
         "房型",
@@ -49,6 +54,20 @@ class AIChatService:
     BOOKING_FAMILY_KEYWORDS = ("亲子", "家庭", "带娃", "儿童", "一家人")
     BOOKING_BUSINESS_KEYWORDS = ("出差", "商务", "商旅", "开会")
     BOOKING_NEARBY_KEYWORDS = ("附近", "最近", "离", "周边")
+    CUSTOMER_SERVICE_KEYWORDS = (
+        "订单",
+        "取消",
+        "退款",
+        "支付",
+        "发票",
+        "会员",
+        "积分",
+        "通知",
+        "改期",
+        "改签",
+        "入住",
+        "离店",
+    )
     POI_CANDIDATES = (
         {"name": "西湖", "city": "杭州", "lat": 30.243060, "lng": 120.150818, "aliases": ["西湖", "杭州西湖"]},
         {"name": "天安门", "city": "北京", "lat": 39.908722, "lng": 116.397499, "aliases": ["天安门"]},
@@ -73,7 +92,38 @@ class AIChatService:
         return self.settings.enabled and self._provider is not None and self._provider.is_configured
 
     def normalize_scene(self, scene: str) -> str:
-        return self.prompt_service.normalize_scene(scene)
+        return self._normalize_requested_scene(scene)
+
+    def _normalize_requested_scene(self, scene: str) -> str:
+        raw = (scene or "").strip().lower()
+        normalized = self.USER_CHAT_SCENE_ALIASES.get(raw)
+        if not normalized:
+            raise PromptSceneError(f"unsupported AI scene: {scene}")
+        return normalized
+
+    def _resolve_chat_mode(
+        self,
+        *,
+        requested_scene: str,
+        question: str,
+        hotel_id: int | None,
+        booking_context: dict[str, Any] | None,
+    ) -> str:
+        if requested_scene == "customer_service":
+            return "customer_service"
+        if requested_scene == "booking_assistant":
+            return "booking_assistant"
+        if any(keyword in question for keyword in self.CUSTOMER_SERVICE_KEYWORDS):
+            return "customer_service"
+        normalized_context = self._normalize_booking_context(booking_context)
+        if self._should_enter_booking_flow(
+            question,
+            hotel_id=hotel_id,
+            booking_context=normalized_context,
+            force_booking_flow=False,
+        ):
+            return "booking_assistant"
+        return "customer_service"
 
     def reply_customer_service(
         self,
@@ -85,28 +135,47 @@ class AIChatService:
         order_id: int | None = None,
         booking_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        normalized_scene = self.normalize_scene(scene)
-        booking_assistant = self._build_booking_assistant_response(
-            user=user,
+        requested_scene = self._normalize_requested_scene(scene)
+        chat_mode = self._resolve_chat_mode(
+            requested_scene=requested_scene,
             question=question,
-            requested_scene=scene,
             hotel_id=hotel_id,
             booking_context=booking_context,
         )
-        if booking_assistant is not None:
-            return {
-                "scene": normalized_scene,
-                "answer": booking_assistant["answer"],
-                "booking_assistant": booking_assistant,
-            }
+        booking_assistant = None
+        allow_booking_assistant = chat_mode == "booking_assistant"
 
-        _, messages = self.build_customer_service_messages(
-            user=user,
-            scene=normalized_scene,
-            question=question,
-            hotel_id=hotel_id,
-            order_id=order_id,
-        )
+        if allow_booking_assistant:
+            booking_assistant = self._build_booking_assistant_response(
+                user=user,
+                question=question,
+                requested_scene=requested_scene,
+                hotel_id=hotel_id,
+                booking_context=booking_context,
+            )
+            if booking_assistant is not None:
+                return {
+                    "scene": chat_mode,
+                    "answer": booking_assistant["answer"],
+                    "booking_assistant": booking_assistant,
+                }
+
+        if chat_mode == "booking_assistant":
+            _, messages = self.build_booking_assistant_messages(
+                user=user,
+                scene=chat_mode,
+                question=question,
+                hotel_id=hotel_id,
+                booking_context=booking_context,
+            )
+        else:
+            _, messages = self.build_customer_service_messages(
+                user=user,
+                scene=chat_mode,
+                question=question,
+                hotel_id=hotel_id,
+                order_id=order_id,
+            )
 
         try:
             if self.is_available():
@@ -119,7 +188,7 @@ class AIChatService:
             answer = ""
 
         return {
-            "scene": normalized_scene,
+            "scene": chat_mode,
             "answer": answer,
             "booking_assistant": None,
         }
@@ -141,8 +210,7 @@ class AIChatService:
         hotel_id: int | None = None,
         order_id: int | None = None,
     ) -> tuple[str, list[dict[str, str]]]:
-        normalized_scene = self.normalize_scene(scene)
-        if normalized_scene != "customer_service":
+        if scene != "customer_service":
             raise PromptSceneError(f"unsupported AI scene: {scene}")
 
         prompt_context = self._build_customer_service_prompt_context(
@@ -160,7 +228,37 @@ class AIChatService:
                 "content": self.prompt_service.render("customer_service/user.j2", question=question),
             },
         ]
-        return normalized_scene, messages
+        return scene, messages
+
+    def build_booking_assistant_messages(
+        self,
+        *,
+        user: Any,
+        scene: str,
+        question: str,
+        hotel_id: int | None = None,
+        booking_context: dict[str, Any] | None = None,
+    ) -> tuple[str, list[dict[str, str]]]:
+        if scene != "booking_assistant":
+            raise PromptSceneError(f"unsupported AI scene: {scene}")
+
+        prompt_context = self._build_booking_assistant_prompt_context(
+            user=user,
+            question=question,
+            hotel_id=hotel_id,
+            booking_context=booking_context,
+        )
+        messages = [
+            {
+                "role": "system",
+                "content": self.prompt_service.render("booking_assistant/system.j2", **prompt_context),
+            },
+            {
+                "role": "user",
+                "content": self.prompt_service.render("booking_assistant/user.j2", **prompt_context),
+            },
+        ]
+        return scene, messages
 
     def create_chat_completion(
         self,
@@ -232,7 +330,8 @@ class AIChatService:
                 for item in RoomType.objects.filter(hotel=requested_hotel, status=RoomType.STATUS_ONLINE).order_by("id")[:10]
             ]
 
-        recent_orders = [self._serialize_order(item) for item in user_orders[:5]]
+        recent_order_models = list(user_orders[:5])
+        recent_orders = [self._serialize_order(item) for item in recent_order_models]
         recommended_hotels = [
             self._serialize_hotel(item)
             for item in Hotel.objects.filter(status=Hotel.STATUS_ONLINE, is_recommended=True).order_by("-updated_at", "-id")[:5]
@@ -241,6 +340,11 @@ class AIChatService:
             self._serialize_notice(item)
             for item in SystemNotice.objects.filter(user=user).order_by("-created_at", "-id")[:5]
         ]
+        agent_hints = self._build_customer_service_agent_hints(
+            requested_order=requested_order,
+            recent_orders=recent_order_models,
+            recent_notices=recent_notices,
+        )
 
         return {
             "now": timezone.localtime().isoformat(timespec="seconds"),
@@ -264,6 +368,128 @@ class AIChatService:
             "recent_orders_json": self.prompt_service.dumps(recent_orders),
             "recommended_hotels_json": self.prompt_service.dumps(recommended_hotels),
             "recent_notices_json": self.prompt_service.dumps(recent_notices),
+            "agent_hints_json": self.prompt_service.dumps(agent_hints),
+        }
+
+    def _build_customer_service_agent_hints(
+        self,
+        *,
+        requested_order: BookingOrder | None,
+        recent_orders: list[BookingOrder],
+        recent_notices: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        cancellable_statuses = {
+            BookingOrder.STATUS_PENDING_PAYMENT,
+            BookingOrder.STATUS_PAID,
+            BookingOrder.STATUS_CONFIRMED,
+            BookingOrder.STATUS_REFUNDING,
+        }
+        cancellable_orders = [
+            {
+                "id": order.id,
+                "order_no": order.order_no,
+                "status": order.status,
+                "status_label": order.get_status_display(),
+                "payment_status": order.payment_status,
+                "payment_status_label": order.get_payment_status_display(),
+            }
+            for order in recent_orders
+            if order.status in cancellable_statuses
+        ]
+        unpaid_orders = [
+            {
+                "id": order.id,
+                "order_no": order.order_no,
+                "status": order.status,
+                "status_label": order.get_status_display(),
+                "payment_status": order.payment_status,
+                "payment_status_label": order.get_payment_status_display(),
+            }
+            for order in recent_orders
+            if order.payment_status == BookingOrder.PAYMENT_UNPAID
+        ]
+
+        suggested_actions = [
+            {
+                "id": "query_order_status",
+                "description": "查询订单状态与支付状态",
+                "write": False,
+                "endpoint": "GET /api/v1/user/orders/{id}",
+                "requires_confirmation": False,
+            },
+            {
+                "id": "cancel_order",
+                "description": "取消订单（写操作）",
+                "write": True,
+                "endpoint": "POST /api/v1/user/orders/cancel",
+                "requires_confirmation": True,
+            },
+            {
+                "id": "pay_order",
+                "description": "继续支付订单（写操作）",
+                "write": True,
+                "endpoint": "POST /api/v1/user/orders/pay",
+                "requires_confirmation": True,
+            },
+            {
+                "id": "apply_invoice",
+                "description": "提交发票申请（写操作）",
+                "write": True,
+                "endpoint": "POST /api/v1/user/invoices/apply",
+                "requires_confirmation": True,
+            },
+            {
+                "id": "query_notices",
+                "description": "查询最近通知",
+                "write": False,
+                "endpoint": "GET /api/v1/user/notices",
+                "requires_confirmation": False,
+            },
+        ]
+
+        return {
+            "safety_policy": {
+                "allow_write_operations": False,
+                "write_requires_user_confirmation": True,
+                "must_use_user_owned_data_only": True,
+            },
+            "requested_order_id": requested_order.id if requested_order else None,
+            "cancellable_orders": cancellable_orders[:5],
+            "unpaid_orders": unpaid_orders[:5],
+            "recent_notice_count": len(recent_notices),
+            "suggested_actions": suggested_actions,
+        }
+
+    def _build_booking_assistant_prompt_context(
+        self,
+        *,
+        user: Any,
+        question: str,
+        hotel_id: int | None,
+        booking_context: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        context = self._normalize_booking_context(booking_context)
+        cities = self._list_available_cities()
+
+        selected_hotel = None
+        selected_hotel_id = context.get("selected_hotel_id")
+        if hotel_id:
+            selected_hotel = Hotel.objects.filter(id=hotel_id, status=Hotel.STATUS_ONLINE).first()
+        elif selected_hotel_id:
+            selected_hotel = Hotel.objects.filter(id=selected_hotel_id, status=Hotel.STATUS_ONLINE).first()
+
+        return {
+            "now": timezone.localtime().isoformat(timespec="seconds"),
+            "user_profile_json": self.prompt_service.dumps(
+                {
+                    "id": getattr(user, "id", None),
+                    "username": getattr(user, "username", ""),
+                }
+            ),
+            "question": question,
+            "booking_context_json": self.prompt_service.dumps(context),
+            "available_cities_json": self.prompt_service.dumps(cities),
+            "selected_hotel_json": self.prompt_service.dumps(self._serialize_hotel(selected_hotel) if selected_hotel else None),
         }
 
     def _build_dictionary_payload(self) -> dict[str, list[dict[str, Any]]]:
@@ -1012,19 +1238,13 @@ class AIChatService:
     def _extract_booking_slots_with_llm(self, *, question: str, cities: list[str]) -> dict[str, Any]:
         if not self.is_available():
             return {}
-
-        system_prompt = (
-            "你是酒店预订意图解析器。请从用户输入中提取订房结构化字段，并且只输出 JSON。"
-            "字段: selected_city(字符串或null), hotel_keyword(字符串或null), reset(布尔), switch_hotel(布尔),"
-            " sort_by(可选:price_asc/rating_desc/price_desc/null), budget_max(整数或null), min_rating(数字或null), nearby_radius_km(整数或null)。"
-            "reset 用于表达‘重新开始/重选城市’，switch_hotel 用于表达‘换一家/不要这个酒店’。"
-        )
-        user_prompt = (
-            f"可选城市: {', '.join(cities)}\n"
-            f"用户输入: {question}\n"
-            "只返回 JSON，不要解释。"
-        )
         try:
+            prompt_context = {
+                "question": question,
+                "available_cities_json": self.prompt_service.dumps(cities),
+            }
+            system_prompt = self.prompt_service.render("booking_assistant/slot_system.j2", **prompt_context)
+            user_prompt = self.prompt_service.render("booking_assistant/slot_user.j2", **prompt_context)
             result = self.create_chat_completion(
                 [
                     {"role": "system", "content": system_prompt},
@@ -1044,17 +1264,64 @@ class AIChatService:
                 return {}
 
             return {
-                "selected_city": payload.get("selected_city") or None,
-                "hotel_keyword": payload.get("hotel_keyword") or None,
+                "selected_city": self._sanitize_slot_city(payload.get("selected_city"), cities),
+                "hotel_keyword": self._sanitize_slot_hotel_keyword(payload.get("hotel_keyword")),
                 "reset": bool(payload.get("reset", False)),
                 "switch_hotel": bool(payload.get("switch_hotel", False)),
-                "sort_by": payload.get("sort_by") or None,
-                "budget_max": payload.get("budget_max"),
-                "min_rating": payload.get("min_rating"),
-                "nearby_radius_km": payload.get("nearby_radius_km"),
+                "sort_by": self._sanitize_slot_sort_by(payload.get("sort_by")),
+                "budget_max": self._sanitize_slot_int(payload.get("budget_max"), minimum=80, maximum=50000),
+                "min_rating": self._sanitize_slot_float(payload.get("min_rating"), minimum=0, maximum=5),
+                "nearby_radius_km": self._sanitize_slot_int(payload.get("nearby_radius_km"), minimum=1, maximum=30),
             }
         except Exception:
             return {}
+
+    def _sanitize_slot_city(self, value: Any, cities: list[str]) -> str | None:
+        if not value:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        return text if text in cities else None
+
+    def _sanitize_slot_hotel_keyword(self, value: Any) -> str | None:
+        if not value:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        if len(text) > 60:
+            text = text[:60]
+        return text
+
+    def _sanitize_slot_sort_by(self, value: Any) -> str | None:
+        allowed = {"price_asc", "rating_desc", "price_desc"}
+        if not value:
+            return None
+        text = str(value).strip()
+        return text if text in allowed else None
+
+    def _sanitize_slot_int(self, value: Any, *, minimum: int, maximum: int) -> int | None:
+        if value is None or value == "":
+            return None
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return None
+        if parsed < minimum or parsed > maximum:
+            return None
+        return parsed
+
+    def _sanitize_slot_float(self, value: Any, *, minimum: float, maximum: float) -> float | None:
+        if value is None or value == "":
+            return None
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return None
+        if parsed < minimum or parsed > maximum:
+            return None
+        return parsed
 
     def _build_city_option(self, city: str) -> dict[str, Any]:
         return {

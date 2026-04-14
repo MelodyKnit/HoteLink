@@ -339,6 +339,96 @@ class UserApiTests(ApiBaseTestCase):
         self.assertIn('"type": "chunk"', payload)
         self.assertIn('"type": "done"', payload)
 
+    def test_user_ai_chat_customer_service_should_not_trigger_booking_assistant(self):
+        """验证客服场景咨询订单操作时，不会误触发订房助手流程。"""
+        self.login_user()
+        response = self.client.post(
+            "/api/v1/user/ai/chat",
+            {
+                "scene": "customer_service",
+                "question": "我想取消订单，应该怎么操作？",
+                "order_id": self.order.id,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertEqual(data["scene"], "customer_service")
+        self.assertIsNone(data.get("booking_assistant"))
+
+    def test_user_ai_chat_customer_service_should_not_call_booking_builder(self):
+        """验证 customer_service 场景不会调用订房助手构建逻辑。"""
+        self.login_user()
+        with patch(
+            "apps.operations.services.ai_service.AIChatService._build_booking_assistant_response",
+            side_effect=AssertionError("customer_service should not invoke booking flow"),
+        ):
+            response = self.client.post(
+                "/api/v1/user/ai/chat",
+                {
+                    "scene": "customer_service",
+                    "question": "我的订单现在什么状态？",
+                    "order_id": self.order.id,
+                },
+                format="json",
+            )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertEqual(data["scene"], "customer_service")
+        self.assertIsNone(data.get("booking_assistant"))
+
+    def test_user_ai_chat_general_customer_question_should_route_to_customer_service(self):
+        """验证 general 场景下客服类问题会路由到客服模式。"""
+        self.login_user()
+        response = self.client.post(
+            "/api/v1/user/ai/chat",
+            {
+                "scene": "general",
+                "question": "怎么取消我的订单？",
+                "order_id": self.order.id,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertEqual(data["scene"], "customer_service")
+        self.assertIsNone(data.get("booking_assistant"))
+
+    def test_user_ai_chat_booking_assistant_scene_should_return_booking_scene(self):
+        """验证 booking_assistant 场景会返回 booking_assistant scene。"""
+        self.login_user()
+        response = self.client.post(
+            "/api/v1/user/ai/chat",
+            {
+                "scene": "booking_assistant",
+                "question": "我想订酒店",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertEqual(data["scene"], "booking_assistant")
+        self.assertIsNotNone(data.get("booking_assistant"))
+
+    def test_user_ai_chat_stream_customer_service_should_not_return_booking_meta(self):
+        """验证客服场景流式接口不会返回订房助手 meta 数据。"""
+        self.login_user()
+        response = self.client.post(
+            "/api/v1/user/ai/chat/stream",
+            {
+                "scene": "customer_service",
+                "question": "怎么取消我这个订单？",
+                "order_id": self.order.id,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = b"".join(response.streaming_content).decode("utf-8")
+        self.assertIn('"type": "meta"', payload)
+        self.assertIn('"scene": "customer_service"', payload)
+        self.assertNotIn('"booking_assistant"', payload)
+        self.assertNotIn('"phase": "select_city"', payload)
+
     def test_user_ai_chat_should_persist_session_and_messages(self):
         """验证 AI 对话会自动落库会话与消息。"""
         self.login_user()

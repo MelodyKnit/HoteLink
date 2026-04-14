@@ -379,6 +379,7 @@ def fallback_ai_reply(scene: str) -> str:
     """
     _FALLBACKS = {
         "customer_service": "您好，这里是 HoteLink 智能客服。当前我暂时无法从系统已接入的数据中生成可靠答复，请稍后重试，或联系人工客服进一步处理。",
+        "booking_assistant": "您好，这里是 HoteLink AI 订房助手。当前我暂时无法完成智能筛选，您可以先告诉我城市和预算，我会继续为您定位可预订酒店。",
         "report_summary": "当前时间段内营收与订单波动建议结合入住率、取消率和均价变化综合判断。",
         "review_summary": "近期评价主要关注服务体验、卫生情况和入住便利性，建议优先处理重复出现的问题。",
         "reply_suggestion": "感谢您的反馈，我们会认真优化相关体验，期待您的再次入住。",

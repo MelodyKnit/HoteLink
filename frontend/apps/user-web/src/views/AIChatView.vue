@@ -98,7 +98,7 @@
           <template v-else-if="msg.role === 'assistant'">
             <div class="ai-markdown space-y-2" v-html="renderMd(msg.content)" />
             <!-- Smart Options -->
-            <div v-if="msg.bookingAssistant?.options?.length" class="mt-4 space-y-2 border-t border-gray-100 pt-3">
+            <div v-if="isBookingMode && msg.bookingAssistant?.options?.length" class="mt-4 space-y-2 border-t border-gray-100 pt-3">
               <p class="text-xs font-medium text-gray-500">💡 推荐选项：</p>
               <div
                 v-for="option in msg.bookingAssistant.options"
@@ -138,14 +138,26 @@
       <!-- Empty State Suggestion -->
       <div v-if="messages.length === 1" class="px-2">
         <div class="rounded-2xl bg-white p-4 shadow-sm border border-brand/10">
-          <p class="text-xs text-gray-600 leading-relaxed">
-            💬 直接告诉我您的需求，比如：<br/>
-            <span class="mt-2 inline-block">
-              • "我想在上海订个五星酒店"<br/>
-              • "帮我找近地铁的酒店"<br/>
-              • "预算500左右，要高评分的"
-            </span>
-          </p>
+          <template v-if="isBookingMode">
+            <p class="text-xs text-gray-600 leading-relaxed">
+              💬 直接告诉我您的订房需求，比如：<br/>
+              <span class="mt-2 inline-block">
+                • "我想在上海订个五星酒店"<br/>
+                • "帮我找近地铁的酒店"<br/>
+                • "预算500左右，要高评分的"
+              </span>
+            </p>
+          </template>
+          <template v-else>
+            <p class="text-xs text-gray-600 leading-relaxed">
+              💬 可以直接问我系统与订单问题，比如：<br/>
+              <span class="mt-2 inline-block">
+                • "怎么取消订单？"<br/>
+                • "退款大概多久到账？"<br/>
+                • "我的发票申请到哪一步了？"
+              </span>
+            </p>
+          </template>
         </div>
       </div>
     </div>
@@ -161,7 +173,7 @@
     <!-- Input -->
     <div class="safe-area-bottom border-t border-gray-200 bg-white p-3 shadow-lg">
       <div class="flex gap-2">
-        <input v-model="input" @keydown.enter="sendMessage()" @focus="onInputFocus" placeholder="直接问我，我会帮您找到合适的酒店..."
+        <input v-model="input" @keydown.enter="sendMessage()" @focus="onInputFocus" :placeholder="inputPlaceholder"
           class="flex-1 rounded-2xl border-2 border-gray-200 px-4 py-2.5 text-sm outline-none focus:border-brand transition-colors" />
         <button @click="sendMessage()" :disabled="!input.trim() || sending"
           class="flex-shrink-0 rounded-2xl bg-gradient-to-r from-brand to-brand/90 px-6 py-2.5 text-sm font-medium text-white hover:shadow-lg disabled:opacity-50 transition-all">
@@ -276,6 +288,9 @@ const isBookingMode = route.path === '/ai-booking'
 const scene = isBookingMode ? 'booking_assistant' : 'customer_service'
 
 const pageTitle = isBookingMode ? 'AI 订房助手 🧭' : 'AI 智能客服 💬'
+const inputPlaceholder = isBookingMode
+  ? '直接描述您的订房需求，我会帮您快速筛选酒店与房型...'
+  : '直接咨询订单、退款、发票、会员等问题...'
 
 const sessionKey = isBookingMode ? 'hotelink_ai_booking_chat_state' : 'hotelink_ai_customer_chat_state'
 const historyStorageKey = isBookingMode ? 'hotelink_ai_booking_history' : 'hotelink_ai_customer_history'
@@ -399,7 +414,7 @@ function restoreHistory(idx: number) {
   if (!history) return
 
   messages.value = normalizeMessages(history.messages).filter(m => !m.loading)
-  bookingContext.value = { ...history.bookingContext }
+  bookingContext.value = isBookingMode ? { ...history.bookingContext } : {}
   backendSessionId.value = Number.isFinite(Number(history.backendSessionId)) ? Number(history.backendSessionId) : null
   showHistoryPanel.value = false
   scrollBottom()
@@ -494,6 +509,7 @@ function mergeBookingContext(contextPatch?: Record<string, unknown>): BookingCon
 }
 
 function shouldCarryBookingContext(message: string, contextPatch?: Record<string, unknown>): boolean {
+  if (!isBookingMode) return false
   if (contextPatch) return true
   if (!bookingContext.value.intent) return false
   const value = message.trim()
@@ -546,7 +562,7 @@ async function sendMessage(text?: string, contextPatch?: Record<string, unknown>
   const msg = (text || input.value).trim()
   if (!msg || sending.value) return
   
-  const carryBookingContext = shouldCarryBookingContext(msg, contextPatch)
+  const carryBookingContext = isBookingMode && shouldCarryBookingContext(msg, contextPatch)
   const nextBookingContext = carryBookingContext ? mergeBookingContext(contextPatch) : undefined
   input.value = ''
   messages.value.push(createMessage('user', msg))
@@ -565,15 +581,17 @@ async function sendMessage(text?: string, contextPatch?: Record<string, unknown>
       question: msg,
       hotel_id: nextBookingContext?.selected_hotel_id || undefined,
       session_id: backendSessionId.value || undefined,
-      booking_context: nextBookingContext,
+      booking_context: isBookingMode ? nextBookingContext : undefined,
     })) {
       if (event.type === 'meta') {
-        pendingBookingAssistant = (event.booking_assistant as BookingAssistant) || null
+        pendingBookingAssistant = isBookingMode
+          ? ((event.booking_assistant as BookingAssistant) || null)
+          : null
         const incomingSessionId = Number(event.session_id)
         if (Number.isFinite(incomingSessionId) && incomingSessionId > 0) {
           backendSessionId.value = incomingSessionId
         }
-        if (pendingBookingAssistant?.context) {
+        if (isBookingMode && pendingBookingAssistant?.context) {
           bookingContext.value = { ...pendingBookingAssistant.context }
         }
         continue
@@ -597,13 +615,13 @@ async function sendMessage(text?: string, contextPatch?: Record<string, unknown>
       if (isDone) break
     }
     if (!receivedAny) throw new Error('no reply')
-    if (!pendingBookingAssistant && !carryBookingContext) {
+    if (!isBookingMode || (!pendingBookingAssistant && !carryBookingContext)) {
       bookingContext.value = {}
     }
   } catch (err) {
     if (!receivedAny) messages.value.pop()
     messages.value.push(createMessage('assistant', generateFallback(msg)))
-    if (!carryBookingContext) {
+    if (!isBookingMode || !carryBookingContext) {
       bookingContext.value = {}
     }
   }
@@ -633,6 +651,9 @@ function generateFallback(q: string): string {
 
 onMounted(async () => {
   const restored = restoreSessionState()
+  if (!isBookingMode) {
+    bookingContext.value = {}
+  }
   chatHistories.value = loadHistories()
   scrollBottom()
   const ask = typeof route.query.ask === 'string' ? route.query.ask.trim() : ''
