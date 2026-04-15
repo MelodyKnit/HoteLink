@@ -116,3 +116,18 @@ class AICallLog(models.Model):
 
     def __str__(self) -> str:
         return f"{self.scene} / {self.provider} / {self.status}"
+
+
+class RuntimeConfig(models.Model):
+    """运行时配置键值表，用于持久化动态配置（如 AI 供应商设置）。"""
+
+    key = models.CharField(max_length=100, unique=True)
+    value = models.JSONField(default=dict, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Runtime Config"
+        verbose_name_plural = "Runtime Configs"
+
+    def __str__(self) -> str:
+        return self.key

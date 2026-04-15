@@ -19,6 +19,7 @@ from apps.api.views import (
     AdminAIOrderAnomalySummaryView,
     AdminAIPricingSuggestionView,
     AdminAIReviewSentimentView,
+    AdminAITestView,
     AdminAIUsageStatsView,
     AdminCouponTemplatesView,
     AdminCouponTemplateUpdateView,
@@ -200,6 +201,7 @@ urlpatterns = [
     path("admin/ai/provider/add", AdminAIProviderAddView.as_view(), name="admin-ai-provider-add"),
     path("admin/ai/provider/switch", AdminAIProviderSwitchView.as_view(), name="admin-ai-provider-switch"),
     path("admin/ai/provider/delete", AdminAIProviderDeleteView.as_view(), name="admin-ai-provider-delete"),
+    path("admin/ai/test", AdminAITestView.as_view(), name="admin-ai-test"),
     # 系统重置接口
     path("admin/system/reset", AdminSystemResetView.as_view(), name="admin-system-reset"),
 ]

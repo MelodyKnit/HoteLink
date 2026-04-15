@@ -51,7 +51,7 @@
 - 路由总数：`103`（含 `/api/v1/` 根路由）
 - View 类：`89`
 - Serializer 类：`71`
-- 业务模型：`21`
+- 业务模型：`22`
 
 ### 3.2 前端
 
@@ -109,6 +109,7 @@
 - `AuditLog`
 - `SystemNotice`
 - `AICallLog`
+- `RuntimeConfig`
 
 ---
 

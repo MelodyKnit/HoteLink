@@ -59,6 +59,7 @@ pnpm-debug.log*
 secrets/
 backend/.ai_providers.json
 **/.ai_providers.json
+backend/celerybeat-schedule
 private/*
 !private/.gitkeep
 backend/private/*

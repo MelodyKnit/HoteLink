@@ -44,7 +44,7 @@ AI_REASONING_MODEL=deepseek-reasoner
 - `openai` SDK 生态成熟，切换供应商只需改 `base_url`，改动成本低
 - DeepSeek 提供 OpenAI 兼容接口，便于统一接入
 - 所有 AI 调用放在后端，密钥不暴露到前端
-- 通过 `AISettings` + `.ai_providers.json` 支持运行时热切换供应商
+- 通过 `AISettings` + `RuntimeConfig` 支持运行时热切换供应商，数据库优先、文件兜底
 
 ### 3.2 AI 调用链路
 
@@ -143,6 +143,7 @@ build_ai_client(provider) → OpenAI compatible client
 | AI 订单异常摘要 | `POST /api/v1/admin/ai/order-anomaly-summary` | 订单异常模式摘要 |
 | AI 配置管理 | `GET/POST /api/v1/admin/ai/settings` | 读写 AI 开关与配置 |
 | 供应商管理 | `POST /admin/ai/provider/add\|switch\|delete` | 增删改查、切换活跃 |
+| AI 连通性测试 | `POST /api/v1/admin/ai/test` | 验证当前或指定供应商是否可用 |
 | AI 调用日志 | `GET /api/v1/admin/ai/call-logs` | 查询 AICallLog 表，分页返回调用记录 |
 | AI 用量统计 | `GET /api/v1/admin/ai/usage-stats` | 按场景 / 供应商统计 token 用量与费用 |
 
@@ -269,8 +270,8 @@ stateDiagram-v2
 
 ### 7.3 运行时配置持久化
 
-- 供应商配置保存在 `.ai_providers.json`（已 .gitignore 忽略）
-- 管理端修改后实时生效，无需重启服务
+- 供应商配置由 `RuntimeConfig` 持久化到数据库，并同步写入 `.ai_providers.json` 作为兼容兜底
+- 管理端修改后实时生效，无需重启服务；重启或更新镜像后配置也可恢复
 - 切换供应商时前一供应商配置保留，方便回切
 
 ### 7.4 用户端 AI 客服接口
@@ -291,8 +292,10 @@ stateDiagram-v2
 - 查看所有供应商状态
 - 快捷添加内置供应商
 - 编辑供应商模型与 Base URL
+- 编辑时回显 API Key，并可显示/隐藏密钥
 - 切换当前活跃供应商
 - 删除非活跃供应商
+- AI 连通性测试面板
 
 用户端 AI 客服页（`/ai-chat`、`/ai-booking`）支持：
 

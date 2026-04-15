@@ -1,14 +1,14 @@
 <template>
-  <div class="min-h-[100dvh] overflow-hidden bg-slate-100 text-slate-900">
+  <div class="h-[100dvh] overflow-hidden bg-slate-100 text-slate-900">
     <!-- Mobile overlay -->
     <Transition name="fade">
       <div v-if="sidebarOpen" class="fixed inset-0 z-40 bg-black/40 lg:hidden" @click="sidebarOpen = false" />
     </Transition>
 
-    <div class="flex min-h-[100dvh]">
+    <div class="flex h-full min-h-0">
       <!-- Sidebar -->
       <aside
-        class="fixed inset-y-0 left-0 z-50 flex w-64 flex-col bg-slate-900 text-white transition-transform duration-200 lg:static lg:translate-x-0"
+        class="fixed inset-y-0 left-0 z-50 flex h-[100dvh] w-64 flex-col overflow-y-auto overscroll-contain bg-slate-900 text-white transition-transform duration-200 lg:static lg:translate-x-0"
         :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'"
       >
         <div class="flex h-16 shrink-0 items-center gap-3 px-6">
@@ -16,7 +16,7 @@
           <span class="text-xs text-slate-400">管理端</span>
         </div>
 
-        <nav class="flex-1 overflow-y-auto px-3 py-4">
+        <nav class="flex-1 px-3 py-4">
           <template v-for="group in menuGroups" :key="group.label">
             <p class="mb-2 mt-4 px-3 text-[10px] font-semibold uppercase tracking-wider text-slate-500">{{ group.label }}</p>
             <router-link
@@ -48,7 +48,7 @@
       </aside>
 
       <!-- Main content -->
-      <div class="flex min-h-0 flex-1 flex-col overflow-y-auto scroll-smooth">
+      <div class="flex h-[100dvh] min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain scroll-smooth">
         <!-- Top bar -->
         <header class="sticky top-0 z-30 flex h-16 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 lg:px-8">
           <button class="rounded-lg p-2 text-slate-600 hover:bg-slate-100 lg:hidden" @click="sidebarOpen = !sidebarOpen">

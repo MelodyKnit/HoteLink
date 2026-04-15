@@ -496,6 +496,12 @@ class AIChatSerializer(serializers.Serializer):
     booking_context = serializers.JSONField(required=False)
 
 
+class AITestSerializer(serializers.Serializer):
+    """AITest 序列化器：用于管理员 AI 连通性测试参数校验。"""
+    message = serializers.CharField(max_length=500)
+    provider_name = serializers.CharField(max_length=50, required=False, allow_blank=True)
+
+
 class AIReportSummarySerializer(serializers.Serializer):
     """AIReportSummary 序列化器：用于接口参数校验或响应数据转换。"""
     start_date = serializers.DateField()

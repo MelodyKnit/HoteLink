@@ -17,6 +17,7 @@ from apps.bookings.models import BookingOrder
 from apps.bookings.tasks import sweep_order_lifecycle_anomalies
 from apps.crm.models import ChatMessage, ChatSession, InvoiceTitle, UserCoupon
 from apps.hotels.models import Hotel, RoomInventory, RoomType
+from apps.operations.models import AICallLog
 from apps.payments.models import PaymentRecord
 from apps.users.models import UserProfile
 from config.ai import _get_runtime_config_path
@@ -115,6 +116,12 @@ class ApiBaseTestCase(APITestCase):
         path = _get_runtime_config_path()
         if path.exists():
             path.unlink()
+        try:
+            from apps.operations.models import RuntimeConfig
+
+            RuntimeConfig.objects.filter(key="ai_runtime").delete()
+        except Exception:
+            pass
 
     def login_user(self):
         """登录普通用户并注入 Authorization 头。"""
@@ -895,3 +902,122 @@ class AdminApiTests(ApiBaseTestCase):
         self.assertEqual(response.json()["code"], 0)
         self.assertTrue(response.json()["data"]["reset"])
         self.assertIn("deleted_counts", response.json()["data"])
+
+    def test_admin_ai_reply_suggestion_should_write_call_log(self):
+        """验证评价回复建议调用后会写入 AI 调用日志。"""
+        self.login_admin()
+        from apps.crm.models import Review
+
+        review = Review.objects.create(
+            order=self.order,
+            user=self.user,
+            hotel=self.hotel,
+            score=4,
+            content="服务不错，下次还会入住",
+        )
+
+        with patch("apps.api.views.AIChatService.is_available", return_value=True), patch(
+            "apps.api.views.AIChatService.generate_reply_suggestion",
+            return_value={
+                "suggestions": [{"style": "formal", "content": "感谢您的反馈，期待再次光临。"}],
+                "provider": "testprovider",
+                "model_used": "test-chat-model",
+                "raw": {"usage": {"prompt_tokens": 12, "completion_tokens": 18, "total_tokens": 30}},
+            },
+        ):
+            response = self.client.post(
+                "/api/v1/admin/ai/reply-suggestion",
+                {"review_id": review.id},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["code"], 0)
+        log = AICallLog.objects.filter(scene="reply_suggestion").order_by("-id").first()
+        self.assertIsNotNone(log)
+        self.assertEqual(log.status, AICallLog.STATUS_SUCCESS)
+        self.assertGreaterEqual(log.total_tokens, 30)
+
+    def test_admin_ai_provider_switch_then_call_should_work_and_log(self):
+        """验证新增并切换 AI 供应商后，AI 接口可调用且会记录日志。"""
+        self.login_admin()
+
+        add_response = self.client.post(
+            "/api/v1/admin/ai/provider/add",
+            {
+                "name": "testprovider2",
+                "label": "Test Provider 2",
+                "base_url": "https://example.com/v1",
+                "api_key": "test-key-2",
+                "chat_model": "test-chat-model-2",
+                "reasoning_model": "test-reasoning-model-2",
+            },
+            format="json",
+        )
+        self.assertEqual(add_response.status_code, 200)
+
+        switch_response = self.client.post(
+            "/api/v1/admin/ai/provider/switch",
+            {"provider_name": "testprovider2"},
+            format="json",
+        )
+        self.assertEqual(switch_response.status_code, 200)
+        self.assertEqual(switch_response.json()["data"]["active_provider"], "testprovider2")
+
+        with patch("apps.api.views.AIChatService.is_available", return_value=True), patch(
+            "apps.api.views.AIChatService.generate_report_summary",
+            return_value={
+                "summary": "这是测试摘要",
+                "provider": "testprovider2",
+                "model_used": "test-chat-model-2",
+                "raw": {"usage": {"prompt_tokens": 20, "completion_tokens": 25, "total_tokens": 45}},
+            },
+        ):
+            call_response = self.client.post(
+                "/api/v1/admin/ai/report-summary",
+                {
+                    "start_date": str(timezone.localdate() - timedelta(days=7)),
+                    "end_date": str(timezone.localdate()),
+                },
+                format="json",
+            )
+
+        self.assertEqual(call_response.status_code, 200)
+        self.assertEqual(call_response.json()["code"], 0)
+        self.assertIn("summary", call_response.json()["data"])
+
+        log = AICallLog.objects.filter(scene="report_summary").order_by("-id").first()
+        self.assertIsNotNone(log)
+        self.assertEqual(log.status, AICallLog.STATUS_SUCCESS)
+        self.assertEqual(log.provider, "testprovider2")
+        self.assertEqual(log.model, "test-chat-model-2")
+
+    def test_admin_ai_test_endpoint_should_return_answer_and_write_log(self):
+        """验证管理端 AI 测试接口可调用，并写入 admin_ai_test 日志。"""
+        self.login_admin()
+
+        with patch("apps.api.views.AIChatService.is_available", return_value=True), patch(
+            "apps.api.views.AIChatService.create_chat_completion",
+            return_value={
+                "provider": "testprovider",
+                "model": "test-chat-model",
+                "content": "AI测试成功，当前模型 test-chat-model。",
+                "raw": {"usage": {"prompt_tokens": 10, "completion_tokens": 12, "total_tokens": 22}},
+            },
+        ):
+            response = self.client.post(
+                "/api/v1/admin/ai/test",
+                {"message": "请回复 AI测试成功"},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["code"], 0)
+        self.assertIn("AI测试成功", payload["data"]["answer"])
+
+        log = AICallLog.objects.filter(scene="admin_ai_test").order_by("-id").first()
+        self.assertIsNotNone(log)
+        self.assertEqual(log.status, AICallLog.STATUS_SUCCESS)
+        self.assertEqual(log.provider, "testprovider")
+        self.assertEqual(log.model, "test-chat-model")

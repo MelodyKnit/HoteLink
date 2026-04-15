@@ -369,7 +369,7 @@ export const aiApi = {
   settings: () => get<{
     ai_enabled: boolean
     active_provider: string
-    providers: { name: string; label: string; base_url: string; api_key_configured: boolean; chat_model: string; reasoning_model: string; timeout: number; is_active: boolean }[]
+    providers: { name: string; label: string; base_url: string; api_key_configured: boolean; api_key?: string; chat_model: string; reasoning_model: string; timeout: number; is_active: boolean }[]
     builtin_providers: string[]
     current_provider: Record<string, unknown> | null
   }>('/admin/ai/settings'),
@@ -378,6 +378,8 @@ export const aiApi = {
     post('/admin/ai/provider/add', data),
   switchProvider: (provider_name: string) => post('/admin/ai/provider/switch', { provider_name }),
   deleteProvider: (provider_name: string) => post('/admin/ai/provider/delete', { provider_name }),
+  test: (data: { message: string; provider_name?: string }) =>
+    post<{ scene: string; provider: string; model: string; answer: string; latency_ms: number }>('/admin/ai/test', data),
 }
 
 // ========== Common ==========

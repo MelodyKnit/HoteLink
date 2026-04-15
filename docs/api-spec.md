@@ -152,6 +152,11 @@
 - 系统状态与系统重置
 - AI：配置、供应商管理、摘要、定价、经营报告（含流式）、情感分析、文案与内容生成、异常分析、调用日志、用量统计
 
+补充说明：
+
+- `GET /api/v1/admin/ai/settings` 会返回管理端编辑所需的供应商信息；供应商列表中包含 `api_key`，仅供管理员界面回显与编辑使用。
+- `POST /api/v1/admin/ai/test` 用于管理端连通性测试，可验证当前或指定供应商是否可用。
+
 注意：
 
 - `/api/v1/admin/orders/detail` 返回订单基础信息外，还包含 `payments`（支付记录列表）与订单状态时间字段（如 `paid_at`、`confirmed_at`、`checked_in_at`、`completed_at`、`cancelled_at`）

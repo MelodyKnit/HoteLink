@@ -40,6 +40,7 @@ python manage.py check
 - 新增或修改 AI 能力：同步更新 `docs/ai-integration.md`
 - 新增架构能力或模块：同步更新 `docs/architecture.md`
 - 新增前端页面、路由、交互协议：同步更新 `docs/frontend-system-design.md`
+- 新增或修改 API 路由与请求响应：同步更新 `docs/api-spec.md`
 - 新增部署或环境变量：同步更新 `docs/deployment.md` 与相关 `.env.example`
 
 建议在每次合并前执行一次“文档差异复核”，确认实现、接口、示例、枚举值一致。
@@ -293,7 +294,7 @@ HoteLink/
 前端 Monorepo 已包含完整的双端应用和共享包：
 
 - **用户端**（`apps/user-web`）：24 条路由 / 23 个视图页面，覆盖首页、酒店浏览、预订支付、订单管理、会员中心、AI 客服等
-- **管理端**（`apps/admin-web`）：19 条路由 / 18 个视图页面，覆盖工作台、酒店/房型/库存管理、订单处理、报表、员工、AI 配置等
+- **管理端**（`apps/admin-web`）：19 条路由 / 18 个视图页面，覆盖工作台、酒店/房型/库存管理、订单处理、报表、员工、AI 配置、AI 连通性测试等
 - **共享 UI 组件库**（`packages/ui`）：10 个组件（DataTable / Pagination / Toast / ConfirmDialog / StatCard 等）+ 2 个 Composable
 - **API 封装层**（`packages/api`）：27 个业务 API 模块，按管理端/用户端分组
 - **状态管理**（`packages/store`）：2 个 Pinia Store（管理端/用户端登录态）

@@ -39,8 +39,9 @@ apps/api/views.py —— 项目所有 REST API 视图类。
 from __future__ import annotations
 
 import logging
+import time
 from datetime import timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from io import BytesIO
 from pathlib import Path
 import hashlib
@@ -63,6 +64,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from apps.api.permissions import IsAdminRole, IsSystemAdminRole, get_user_role
 from apps.api.responses import api_response, paginated_response
 from apps.api.serializers import (
+    AITestSerializer,
     AIChatSerializer,
     AIAnomalyReportSerializer,
     AIBusinessReportSerializer,
@@ -393,6 +395,73 @@ def fallback_ai_reply(scene: str) -> str:
         "hotel_compare": "暂无对比结果，请稍后重试。",
     }
     return _FALLBACKS.get(scene, f"当前为 {scene} 场景的占位回复。")
+
+
+def _extract_ai_usage_from_result(result: dict | None) -> tuple[int, int, int]:
+    """从 AI 返回结果中提取 token 用量，兼容 OpenAI usage 字段。"""
+    if not isinstance(result, dict):
+        return 0, 0, 0
+
+    raw = result.get("raw")
+    usage = {}
+    if isinstance(raw, dict):
+        usage = raw.get("usage") or {}
+
+    input_tokens = int(usage.get("prompt_tokens") or result.get("input_tokens") or 0)
+    output_tokens = int(usage.get("completion_tokens") or result.get("output_tokens") or 0)
+    total_tokens = int(usage.get("total_tokens") or result.get("total_tokens") or 0)
+    if total_tokens <= 0:
+        total_tokens = input_tokens + output_tokens
+    return input_tokens, output_tokens, total_tokens
+
+
+def record_ai_call_log(
+    *,
+    user,
+    scene: str,
+    service: AIChatService | None = None,
+    result: dict | None = None,
+    status: str = AICallLog.STATUS_SUCCESS,
+    error_message: str = "",
+    latency_ms: int = 0,
+) -> None:
+    """统一写入 AI 调用日志，避免各接口遗漏埋点。"""
+    provider = ""
+    model = ""
+    if isinstance(result, dict):
+        provider = str(result.get("provider") or "")
+        model = str(result.get("model") or result.get("model_used") or "")
+
+    if service and service.provider:
+        provider = provider or (service.provider.name or "")
+        model = model or (service.provider.chat_model or "")
+
+    input_tokens, output_tokens, total_tokens = _extract_ai_usage_from_result(result)
+    cost_estimate = Decimal("0")
+    if isinstance(result, dict):
+        raw_cost_estimate = result.get("cost_estimate")
+        if raw_cost_estimate not in (None, ""):
+            try:
+                cost_estimate = Decimal(str(raw_cost_estimate))
+            except (InvalidOperation, TypeError, ValueError):
+                cost_estimate = Decimal("0")
+
+    try:
+        AICallLog.objects.create(
+            user=user,
+            scene=(scene or "unknown")[:50],
+            provider=provider[:50] or "unknown",
+            model=model[:100] or "unknown",
+            input_tokens=max(0, input_tokens),
+            output_tokens=max(0, output_tokens),
+            total_tokens=max(0, total_tokens),
+            cost_estimate=cost_estimate,
+            latency_ms=max(0, int(latency_ms)),
+            status=status,
+            error_message=(error_message or "")[:500],
+        )
+    except Exception:
+        logger.exception("Failed to persist AI call log", extra={"scene": scene, "status": status})
 
 
 def persist_ai_chat_turn(
@@ -1611,6 +1680,7 @@ class UserAIChatView(APIView):
             return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         data = serializer.validated_data
         service = AIChatService()
+        started_at = time.perf_counter()
         try:
             result = service.reply_customer_service(
                 user=request.user,
@@ -1624,6 +1694,15 @@ class UserAIChatView(APIView):
             return api_response(code=4002, message=str(exc), data=None, status_code=400)
 
         answer = result["answer"] or fallback_ai_reply(result["scene"])
+        latency_ms = int((time.perf_counter() - started_at) * 1000)
+        record_ai_call_log(
+            user=request.user,
+            scene=result["scene"],
+            service=service,
+            result=result,
+            status=AICallLog.STATUS_SUCCESS,
+            latency_ms=latency_ms,
+        )
         session = persist_ai_chat_turn(
             user=request.user,
             scene=result["scene"],
@@ -1654,6 +1733,7 @@ class UserAIChatStreamView(APIView):
             return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         data = serializer.validated_data
         service = AIChatService()
+        started_at = time.perf_counter()
         try:
             result = service.reply_customer_service(
                 user=request.user,
@@ -1668,6 +1748,15 @@ class UserAIChatStreamView(APIView):
 
         scene = result["scene"]
         answer = result["answer"] or fallback_ai_reply(scene)
+        latency_ms = int((time.perf_counter() - started_at) * 1000)
+        record_ai_call_log(
+            user=request.user,
+            scene=scene,
+            service=service,
+            result=result,
+            status=AICallLog.STATUS_SUCCESS,
+            latency_ms=latency_ms,
+        )
         booking_assistant = result.get("booking_assistant")
         session = persist_ai_chat_turn(
             user=request.user,
@@ -2529,7 +2618,7 @@ class AdminAISettingsView(APIView):
             data={
                 "ai_enabled": ai_settings.enabled,
                 "active_provider": ai_settings.active_provider,
-                "providers": ai_settings.list_providers(),
+                "providers": ai_settings.list_providers(include_api_key=True),
                 "builtin_providers": list(BUILTIN_PROVIDERS.keys()),
                 "current_provider": active.to_dict() if active else None,
             }
@@ -2610,6 +2699,72 @@ class AdminAIProviderDeleteView(APIView):
         })
 
 
+class AdminAITestView(APIView):
+    """管理员 AI 连通性测试接口：用于验证当前（或指定）供应商是否可用。"""
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def post(self, request):
+        serializer = AITestSerializer(data=request.data)
+        if not serializer.is_valid():
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
+
+        data = serializer.validated_data
+        provider_name = (data.get("provider_name") or "").strip() or None
+        service = AIChatService(provider_name=provider_name)
+
+        if not service.is_available():
+            record_ai_call_log(
+                user=request.user,
+                scene="admin_ai_test",
+                service=service,
+                status=AICallLog.STATUS_FAILED,
+                error_message="AI service unavailable",
+            )
+            return api_response(code=4001, message="当前 AI 供应商不可用或未配置", data=None, status_code=400)
+
+        started_at = time.perf_counter()
+        messages = [
+            {
+                "role": "system",
+                "content": "你是酒店管理系统的 AI 连通性测试助手。请简洁回答，并包含“AI测试成功”四个字。",
+            },
+            {
+                "role": "user",
+                "content": data["message"],
+            },
+        ]
+        try:
+            result = service.create_chat_completion(messages, temperature=0)
+            latency_ms = int((time.perf_counter() - started_at) * 1000)
+            record_ai_call_log(
+                user=request.user,
+                scene="admin_ai_test",
+                service=service,
+                result=result,
+                status=AICallLog.STATUS_SUCCESS,
+                latency_ms=latency_ms,
+            )
+            return api_response(
+                data={
+                    "scene": "admin_ai_test",
+                    "provider": result.get("provider") or (service.provider.name if service.provider else ""),
+                    "model": result.get("model") or (service.provider.chat_model if service.provider else ""),
+                    "answer": (result.get("content") or "").strip(),
+                    "latency_ms": latency_ms,
+                }
+            )
+        except Exception as exc:
+            record_ai_call_log(
+                user=request.user,
+                scene="admin_ai_test",
+                service=service,
+                status=AICallLog.STATUS_FAILED,
+                error_message=str(exc),
+                latency_ms=int((time.perf_counter() - started_at) * 1000),
+            )
+            return api_response(code=5001, message="AI 测试调用失败", data={"error": str(exc)}, status_code=500)
+
+
 class AdminAIReportSummaryView(APIView):
     """AI 报表摘要接口：根据订单数据调用 LLM 生成运营总结文案。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
@@ -2621,6 +2776,13 @@ class AdminAIReportSummaryView(APIView):
         data = serializer.validated_data
         service = AIChatService()
         if not service.is_available():
+            record_ai_call_log(
+                user=request.user,
+                scene="report_summary",
+                service=service,
+                status=AICallLog.STATUS_FAILED,
+                error_message="AI service unavailable",
+            )
             orders = BookingOrder.objects.filter(
                 check_in_date__gte=data["start_date"],
                 check_out_date__lte=data["end_date"],
@@ -2634,13 +2796,30 @@ class AdminAIReportSummaryView(APIView):
             summary = f"统计区间内共有 {total_orders} 笔订单，已支付营收 {total_revenue} 元。建议结合取消率与房型均价进一步分析。"
             return api_response(data={"scene": "report_summary", "summary": summary})
         try:
+            started_at = time.perf_counter()
             result = service.generate_report_summary(
                 hotel_id=data.get("hotel_id"),
                 start_date=data["start_date"],
                 end_date=data["end_date"],
             )
+            latency_ms = int((time.perf_counter() - started_at) * 1000)
+            record_ai_call_log(
+                user=request.user,
+                scene="report_summary",
+                service=service,
+                result=result,
+                status=AICallLog.STATUS_SUCCESS,
+                latency_ms=latency_ms,
+            )
             return api_response(data={"scene": "report_summary", "summary": result["summary"]})
-        except Exception:
+        except Exception as exc:
+            record_ai_call_log(
+                user=request.user,
+                scene="report_summary",
+                service=service,
+                status=AICallLog.STATUS_FAILED,
+                error_message=str(exc),
+            )
             return api_response(data={"scene": "report_summary", "summary": fallback_ai_reply("report_summary")})
 
 
@@ -2655,6 +2834,13 @@ class AdminAIReviewSummaryView(APIView):
         data = serializer.validated_data
         service = AIChatService()
         if not service.is_available():
+            record_ai_call_log(
+                user=request.user,
+                scene="review_summary",
+                service=service,
+                status=AICallLog.STATUS_FAILED,
+                error_message="AI service unavailable",
+            )
             reviews = Review.objects.filter(
                 created_at__date__gte=data["start_date"],
                 created_at__date__lte=data["end_date"],
@@ -2665,13 +2851,30 @@ class AdminAIReviewSummaryView(APIView):
             summary = f"统计区间内共有 {reviews.count()} 条评价，平均评分 {round(avg_score, 2)} 分。建议重点关注低分评价中的重复问题。"
             return api_response(data={"scene": "review_summary", "summary": summary})
         try:
+            started_at = time.perf_counter()
             result = service.generate_review_summary(
                 hotel_id=data.get("hotel_id"),
                 start_date=data["start_date"],
                 end_date=data["end_date"],
             )
+            latency_ms = int((time.perf_counter() - started_at) * 1000)
+            record_ai_call_log(
+                user=request.user,
+                scene="review_summary",
+                service=service,
+                result=result,
+                status=AICallLog.STATUS_SUCCESS,
+                latency_ms=latency_ms,
+            )
             return api_response(data={"scene": "review_summary", "summary": result["summary"]})
-        except Exception:
+        except Exception as exc:
+            record_ai_call_log(
+                user=request.user,
+                scene="review_summary",
+                service=service,
+                status=AICallLog.STATUS_FAILED,
+                error_message=str(exc),
+            )
             return api_response(data={"scene": "review_summary", "summary": fallback_ai_reply("review_summary")})
 
 
@@ -2688,6 +2891,13 @@ class AdminAIReplySuggestionView(APIView):
             return api_response(code=4040, message="评价不存在", data=None, status_code=404)
         service = AIChatService()
         if not service.is_available():
+            record_ai_call_log(
+                user=request.user,
+                scene="reply_suggestion",
+                service=service,
+                status=AICallLog.STATUS_FAILED,
+                error_message="AI service unavailable",
+            )
             return api_response(data={
                 "scene": "reply_suggestion",
                 "suggestions": [
@@ -2695,9 +2905,26 @@ class AdminAIReplySuggestionView(APIView):
                 ],
             })
         try:
+            started_at = time.perf_counter()
             result = service.generate_reply_suggestion(review=review)
+            latency_ms = int((time.perf_counter() - started_at) * 1000)
+            record_ai_call_log(
+                user=request.user,
+                scene="reply_suggestion",
+                service=service,
+                result=result,
+                status=AICallLog.STATUS_SUCCESS,
+                latency_ms=latency_ms,
+            )
             return api_response(data={"scene": "reply_suggestion", "suggestions": result})
-        except Exception:
+        except Exception as exc:
+            record_ai_call_log(
+                user=request.user,
+                scene="reply_suggestion",
+                service=service,
+                status=AICallLog.STATUS_FAILED,
+                error_message=str(exc),
+            )
             return api_response(data={
                 "scene": "reply_suggestion",
                 "suggestions": [{"style": "formal", "content": fallback_ai_reply("reply_suggestion")}],
@@ -2894,15 +3121,39 @@ class AdminAIPricingSuggestionView(APIView):
             return api_response(code=4040, message="房型不存在", data=None, status_code=404)
         service = AIChatService()
         if not service.is_available():
+            record_ai_call_log(
+                user=request.user,
+                scene="pricing_suggestion",
+                service=service,
+                status=AICallLog.STATUS_FAILED,
+                error_message="AI service unavailable",
+            )
             return api_response(data={"scene": "pricing_suggestion", "suggestions": [], "message": fallback_ai_reply("pricing_suggestion")})
         try:
+            started_at = time.perf_counter()
             result = service.generate_pricing_suggestion(
                 room_type=room_type,
                 target_dates=data["target_dates"],
                 use_reasoning=data.get("use_reasoning", False),
             )
+            latency_ms = int((time.perf_counter() - started_at) * 1000)
+            record_ai_call_log(
+                user=request.user,
+                scene="pricing_suggestion",
+                service=service,
+                result=result,
+                status=AICallLog.STATUS_SUCCESS,
+                latency_ms=latency_ms,
+            )
             return api_response(data={"scene": "pricing_suggestion", "suggestions": result["suggestions"], "overall_analysis": result.get("overall_analysis", "")})
-        except Exception:
+        except Exception as exc:
+            record_ai_call_log(
+                user=request.user,
+                scene="pricing_suggestion",
+                service=service,
+                status=AICallLog.STATUS_FAILED,
+                error_message=str(exc),
+            )
             return api_response(data={"scene": "pricing_suggestion", "suggestions": [], "message": fallback_ai_reply("pricing_suggestion")})
 
 
@@ -2917,8 +3168,16 @@ class AdminAIBusinessReportView(APIView):
         data = serializer.validated_data
         service = AIChatService()
         if not service.is_available():
+            record_ai_call_log(
+                user=request.user,
+                scene="business_report",
+                service=service,
+                status=AICallLog.STATUS_FAILED,
+                error_message="AI service unavailable",
+            )
             return api_response(data={"scene": "business_report", "report": fallback_ai_reply("business_report")})
         try:
+            started_at = time.perf_counter()
             result = service.generate_business_report(
                 hotel_id=data.get("hotel_id"),
                 start_date=data["start_date"],
@@ -2926,8 +3185,24 @@ class AdminAIBusinessReportView(APIView):
                 dimensions=data.get("dimensions"),
                 use_reasoning=data.get("use_reasoning", False),
             )
+            latency_ms = int((time.perf_counter() - started_at) * 1000)
+            record_ai_call_log(
+                user=request.user,
+                scene="business_report",
+                service=service,
+                result=result,
+                status=AICallLog.STATUS_SUCCESS,
+                latency_ms=latency_ms,
+            )
             return api_response(data={"scene": "business_report", "report": result.get("report_markdown", "")})
-        except Exception:
+        except Exception as exc:
+            record_ai_call_log(
+                user=request.user,
+                scene="business_report",
+                service=service,
+                status=AICallLog.STATUS_FAILED,
+                error_message=str(exc),
+            )
             return api_response(data={"scene": "business_report", "report": fallback_ai_reply("business_report")})
 
 
@@ -2944,9 +3219,17 @@ class AdminAIBusinessReportStreamView(APIView):
             return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         data = serializer.validated_data
         service = AIChatService()
+        started_at = time.perf_counter()
 
         def event_stream():
             if not service.is_available():
+                record_ai_call_log(
+                    user=request.user,
+                    scene="business_report",
+                    service=service,
+                    status=AICallLog.STATUS_FAILED,
+                    error_message="AI service unavailable",
+                )
                 fallback = fallback_ai_reply("business_report")
                 yield f"data: {json.dumps({'type': 'chunk', 'content': fallback, 'done': False}, ensure_ascii=False)}\n\n"
                 yield f"data: {json.dumps({'type': 'done', 'content': '', 'done': True})}\n\n"
@@ -2962,16 +3245,40 @@ class AdminAIBusinessReportStreamView(APIView):
                 # stream_business_report returns (text, None) tuple on fallback or an OpenAI stream
                 if isinstance(stream_result, tuple):
                     text, _ = stream_result
+                    record_ai_call_log(
+                        user=request.user,
+                        scene="business_report",
+                        service=service,
+                        status=AICallLog.STATUS_FAILED,
+                        error_message="AI stream fallback response",
+                        latency_ms=int((time.perf_counter() - started_at) * 1000),
+                    )
                     yield f"data: {json.dumps({'type': 'chunk', 'content': text, 'done': False}, ensure_ascii=False)}\n\n"
                     yield f"data: {json.dumps({'type': 'done', 'content': '', 'done': True})}\n\n"
                     return
+
+                record_ai_call_log(
+                    user=request.user,
+                    scene="business_report",
+                    service=service,
+                    status=AICallLog.STATUS_SUCCESS,
+                    latency_ms=int((time.perf_counter() - started_at) * 1000),
+                )
                 for chunk in stream_result:
                     delta = chunk.choices[0].delta if chunk.choices else None
                     token = (delta.content or "") if delta else ""
                     done = (chunk.choices[0].finish_reason is not None) if chunk.choices else False
                     event_type = "done" if done else "chunk"
                     yield f"data: {json.dumps({'type': event_type, 'content': token, 'done': done}, ensure_ascii=False)}\n\n"
-            except Exception:
+            except Exception as exc:
+                record_ai_call_log(
+                    user=request.user,
+                    scene="business_report",
+                    service=service,
+                    status=AICallLog.STATUS_FAILED,
+                    error_message=str(exc),
+                    latency_ms=int((time.perf_counter() - started_at) * 1000),
+                )
                 fallback = fallback_ai_reply("business_report")
                 yield f"data: {json.dumps({'type': 'chunk', 'content': fallback, 'done': False}, ensure_ascii=False)}\n\n"
                 yield f"data: {json.dumps({'type': 'done', 'content': '', 'done': True})}\n\n"
@@ -2997,8 +3304,16 @@ class AdminAIReviewSentimentView(APIView):
             return api_response(code=4040, message="评价不存在", data=None, status_code=404)
         service = AIChatService()
         if not service.is_available():
+            record_ai_call_log(
+                user=request.user,
+                scene="review_sentiment",
+                service=service,
+                status=AICallLog.STATUS_FAILED,
+                error_message="AI service unavailable",
+            )
             return api_response(data={"scene": "review_sentiment", "result": None, "message": fallback_ai_reply("review_sentiment")})
         try:
+            started_at = time.perf_counter()
             result = service.analyze_review_sentiment(review=review)
             # 将情感分析结果持久化到 Review 模型
             Review.objects.filter(id=review.id).update(
@@ -3008,6 +3323,15 @@ class AdminAIReviewSentimentView(APIView):
                 sentiment_keywords=result.get("keywords", []),
                 sentiment_analyzed_at=tz.now(),
             )
+            latency_ms = int((time.perf_counter() - started_at) * 1000)
+            record_ai_call_log(
+                user=request.user,
+                scene="review_sentiment",
+                service=service,
+                result=result,
+                status=AICallLog.STATUS_SUCCESS,
+                latency_ms=latency_ms,
+            )
             # 转换字段名以匹配前端期望的格式
             return api_response(data={"scene": "review_sentiment", "result": {
                 "score": result.get("sentiment_score", 0),
@@ -3016,7 +3340,14 @@ class AdminAIReviewSentimentView(APIView):
                 "tags": result.get("tags", []),
                 "summary": result.get("summary", ""),
             }})
-        except Exception:
+        except Exception as exc:
+            record_ai_call_log(
+                user=request.user,
+                scene="review_sentiment",
+                service=service,
+                status=AICallLog.STATUS_FAILED,
+                error_message=str(exc),
+            )
             return api_response(data={"scene": "review_sentiment", "result": None, "message": fallback_ai_reply("review_sentiment")})
 
 
@@ -3031,8 +3362,16 @@ class AdminAIMarketingCopyView(APIView):
         data = serializer.validated_data
         service = AIChatService()
         if not service.is_available():
+            record_ai_call_log(
+                user=request.user,
+                scene="marketing_copy",
+                service=service,
+                status=AICallLog.STATUS_FAILED,
+                error_message="AI service unavailable",
+            )
             return api_response(data={"scene": "marketing_copy", "copies": [], "message": fallback_ai_reply("marketing_copy")})
         try:
+            started_at = time.perf_counter()
             result = service.generate_marketing_copy(
                 hotel_id=data.get("hotel_id"),
                 copy_type=data["copy_type"],
@@ -3041,8 +3380,24 @@ class AdminAIMarketingCopyView(APIView):
                 target_audience=data.get("target_audience", ""),
                 extra_notes=data.get("extra_notes", ""),
             )
+            latency_ms = int((time.perf_counter() - started_at) * 1000)
+            record_ai_call_log(
+                user=request.user,
+                scene="marketing_copy",
+                service=service,
+                result=result,
+                status=AICallLog.STATUS_SUCCESS,
+                latency_ms=latency_ms,
+            )
             return api_response(data={"scene": "marketing_copy", "copies": result.get("copies", [])})
-        except Exception:
+        except Exception as exc:
+            record_ai_call_log(
+                user=request.user,
+                scene="marketing_copy",
+                service=service,
+                status=AICallLog.STATUS_FAILED,
+                error_message=str(exc),
+            )
             return api_response(data={"scene": "marketing_copy", "copies": [], "message": fallback_ai_reply("marketing_copy")})
 
 
@@ -3057,8 +3412,16 @@ class AdminAIContentGenerateView(APIView):
         data = serializer.validated_data
         service = AIChatService()
         if not service.is_available():
+            record_ai_call_log(
+                user=request.user,
+                scene="content_generate",
+                service=service,
+                status=AICallLog.STATUS_FAILED,
+                error_message="AI service unavailable",
+            )
             return api_response(data={"scene": "content_generate", "results": [], "message": fallback_ai_reply("content_generate")})
         try:
+            started_at = time.perf_counter()
             result = service.generate_content(
                 content_type=data["content_type"],
                 context_data=data["context"],
@@ -3072,8 +3435,24 @@ class AdminAIContentGenerateView(APIView):
                     results.append({"content": c.get("content", str(c)), "highlights": c.get("highlights", [])})
                 else:
                     results.append({"content": str(c), "highlights": []})
+            latency_ms = int((time.perf_counter() - started_at) * 1000)
+            record_ai_call_log(
+                user=request.user,
+                scene="content_generate",
+                service=service,
+                result=result,
+                status=AICallLog.STATUS_SUCCESS,
+                latency_ms=latency_ms,
+            )
             return api_response(data={"scene": "content_generate", "results": results})
-        except Exception:
+        except Exception as exc:
+            record_ai_call_log(
+                user=request.user,
+                scene="content_generate",
+                service=service,
+                status=AICallLog.STATUS_FAILED,
+                error_message=str(exc),
+            )
             return api_response(data={"scene": "content_generate", "results": [], "message": fallback_ai_reply("content_generate")})
 
 
@@ -3088,8 +3467,16 @@ class AdminAIAnomalyReportView(APIView):
         data = serializer.validated_data
         service = AIChatService()
         if not service.is_available():
+            record_ai_call_log(
+                user=request.user,
+                scene="anomaly_report",
+                service=service,
+                status=AICallLog.STATUS_FAILED,
+                error_message="AI service unavailable",
+            )
             return api_response(data={"scene": "anomaly_report", "anomalies": [], "message": fallback_ai_reply("anomaly_report")})
         try:
+            started_at = time.perf_counter()
             result = service.generate_anomaly_report(
                 hotel_id=data.get("hotel_id"),
                 analysis_date=data.get("date"),
@@ -3103,12 +3490,28 @@ class AdminAIAnomalyReportView(APIView):
                     "level": severity_map.get(a.get("severity", "info"), "low"),
                     "description": a.get("description", a.get("ai_analysis", "")),
                 })
+            latency_ms = int((time.perf_counter() - started_at) * 1000)
+            record_ai_call_log(
+                user=request.user,
+                scene="anomaly_report",
+                service=service,
+                result=result,
+                status=AICallLog.STATUS_SUCCESS,
+                latency_ms=latency_ms,
+            )
             return api_response(data={
                 "scene": "anomaly_report",
                 "anomalies": anomalies,
                 "summary": result.get("overall_status", ""),
             })
-        except Exception:
+        except Exception as exc:
+            record_ai_call_log(
+                user=request.user,
+                scene="anomaly_report",
+                service=service,
+                status=AICallLog.STATUS_FAILED,
+                error_message=str(exc),
+            )
             return api_response(data={"scene": "anomaly_report", "anomalies": [], "summary": "", "message": fallback_ai_reply("anomaly_report")})
 
 
@@ -3123,15 +3526,39 @@ class AdminAIOrderAnomalySummaryView(APIView):
         data = serializer.validated_data
         service = AIChatService()
         if not service.is_available():
+            record_ai_call_log(
+                user=request.user,
+                scene="order_anomaly",
+                service=service,
+                status=AICallLog.STATUS_FAILED,
+                error_message="AI service unavailable",
+            )
             return api_response(data={"scene": "order_anomaly", "anomalies": [], "summary": fallback_ai_reply("anomaly_report")})
         try:
+            started_at = time.perf_counter()
             result = service.generate_order_anomaly_summary(analysis_date=data.get("date"))
+            latency_ms = int((time.perf_counter() - started_at) * 1000)
+            record_ai_call_log(
+                user=request.user,
+                scene="order_anomaly",
+                service=service,
+                result=result,
+                status=AICallLog.STATUS_SUCCESS,
+                latency_ms=latency_ms,
+            )
             return api_response(data={
                 "scene": "order_anomaly",
                 "anomalies": result.get("anomalies", []),
                 "summary": result.get("summary", ""),
             })
-        except Exception:
+        except Exception as exc:
+            record_ai_call_log(
+                user=request.user,
+                scene="order_anomaly",
+                service=service,
+                status=AICallLog.STATUS_FAILED,
+                error_message=str(exc),
+            )
             return api_response(data={"scene": "order_anomaly", "anomalies": [], "summary": fallback_ai_reply("anomaly_report")})
 
 
@@ -3221,8 +3648,16 @@ class UserAIRecommendationsView(APIView):
 
         service = AIChatService()
         if not service.is_available():
+            record_ai_call_log(
+                user=request.user,
+                scene="recommendations",
+                service=service,
+                status=AICallLog.STATUS_FAILED,
+                error_message="AI service unavailable",
+            )
             return api_response(data={"scene": "recommendations", "recommendations": _fallback()})
         try:
+            started_at = time.perf_counter()
             raw_recs = service.generate_recommendations(
                 user=request.user,
                 scene=data.get("scene", "home"),
@@ -3244,8 +3679,23 @@ class UserAIRecommendationsView(APIView):
                 }
                 for rec in raw_recs
             ]
+            latency_ms = int((time.perf_counter() - started_at) * 1000)
+            record_ai_call_log(
+                user=request.user,
+                scene="recommendations",
+                service=service,
+                status=AICallLog.STATUS_SUCCESS,
+                latency_ms=latency_ms,
+            )
             return api_response(data={"scene": "recommendations", "recommendations": recommendations})
-        except Exception:
+        except Exception as exc:
+            record_ai_call_log(
+                user=request.user,
+                scene="recommendations",
+                service=service,
+                status=AICallLog.STATUS_FAILED,
+                error_message=str(exc),
+            )
             return api_response(data={"scene": "recommendations", "recommendations": _fallback()})
 
 
@@ -3318,9 +3768,17 @@ class UserAIHotelCompareView(APIView):
 
         service = AIChatService()
         if not service.is_available():
+            record_ai_call_log(
+                user=request.user,
+                scene="hotel_compare",
+                service=service,
+                status=AICallLog.STATUS_FAILED,
+                error_message="AI service unavailable",
+            )
             return api_response(data=self._build_fallback_result(hotels, fallback_ai_reply("hotel_compare")))
 
         try:
+            started_at = time.perf_counter()
             result = service.generate_hotel_compare(
                 hotel_ids=[hotel.id for hotel in hotels],
                 check_in_date=data.get("check_in_date"),
@@ -3329,6 +3787,16 @@ class UserAIHotelCompareView(APIView):
             serialized_hotels = result.get("hotels") if isinstance(result.get("hotels"), list) else []
             if not serialized_hotels:
                 serialized_hotels = self._serialize_hotels(hotels)
+
+            latency_ms = int((time.perf_counter() - started_at) * 1000)
+            record_ai_call_log(
+                user=request.user,
+                scene="hotel_compare",
+                service=service,
+                result=result,
+                status=AICallLog.STATUS_SUCCESS,
+                latency_ms=latency_ms,
+            )
 
             return api_response(data={
                 "scene": "hotel_compare",
@@ -3341,7 +3809,14 @@ class UserAIHotelCompareView(APIView):
                 "winner_reason": result.get("winner_reason", ""),
                 "ai_generated": result.get("ai_generated", False),
             })
-        except Exception:
+        except Exception as exc:
+            record_ai_call_log(
+                user=request.user,
+                scene="hotel_compare",
+                service=service,
+                status=AICallLog.STATUS_FAILED,
+                error_message=str(exc),
+            )
             logger.exception("AI 酒店对比失败，hotel_ids=%s", hotel_ids)
             return api_response(data=self._build_fallback_result(hotels, fallback_ai_reply("hotel_compare")))
 

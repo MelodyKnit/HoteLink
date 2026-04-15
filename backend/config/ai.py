@@ -16,6 +16,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from django.apps import apps as django_apps
+from django.db.utils import OperationalError, ProgrammingError
+
 from openai import OpenAI
 
 
@@ -74,9 +77,9 @@ class AIProviderConfig:
         """当 API 密钥不为空时，返回 True。"""
         return bool(self.api_key)
 
-    def to_dict(self) -> dict[str, Any]:
-        """序列化为字典（隐藏完整 api_key）。"""
-        return {
+    def to_dict(self, *, include_api_key: bool = False) -> dict[str, Any]:
+        """序列化为字典，默认隐藏完整 api_key。"""
+        data = {
             "name": self.name,
             "label": self.label,
             "base_url": self.base_url,
@@ -85,6 +88,9 @@ class AIProviderConfig:
             "reasoning_model": self.reasoning_model,
             "timeout": self.timeout,
         }
+        if include_api_key:
+            data["api_key"] = self.api_key
+        return data
 
 
 @dataclass(slots=True)
@@ -109,11 +115,11 @@ class AISettings:
         """按名称获取指定供应商配置。"""
         return self.providers.get(name)
 
-    def list_providers(self) -> list[dict[str, Any]]:
+    def list_providers(self, *, include_api_key: bool = False) -> list[dict[str, Any]]:
         """返回所有供应商的摘要信息列表。"""
         result = []
         for p in self.providers.values():
-            info = p.to_dict()
+            info = p.to_dict(include_api_key=include_api_key)
             info["is_active"] = p.name == self.active_provider
             result.append(info)
         return result
@@ -121,6 +127,7 @@ class AISettings:
 
 # ---------- 运行时配置持久化路径 ----------
 _RUNTIME_CONFIG_PATH: Path | None = None
+_RUNTIME_CONFIG_KEY = "ai_runtime"
 
 
 def _get_runtime_config_path() -> Path:
@@ -134,6 +141,19 @@ def _get_runtime_config_path() -> Path:
 
 def _load_runtime_config() -> dict[str, Any]:
     """从本地磁盘加载运行时 AI 配置。"""
+    # 优先使用数据库持久化，确保容器重启/镜像更新后不丢失。
+    try:
+        if django_apps.ready:
+            RuntimeConfig = django_apps.get_model("operations", "RuntimeConfig")
+            row = RuntimeConfig.objects.filter(key=_RUNTIME_CONFIG_KEY).values_list("value", flat=True).first()
+            if isinstance(row, dict):
+                return row
+    except (LookupError, OperationalError, ProgrammingError):
+        pass
+    except Exception:
+        pass
+
+    # 兼容历史文件存储（作为兜底）。
     path = _get_runtime_config_path()
     if path.exists():
         try:
@@ -145,8 +165,29 @@ def _load_runtime_config() -> dict[str, Any]:
 
 def _save_runtime_config(data: dict[str, Any]) -> None:
     """将运行时 AI 配置持久化到本地磁盘。"""
+    # 优先保存到数据库，保证重启后可恢复。
+    persisted = False
+    try:
+        if django_apps.ready:
+            RuntimeConfig = django_apps.get_model("operations", "RuntimeConfig")
+            RuntimeConfig.objects.update_or_create(
+                key=_RUNTIME_CONFIG_KEY,
+                defaults={"value": data},
+            )
+            persisted = True
+    except (LookupError, OperationalError, ProgrammingError):
+        pass
+    except Exception:
+        pass
+
+    # 同步保存到历史文件，便于兼容和排查。
     path = _get_runtime_config_path()
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    try:
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        persisted = True
+    except OSError:
+        if not persisted:
+            raise
 
 
 def load_ai_settings() -> AISettings:
