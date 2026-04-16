@@ -236,7 +236,9 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { userOrderApi, userReviewApi, commonApi } from '@hotelink/api'
 import { ORDER_STATUS_MAP, PAYMENT_METHOD_MAP, PAYMENT_STATUS_MAP, buildImageThumbUrl, formatMoney } from '@hotelink/utils'
-import { OrderStepBar } from '@hotelink/ui'
+import { OrderStepBar, useToast } from '@hotelink/ui'
+
+const { showToast } = useToast()
 
 const route = useRoute()
 const router = useRouter()
@@ -289,6 +291,31 @@ const showActionBar = computed(() => (
 // 处理 goToPay 业务流程。
 function goToPay() { router.push(`/payment/${orderId}`) }
 
+function consumeAssistantActionQuery() {
+  const source = typeof route.query.source === 'string' ? route.query.source : ''
+  const action = typeof route.query.action === 'string' ? route.query.action : ''
+  if (source !== 'ai') return
+
+  if (action === 'cancel') {
+    if (canCancel.value) {
+      if (!cancelReason.value.trim()) {
+        cancelReason.value = 'AI 助手协助发起取消'
+      }
+      showCancelModal.value = true
+      showToast('已为您打开取消流程，请确认后提交', 'success')
+    } else {
+      showToast('当前订单状态不可取消，已为您展示订单详情', 'warning')
+    }
+  }
+
+  const nextQuery = { ...route.query } as Record<string, unknown>
+  delete nextQuery.source
+  delete nextQuery.action
+  delete nextQuery.intent
+  delete nextQuery.order_id
+  router.replace({ path: route.path, query: nextQuery })
+}
+
 async function handleReviewImageUpload(e: Event) {
   const files = (e.target as HTMLInputElement).files
   if (!files?.length) return
@@ -297,9 +324,18 @@ async function handleReviewImageUpload(e: Event) {
     for (const file of Array.from(files)) {
       if (reviewImages.value.length >= 9) break
       const res = await commonApi.upload(file, 'review')
-      if (res.code === 0 && res.data) reviewImages.value.push((res.data as any).file_url as string)
+      if (res.code === 0 && res.data) {
+        reviewImages.value.push((res.data as any).file_url as string)
+      } else {
+        showToast(res.message || '图片上传失败，请重试', 'error')
+      }
     }
-  } catch { /* ignore */ }
+    if (reviewImages.value.length > 0) {
+      showToast('图片上传完成', 'success')
+    }
+  } catch {
+    showToast('图片上传失败，请检查网络后重试', 'error')
+  }
   uploadingImage.value = false
   ;(e.target as HTMLInputElement).value = ''
 }
@@ -314,14 +350,22 @@ async function handleCancel() {
     if (res.code === 0) {
       order.value.status = 'cancelled'
       showCancelModal.value = false
+      showToast('订单已取消', 'success')
+    } else {
+      showToast(res.message || '取消订单失败，请重试', 'error')
     }
-  } catch { /* ignore */ }
+  } catch {
+    showToast('取消订单失败，请检查网络后重试', 'error')
+  }
   cancelling.value = false
 }
 
 // 处理 Review 交互逻辑。
 async function handleReview() {
-  if (!reviewContent.value.trim()) return
+  if (!reviewContent.value.trim()) {
+    showToast('请输入评价内容后再提交', 'warning')
+    return
+  }
   reviewing.value = true
   try {
     const res = await userReviewApi.create({
@@ -339,8 +383,13 @@ async function handleReview() {
         reviewSuccessMsg.value = `评价成功！奖励 +${pts} 积分`
         setTimeout(() => { reviewSuccessMsg.value = '' }, 4000)
       }
+      showToast(pts > 0 ? `评价成功，奖励 +${pts} 积分` : '评价提交成功', 'success')
+    } else {
+      showToast(res.message || '评价提交失败，请稍后重试', 'error')
     }
-  } catch { /* ignore */ }
+  } catch {
+    showToast('评价提交失败，请检查网络后重试', 'error')
+  }
   reviewing.value = false
 }
 
@@ -349,6 +398,7 @@ onMounted(async () => {
     const res = await userOrderApi.detail(orderId)
     if (res.code === 0 && res.data) {
       order.value = res.data
+      consumeAssistantActionQuery()
     } else {
       order.value = {}
       error.value = res.message || '订单详情加载失败，请稍后重试'
@@ -356,6 +406,7 @@ onMounted(async () => {
   } catch {
     order.value = {}
     error.value = '订单详情加载失败，请稍后重试'
+    showToast('订单详情加载失败，请稍后重试', 'error')
   } finally {
     loading.value = false
   }

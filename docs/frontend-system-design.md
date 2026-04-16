@@ -191,7 +191,7 @@ flowchart TD
 > | 21 | 活动专题页 | — | — | 📐 设计中 |
 > | 22 | 联系我们页 | `/contact` | `ContactView.vue` | ✅ 已实现 |
 > | 23 | AI 酒店对比页 | `/hotel-compare` | `HotelCompareView.vue` | ✅ 已实现 |
-> | — | 通知中心 | `/my/notifications` | `NotificationView.vue` | ✅ 已实现（文档未列设计） |
+> | — | 通知中心 | `/my/notifications` | `NotificationView.vue` | ✅ 已实现 |
 > | — | 404 页 | `/404` | `NotFoundView.vue` | ✅ 已实现 |
 
 用户端既要满足“官网展示”，也要满足“预订闭环”。建议以移动优先，但 PC 端必须具有完整浏览和下单体验。
@@ -355,12 +355,17 @@ flowchart TD
 
 核心模块：
 
-- 订单筛选
+- 关键词搜索（订单号 / 酒店 / 房型 / 入住人 / 手机号）
+- 高级筛选（支付状态、入住日期区间、下单日期区间、金额区间）
 - 订单状态标签
 - 订单卡片
 - 取消订单
 - 再次预订
 - 联系酒店
+
+交互补充：
+
+- 搜索与筛选条件会同步到 URL query，支持刷新恢复、链接分享与从通知页回跳后保留条件。
 
 #### 11. 订单详情页
 
@@ -445,6 +450,16 @@ flowchart TD
 - 订单相关快捷问题
 - 酒店规则解释
 - 转人工入口
+
+交互补充：
+
+- 客服场景会根据当前订单与通知上下文返回快捷操作按钮，可一键跳转到我的订单、订单详情、支付页、发票中心、通知中心等页面。
+- 订房场景继续使用结构化推荐选项，用于城市、酒店、房型等多步选择。
+
+#### 通知中心补充（用户端）
+
+- 订单/支付通知优先直达对应订单详情页（`/my/orders/:id`）。
+- 若历史通知缺失关联订单字段，则降级跳转到 `/my/orders` 并自动带 `keyword` 进行定位。
 
 设计要求：
 
@@ -534,6 +549,11 @@ flowchart TD
 > | 34 | AI 客服辅助页 | — | — | 📐 设计中 |
 > | — | 初始化设置页 | `/admin/setup` | `InitSetupView.vue` | ✅ 已实现（文档未列设计） |
 > | — | 404 页 | `/admin/404` | `NotFoundView.vue` | ✅ 已实现 |
+
+补充（2026-04）：
+
+- `OrderListView.vue`、`UserListView.vue`、`EmployeeListView.vue`、`ReportView.vue` 已统一接入可复用排序交互：顶部排序下拉 + `DataTable` 表头排序双向同步。
+- 上述页面列表请求均透传 `ordering` 参数，与后端白名单排序保持一致。
 
 管理端要体现“高效率”“强信息密度”“可追踪”“权限清晰”。PC 端为主，移动端保留核心快捷操作。
 
@@ -1019,6 +1039,11 @@ flowchart LR
 - 流式协议：SSE，前端先消费 `meta` 事件中的结构化订房数据，再按 `chunk/done` 逐段拼接回答文本
 - 展示能力：AI 回复支持 Markdown 渲染（加粗、列表、代码块、引用等）
 - 订房交互：支持在聊天消息中直接渲染城市、酒店、房型动作卡片，点击后继续对话或直接跳转 `/booking`
+- 客服交互：客服场景支持结构化快捷动作（订单详情、去支付、取消引导、发票、通知、帮助中心、切换订房助手）
+- 双向引导：订房助手检测到客服诉求时会返回“切换到 AI 智能客服”按钮；客服检测到订房诉求时会返回“切换到 AI 订房助手”按钮
+- 动作协议：前端按 `type/action_type/route/query/requires_confirmation/priority/tracking_id` 渲染与执行，支持优先级排序与确认提示
+- 问题续聊：跨助手跳转时通过 `query.ask` 透传原问题，目标页面自动发送该问题并移除一次性参数
+- 页面联动：当 AI 动作跳转到订单详情并携带 `source=ai&action=cancel` 时，会自动打开取消弹窗并清理一次性参数
 
 交互原则：
 
@@ -1099,7 +1124,7 @@ const { toastVisible, toastMessage, toastType, showToast, closeToast } = useToas
 | 组件 | 说明 |
 |------|------|
 | `StatCard.vue` | 统计卡片，用于工作台数据展示 |
-| `DataTable.vue` | 数据表格，支持排序与插槽 |
+| `DataTable.vue` | 数据表格，支持 `sortField` 表头排序、`sort-value` 双向绑定与插槽 |
 | `ModalDialog.vue` | 模态对话框 |
 | `StatusBadge.vue` | 状态徽章（颜色标签） |
 | `PageHeader.vue` | 页面标题头部 |

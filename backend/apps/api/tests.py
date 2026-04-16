@@ -17,7 +17,7 @@ from apps.bookings.models import BookingOrder
 from apps.bookings.tasks import sweep_order_lifecycle_anomalies
 from apps.crm.models import ChatMessage, ChatSession, InvoiceTitle, UserCoupon
 from apps.hotels.models import Hotel, RoomInventory, RoomType
-from apps.operations.models import AICallLog
+from apps.operations.models import AICallLog, SystemNotice
 from apps.payments.models import PaymentRecord
 from apps.users.models import UserProfile
 from config.ai import _get_runtime_config_path
@@ -270,6 +270,135 @@ class UserApiTests(ApiBaseTestCase):
         self.assertEqual(invoice_apply.status_code, 200)
         self.assertEqual(invoice_apply.json()["data"]["status"], "pending")
 
+    def test_user_notices_should_include_related_order_fields(self):
+        """验证通知列表会返回订单关联字段，支持前端直达订单详情。"""
+        self.login_user()
+        SystemNotice.objects.create(
+            user=self.user,
+            notice_type=SystemNotice.TYPE_ORDER,
+            title="订单状态更新",
+            content=f"订单 {self.order.order_no} 已更新。",
+            related_order=self.order,
+        )
+
+        response = self.client.get("/api/v1/user/notices")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()["data"]
+        self.assertGreaterEqual(payload["total"], 1)
+
+        target = next(
+            (item for item in payload["items"] if item["title"] == "订单状态更新"),
+            None,
+        )
+        self.assertIsNotNone(target)
+        self.assertEqual(target["related_order_id"], self.order.id)
+        self.assertEqual(target["related_order_no"], self.order.order_no)
+
+    def test_user_orders_list_should_support_keyword_and_advanced_filters(self):
+        """验证用户订单列表支持关键词与多条件组合筛选。"""
+        self.login_user()
+        second_hotel = Hotel.objects.create(
+            name="HoteLink 上海陆家嘴店",
+            city="上海",
+            address="上海市浦东新区示例路 99 号",
+            star=5,
+            phone="021-77778888",
+            description="测试酒店",
+            rating=Decimal("4.8"),
+            min_price=Decimal("699.00"),
+            is_recommended=True,
+            status=Hotel.STATUS_ONLINE,
+        )
+        second_room_type = RoomType.objects.create(
+            hotel=second_hotel,
+            name="行政套房",
+            bed_type=RoomType.BED_QUEEN,
+            area=55,
+            breakfast_count=2,
+            base_price=Decimal("1288.00"),
+            max_guest_count=2,
+            stock=6,
+            status=RoomType.STATUS_ONLINE,
+        )
+        target_order = BookingOrder.objects.create(
+            user=self.user,
+            hotel=second_hotel,
+            room_type=second_room_type,
+            order_no="HTSEARCH0002",
+            status=BookingOrder.STATUS_CONFIRMED,
+            payment_status=BookingOrder.PAYMENT_PAID,
+            check_in_date=timezone.localdate() + timedelta(days=10),
+            check_out_date=timezone.localdate() + timedelta(days=12),
+            guest_name="王五",
+            guest_mobile="13700137000",
+            guest_count=1,
+            original_amount=Decimal("1288.00"),
+            discount_amount=Decimal("0.00"),
+            pay_amount=Decimal("1288.00"),
+        )
+        BookingOrder.objects.filter(id=target_order.id).update(created_at=timezone.now() - timedelta(days=2))
+
+        other_user = User.objects.create_user(username="lisi", password="Password123")
+        BookingOrder.objects.create(
+            user=other_user,
+            hotel=second_hotel,
+            room_type=second_room_type,
+            order_no="HTSEARCH0003",
+            status=BookingOrder.STATUS_CONFIRMED,
+            payment_status=BookingOrder.PAYMENT_PAID,
+            check_in_date=timezone.localdate() + timedelta(days=10),
+            check_out_date=timezone.localdate() + timedelta(days=12),
+            guest_name="王五",
+            guest_mobile="13600136000",
+            guest_count=1,
+            original_amount=Decimal("1288.00"),
+            discount_amount=Decimal("0.00"),
+            pay_amount=Decimal("1288.00"),
+        )
+
+        keyword_response = self.client.get("/api/v1/user/orders", {"keyword": "王五"})
+        self.assertEqual(keyword_response.status_code, 200)
+        keyword_payload = keyword_response.json()["data"]
+        self.assertEqual(keyword_payload["total"], 1)
+        self.assertEqual(keyword_payload["items"][0]["id"], target_order.id)
+
+        advanced_response = self.client.get(
+            "/api/v1/user/orders",
+            {
+                "status": BookingOrder.STATUS_CONFIRMED,
+                "payment_status": BookingOrder.PAYMENT_PAID,
+                "keyword": "陆家嘴",
+                "check_in_start": str(timezone.localdate() + timedelta(days=9)),
+                "check_in_end": str(timezone.localdate() + timedelta(days=11)),
+                "created_start": str(timezone.localdate() - timedelta(days=5)),
+                "created_end": str(timezone.localdate() - timedelta(days=1)),
+                "amount_min": "1000",
+                "amount_max": "1300",
+            },
+        )
+        self.assertEqual(advanced_response.status_code, 200)
+        advanced_payload = advanced_response.json()["data"]
+        self.assertEqual(advanced_payload["total"], 1)
+        self.assertEqual(advanced_payload["items"][0]["id"], target_order.id)
+
+    def test_user_orders_list_should_return_400_for_invalid_ranges(self):
+        """验证用户订单列表在日期/金额区间非法时返回参数错误。"""
+        self.login_user()
+        response = self.client.get(
+            "/api/v1/user/orders",
+            {
+                "created_start": "2026-05-20",
+                "created_end": "2026-05-01",
+                "amount_min": "100",
+                "amount_max": "50",
+            },
+        )
+        self.assertEqual(response.status_code, 400)
+        payload = response.json()
+        self.assertEqual(payload["code"], 4001)
+        self.assertIn("created_range", payload["data"]["errors"])
+        self.assertIn("amount_range", payload["data"]["errors"])
+
     def test_user_ai_chat_returns_booking_assistant_options(self):
         """验证 AI 订房可返回结构化城市与房型动作。"""
         self.login_user()
@@ -361,7 +490,9 @@ class UserApiTests(ApiBaseTestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()["data"]
         self.assertEqual(data["scene"], "customer_service")
-        self.assertIsNone(data.get("booking_assistant"))
+        self.assertIsNotNone(data.get("booking_assistant"))
+        self.assertTrue(data["booking_assistant"]["options"])
+        self.assertTrue(any(option["route"] == f"/my/orders/{self.order.id}" for option in data["booking_assistant"]["options"]))
 
     def test_user_ai_chat_customer_service_should_not_call_booking_builder(self):
         """验证 customer_service 场景不会调用订房助手构建逻辑。"""
@@ -382,7 +513,7 @@ class UserApiTests(ApiBaseTestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()["data"]
         self.assertEqual(data["scene"], "customer_service")
-        self.assertIsNone(data.get("booking_assistant"))
+        self.assertIsNotNone(data.get("booking_assistant"))
 
     def test_user_ai_chat_general_customer_question_should_route_to_customer_service(self):
         """验证 general 场景下客服类问题会路由到客服模式。"""
@@ -399,7 +530,62 @@ class UserApiTests(ApiBaseTestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()["data"]
         self.assertEqual(data["scene"], "customer_service")
-        self.assertIsNone(data.get("booking_assistant"))
+        self.assertIsNotNone(data.get("booking_assistant"))
+        self.assertTrue(data["booking_assistant"]["options"])
+
+    def test_user_ai_chat_customer_service_actions_should_include_protocol_fields(self):
+        """验证客服快捷操作包含统一动作协议字段。"""
+        self.login_user()
+        response = self.client.post(
+            "/api/v1/user/ai/chat",
+            {
+                "scene": "customer_service",
+                "question": "帮我取消订单",
+                "order_id": self.order.id,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        action_payload = data["booking_assistant"]
+        self.assertEqual(action_payload["phase"], "quick_actions")
+        self.assertEqual(action_payload["context"]["detected_intent"], "cancel_order")
+
+        cancel_option = next(
+            (option for option in action_payload["options"] if option["type"] == "navigate_cancel_order"),
+            None,
+        )
+        self.assertIsNotNone(cancel_option)
+        self.assertEqual(cancel_option["action_type"], "navigate")
+        self.assertTrue(cancel_option["requires_confirmation"])
+        self.assertEqual(cancel_option["target"], f"/my/orders/{self.order.id}")
+        self.assertEqual(cancel_option["query"]["source"], "ai")
+        self.assertIn("tracking_id", cancel_option)
+
+    def test_user_ai_chat_customer_service_should_offer_booking_switch_action(self):
+        """验证客服场景遇到订房诉求时，会给出切换到订房助手的快捷入口。"""
+        self.login_user()
+        question = "我想订酒店，帮我推荐一下"
+        response = self.client.post(
+            "/api/v1/user/ai/chat",
+            {
+                "scene": "customer_service",
+                "question": question,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertEqual(data["scene"], "customer_service")
+        options = data["booking_assistant"]["options"]
+        switch_option = next(
+            (option for option in options if option["type"] == "navigate_ai_booking" and option["route"] == "/ai-booking"),
+            None,
+        )
+        self.assertIsNotNone(switch_option)
+        self.assertEqual(switch_option["query"]["source"], "ai")
+        self.assertEqual(switch_option["query"]["from"], "ai-chat")
+        self.assertEqual(switch_option["query"]["ask"], question)
 
     def test_user_ai_chat_booking_assistant_scene_should_return_booking_scene(self):
         """验证 booking_assistant 场景会返回 booking_assistant scene。"""
@@ -417,8 +603,40 @@ class UserApiTests(ApiBaseTestCase):
         self.assertEqual(data["scene"], "booking_assistant")
         self.assertIsNotNone(data.get("booking_assistant"))
 
+    def test_user_ai_chat_booking_assistant_should_offer_customer_service_switch_action(self):
+        """验证订房场景遇到客服诉求时，会给出切换到客服助手的快捷入口。"""
+        self.login_user()
+        question = "帮我取消订单并退款"
+        response = self.client.post(
+            "/api/v1/user/ai/chat",
+            {
+                "scene": "booking_assistant",
+                "question": question,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertEqual(data["scene"], "booking_assistant")
+
+        assistant_payload = data["booking_assistant"]
+        self.assertEqual(assistant_payload["phase"], "switch_to_customer_service")
+        switch_option = next(
+            (
+                option
+                for option in assistant_payload["options"]
+                if option["type"] == "navigate_ai_customer_service" and option["route"] == "/ai-chat"
+            ),
+            None,
+        )
+        self.assertIsNotNone(switch_option)
+        self.assertEqual(switch_option["action_type"], "navigate")
+        self.assertEqual(switch_option["query"]["source"], "ai")
+        self.assertEqual(switch_option["query"]["from"], "ai-booking")
+        self.assertEqual(switch_option["query"]["ask"], question)
+
     def test_user_ai_chat_stream_customer_service_should_not_return_booking_meta(self):
-        """验证客服场景流式接口不会返回订房助手 meta 数据。"""
+        """验证客服场景流式接口会返回客服快捷动作 meta 数据。"""
         self.login_user()
         response = self.client.post(
             "/api/v1/user/ai/chat/stream",
@@ -433,8 +651,8 @@ class UserApiTests(ApiBaseTestCase):
         payload = b"".join(response.streaming_content).decode("utf-8")
         self.assertIn('"type": "meta"', payload)
         self.assertIn('"scene": "customer_service"', payload)
-        self.assertNotIn('"booking_assistant"', payload)
-        self.assertNotIn('"phase": "select_city"', payload)
+        self.assertIn('"booking_assistant"', payload)
+        self.assertIn('"phase": "quick_actions"', payload)
 
     def test_user_ai_chat_should_persist_session_and_messages(self):
         """验证 AI 对话会自动落库会话与消息。"""

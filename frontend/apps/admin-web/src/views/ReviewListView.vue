@@ -78,7 +78,7 @@
         <div>
           <div class="mb-1 flex items-center justify-between">
             <h4 class="text-sm font-medium text-slate-500">AI 建议回复</h4>
-            <button class="flex items-center gap-1 rounded-lg bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-100 disabled:opacity-50" :disabled="loadingAI" @click="fetchAISuggestion">
+            <button class="flex items-center gap-1 rounded-lg bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-100 disabled:opacity-50" :disabled="loadingAI || replying || deleting" @click="fetchAISuggestion">
               <span v-if="loadingAI" class="inline-block h-3 w-3 animate-spin rounded-full border-2 border-indigo-400 border-t-transparent"></span>
               <span>{{ loadingAI ? '获取中…' : '获取AI建议' }}</span>
             </button>
@@ -96,9 +96,9 @@
         </div>
       </div>
       <template #footer>
-        <button v-if="isSystemAdmin" class="mr-auto rounded-lg bg-red-50 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-100" @click="deleteReview(replyTarget.id as number)">删除评价</button>
+        <button v-if="isSystemAdmin" class="mr-auto rounded-lg bg-red-50 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60" :disabled="replying || deleting" @click="deleteReview(replyTarget.id as number)">{{ deleting ? '删除中…' : '删除评价' }}</button>
         <button class="rounded-lg border border-slate-200 px-4 py-2 text-sm hover:bg-slate-50" @click="showReply = false">取消</button>
-        <button class="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700" :disabled="!replyContent.trim()" @click="submitReply">提交回复</button>
+        <button class="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-60" :disabled="!replyContent.trim() || replying || deleting" @click="submitReply">{{ replying ? '提交中…' : '提交回复' }}</button>
       </template>
     </ModalDialog>
   </section>
@@ -134,6 +134,8 @@ const replyTarget = reactive<Record<string, unknown>>({})
 const replyContent = ref('')
 const aiSuggestion = ref('')
 const loadingAI = ref(false)
+const replying = ref(false)
+const deleting = ref(false)
 
 // 加载 List 相关数据。
 async function loadList() {
@@ -186,7 +188,16 @@ async function fetchAISuggestion() {
   try {
     const res = await aiApi.replySuggestion({ review_id: replyTarget.id as number })
     if (res.code === 0 && res.data) {
-      aiSuggestion.value = (res.data as Record<string, unknown>).suggested_reply as string || ''
+      const payload = res.data as Record<string, unknown>
+      const direct = String(payload.suggested_reply || '')
+      const suggestions = Array.isArray(payload.suggestions) ? payload.suggestions : []
+      const firstSuggestion = suggestions.length > 0 ? String((suggestions[0] as Record<string, unknown>).content || '') : ''
+      aiSuggestion.value = direct || firstSuggestion
+      if (aiSuggestion.value) {
+        showToast('已获取 AI 建议回复', 'success')
+      } else {
+        showToast('未获取到有效建议，请稍后重试', 'warning')
+      }
     } else {
       showToast(res.message || 'AI 建议获取失败', 'warning')
     }
@@ -199,6 +210,8 @@ async function fetchAISuggestion() {
 
 // 处理 submitReply 业务流程。
 async function submitReply() {
+  if (replying.value) return
+  replying.value = true
   try {
     const res = await reviewApi.reply({ review_id: replyTarget.id as number, content: replyContent.value })
     if (res.code === 0) {
@@ -210,12 +223,16 @@ async function submitReply() {
     }
   } catch {
     showToast('回复提交失败，请重试', 'error')
+  } finally {
+    replying.value = false
   }
 }
 
 // 删除评价。
 async function deleteReview(id: number) {
+  if (deleting.value) return
   if (!await confirmDialog('确定删除这条评价？该操作不可恢复。', { type: 'danger', title: '删除评价' })) return
+  deleting.value = true
   try {
     const res = await reviewApi.delete({ review_id: id })
     if (res.code === 0) {
@@ -227,6 +244,8 @@ async function deleteReview(id: number) {
     }
   } catch {
     showToast('删除失败，请重试', 'error')
+  } finally {
+    deleting.value = false
   }
 }
 

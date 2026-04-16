@@ -143,6 +143,8 @@
 - `/api/v1/user/ai/recommendations` 当前是 `POST`（非 `GET`）
 - `/api/v1/user/ai/hotel-compare` 当前是 `POST`
 - `/api/v1/user/notices` 支持 `GET`/`POST`/`DELETE`
+- `/api/v1/user/notices` 的 `GET` 响应项新增 `related_order_id`、`related_order_no`，用于订单通知直达详情页
+- `/api/v1/user/orders` 支持多维筛选参数：`status`、`payment_status`、`keyword`、`check_in_start`、`check_in_end`、`created_start`、`created_end`、`amount_min`、`amount_max`
 - `/api/v1/user/ai/chat` 与 `/api/v1/user/ai/chat/stream` 支持可选 `session_id`（续聊）；服务端会自动写入会话消息
 
 ### 6.5 Admin
@@ -156,6 +158,11 @@
 
 - `GET /api/v1/admin/ai/settings` 会返回管理端编辑所需的供应商信息；供应商列表中包含 `api_key`，仅供管理员界面回显与编辑使用。
 - `POST /api/v1/admin/ai/test` 用于管理端连通性测试，可验证当前或指定供应商是否可用。
+- 管理端列表接口支持 `ordering` 参数（白名单校验，非法值自动回退为 `-id`）：
+  - `GET /api/v1/admin/orders`：`id`、`order_no`、`guest_name`、`guest_mobile`、`hotel__name`、`room_type__name`、`check_in_date`、`check_out_date`、`pay_amount`、`status`、`payment_status`、`created_at`、`updated_at`
+  - `GET /api/v1/admin/users`：`id`、`user__username`、`nickname`、`mobile`、`gender`、`role`、`member_level`、`points`、`status`、`created_at`、`updated_at`
+  - `GET /api/v1/admin/employees`：`id`、`user__username`、`nickname`、`mobile`、`role`、`status`、`created_at`、`updated_at`
+  - `GET /api/v1/admin/reports/tasks`：`id`、`report_type`、`hotel__name`、`start_date`、`end_date`、`status`、`created_at`、`updated_at`
 
 注意：
 
@@ -181,6 +188,20 @@
    - `GET /api/v1/user/ai/sessions`
    - `POST /api/v1/user/ai/sessions`（删除动作）
    - `GET /api/v1/user/ai/sessions/<int:session_id>/messages`
+
+返回约定补充（客服快捷操作）：
+
+- `data.booking_assistant.phase = "quick_actions"`
+- 订房场景识别到客服诉求时：`data.booking_assistant.phase = "switch_to_customer_service"`
+- `data.booking_assistant.context.detected_intent`：服务端识别的意图（如 `cancel_order`、`pay_order`、`invoice`）
+- `data.booking_assistant.options[]` 支持统一动作协议字段：
+  - `type`：动作类型（如 `navigate_cancel_order`、`navigate_ai_booking`、`navigate_ai_customer_service`）
+  - `action_type`：当前为 `navigate`
+  - `route` / `target`：目标路由
+  - `query` / `params`：跳转参数（含 `source=ai`、`intent`、`from`，跨助手切换时可带 `ask`）
+  - `requires_confirmation`：是否建议二次确认
+  - `priority`：动作优先级（数值越小越优先）
+  - `tracking_id`：动作追踪 ID
 
 ---
 

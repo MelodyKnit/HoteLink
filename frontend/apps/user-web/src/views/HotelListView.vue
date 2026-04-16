@@ -9,8 +9,8 @@
           <input v-model="filters.keyword" type="text" placeholder="搜索酒店名、城市、商圈..." class="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm outline-none focus:border-brand" @keyup.enter="fetchList" />
         </div>
         <div class="grid grid-cols-2 gap-3 md:flex md:gap-3">
-          <input v-model="filters.check_in_date" type="date" class="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm outline-none focus:border-brand" />
-          <input v-model="filters.check_out_date" type="date" class="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm outline-none focus:border-brand" />
+          <input v-model="filters.check_in_date" type="date" :min="today" class="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm outline-none focus:border-brand" />
+          <input v-model="filters.check_out_date" type="date" :min="filters.check_in_date || today" class="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm outline-none focus:border-brand" />
         </div>
         <button type="button" @click="onSearch" class="w-full rounded-xl bg-brand px-6 py-2.5 text-sm font-medium text-white transition hover:bg-brand-dark md:w-auto">搜索</button>
       </div>
@@ -117,10 +117,44 @@ const page = ref(1)
 const pageSize = 10
 const total = ref(0)
 
+function formatDate(date: Date): string {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+function addDays(base: string, days: number): string {
+  const date = new Date(base)
+  date.setDate(date.getDate() + days)
+  return formatDate(date)
+}
+
+const today = formatDate(new Date())
+const tomorrow = addDays(today, 1)
+
+function resolveDateRangeFromRoute() {
+  const incomingCheckIn = (route.query.check_in_date as string) || ''
+  const incomingCheckOut = (route.query.check_out_date as string) || ''
+
+  const normalizedCheckIn = incomingCheckIn || today
+  let normalizedCheckOut = incomingCheckOut || addDays(normalizedCheckIn, 1)
+  if (normalizedCheckOut <= normalizedCheckIn) {
+    normalizedCheckOut = addDays(normalizedCheckIn, 1)
+  }
+
+  return {
+    check_in_date: normalizedCheckIn,
+    check_out_date: normalizedCheckOut,
+  }
+}
+
+const initialDates = resolveDateRangeFromRoute()
+
 const filters = reactive({
   keyword: (route.query.keyword as string) || '',
-  check_in_date: (route.query.check_in_date as string) || '',
-  check_out_date: (route.query.check_out_date as string) || '',
+  check_in_date: initialDates.check_in_date,
+  check_out_date: initialDates.check_out_date,
   star: (route.query.star as string) || '',
   sort: (route.query.sort as string) || 'default',
   min_price: route.query.min_price ? Number(route.query.min_price) : undefined as number | undefined,
@@ -173,9 +207,10 @@ async function fetchList() {
 }
 
 function syncFiltersFromRoute() {
+  const normalizedDates = resolveDateRangeFromRoute()
   filters.keyword = (route.query.keyword as string) || ''
-  filters.check_in_date = (route.query.check_in_date as string) || ''
-  filters.check_out_date = (route.query.check_out_date as string) || ''
+  filters.check_in_date = normalizedDates.check_in_date
+  filters.check_out_date = normalizedDates.check_out_date
   filters.star = (route.query.star as string) || ''
   filters.sort = (route.query.sort as string) || 'default'
   filters.min_price = route.query.min_price ? Number(route.query.min_price) : undefined

@@ -104,8 +104,8 @@ async function refreshAccessToken(): Promise<string | null> {
   return refreshInFlight
 }
 
-function buildFallbackResponse(serverCode: number, serverMessage: string): ApiResult {
-  return { code: serverCode, message: serverMessage, data: null }
+function buildFallbackResponse(serverCode: number, serverMessage: string, serverData: unknown = null): ApiResult {
+  return { code: serverCode, message: serverMessage, data: serverData }
 }
 
 // 处理 getRefreshToken 业务流程。
@@ -157,7 +157,11 @@ function createHttp(baseURL: string): AxiosInstance {
 
       if (error.response?.status === 401) {
         if (isAuthLoginEndpoint(requestUrl)) {
-          const fallback = buildFallbackResponse(error.response?.data?.code ?? 4010, serverMessage)
+          const fallback = buildFallbackResponse(
+            error.response?.data?.code ?? 4010,
+            serverMessage,
+            error.response?.data?.data ?? null,
+          )
           return Promise.resolve({ data: fallback })
         }
 
@@ -175,7 +179,7 @@ function createHttp(baseURL: string): AxiosInstance {
         }
       }
       const serverCode: number = error.response?.data?.code ?? error.response?.status ?? 5000
-      const fallback: ApiResult = buildFallbackResponse(serverCode, serverMessage)
+      const fallback: ApiResult = buildFallbackResponse(serverCode, serverMessage, error.response?.data?.data ?? null)
       return Promise.resolve({ data: fallback })
     }
   )

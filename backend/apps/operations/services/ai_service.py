@@ -160,6 +160,13 @@ class AIChatService:
                     "booking_assistant": booking_assistant,
                 }
 
+        if chat_mode == "customer_service":
+            booking_assistant = self._build_customer_service_action_response(
+                user=user,
+                order_id=order_id,
+                question=question,
+            )
+
         if chat_mode == "booking_assistant":
             _, messages = self.build_booking_assistant_messages(
                 user=user,
@@ -190,7 +197,7 @@ class AIChatService:
         return {
             "scene": chat_mode,
             "answer": answer,
-            "booking_assistant": None,
+            "booking_assistant": booking_assistant,
         }
 
     def iter_text_chunks(self, text: str, chunk_size: int = 24) -> Iterator[str]:
@@ -460,6 +467,262 @@ class AIChatService:
             "suggested_actions": suggested_actions,
         }
 
+    def _build_customer_service_action_response(
+        self,
+        *,
+        user: Any,
+        order_id: int | None,
+        question: str,
+    ) -> dict[str, Any]:
+        requested_order = BookingOrder.objects.filter(user=user).select_related("hotel", "room_type").filter(id=order_id).first() if order_id else None
+        recent_orders = list(
+            BookingOrder.objects.filter(user=user).select_related("hotel", "room_type").order_by("-id")[:5]
+        )
+        intent = self._detect_customer_service_intent(question)
+        cancellable_statuses = {
+            BookingOrder.STATUS_PENDING_PAYMENT,
+            BookingOrder.STATUS_PAID,
+            BookingOrder.STATUS_CONFIRMED,
+            BookingOrder.STATUS_REFUNDING,
+        }
+        unpaid_statuses = {
+            BookingOrder.STATUS_PENDING_PAYMENT,
+            BookingOrder.STATUS_PAID,
+        }
+
+        preferred_order = requested_order or (recent_orders[0] if recent_orders else None)
+        unpaid_order = next(
+            (
+                order
+                for order in recent_orders
+                if order.payment_status == BookingOrder.PAYMENT_UNPAID or order.status in unpaid_statuses
+            ),
+            None,
+        )
+        cancellable_order = next((order for order in recent_orders if order.status in cancellable_statuses), None)
+
+        def build_action_query(
+            *,
+            target_order: BookingOrder | None = None,
+            action: str | None = None,
+            carry_question: bool = False,
+        ) -> dict[str, str]:
+            query: dict[str, str] = {
+                "source": "ai",
+                "intent": intent,
+            }
+            if target_order is not None:
+                query["order_id"] = str(target_order.id)
+            if action:
+                query["action"] = action
+            if carry_question:
+                normalized_question = (question or "").strip()
+                if normalized_question:
+                    query["ask"] = normalized_question[:120]
+                query["from"] = "ai-chat"
+            return query
+
+        def build_option(
+            *,
+            option_type: str,
+            label: str,
+            value: str,
+            route: str,
+            description: str = "",
+            query: dict[str, str] | None = None,
+            requires_confirmation: bool = False,
+        ) -> dict[str, Any]:
+            normalized_query = {str(k): str(v) for k, v in (query or {}).items() if v is not None}
+            tracking_seed = f"{option_type}:{route}:{value}:{intent}"
+            tracking_id = re.sub(r"[^a-z0-9_-]+", "-", tracking_seed.lower()).strip("-")[:64]
+            return {
+                "type": option_type,
+                "label": label,
+                "value": value,
+                "description": description,
+                "route": route,
+                "query": normalized_query,
+                "action_type": "navigate",
+                "target": route,
+                "params": normalized_query,
+                "requires_confirmation": requires_confirmation,
+                "priority": self._calc_customer_service_action_priority(intent=intent, option_type=option_type),
+                "tracking_id": tracking_id or option_type,
+                "source_scene": "customer_service",
+            }
+        options: list[dict[str, Any]] = []
+
+        if intent == "booking_request":
+            options.append(
+                build_option(
+                    option_type="navigate_ai_booking",
+                    label="切换到 AI 订房助手",
+                    value="ai-booking",
+                    route="/ai-booking",
+                    description="订酒店和比价更适合在订房助手中完成",
+                    query=build_action_query(carry_question=True),
+                )
+            )
+
+        if preferred_order is not None:
+            options.append(
+                build_option(
+                    option_type="navigate_order_detail",
+                    label="查看订单详情",
+                    value=preferred_order.order_no,
+                    route=f"/my/orders/{preferred_order.id}",
+                    description=f"{preferred_order.order_no} · {preferred_order.get_status_display()}",
+                    query=build_action_query(target_order=preferred_order),
+                )
+            )
+
+        if unpaid_order is not None:
+            options.append(
+                build_option(
+                    option_type="navigate_payment",
+                    label="去支付",
+                    value=unpaid_order.order_no,
+                    route=f"/payment/{unpaid_order.id}",
+                    description="继续完成订单支付",
+                    query=build_action_query(target_order=unpaid_order),
+                )
+            )
+
+        if cancellable_order is not None:
+            options.append(
+                build_option(
+                    option_type="navigate_cancel_order",
+                    label="取消订单",
+                    value=cancellable_order.order_no,
+                    route=f"/my/orders/{cancellable_order.id}",
+                    description="前往订单详情并打开取消流程",
+                    query=build_action_query(target_order=cancellable_order, action="cancel"),
+                    requires_confirmation=True,
+                )
+            )
+
+        if requested_order is not None and requested_order.status in cancellable_statuses:
+            should_append_requested_cancel = cancellable_order is None or requested_order.id != cancellable_order.id
+            if should_append_requested_cancel:
+                options.append(
+                    build_option(
+                        option_type="navigate_cancel_order",
+                        label="取消当前订单",
+                        value=requested_order.order_no,
+                        route=f"/my/orders/{requested_order.id}",
+                        description="当前对话关联订单可取消",
+                        query=build_action_query(target_order=requested_order, action="cancel"),
+                        requires_confirmation=True,
+                    )
+                )
+
+        options.extend(
+            [
+                build_option(
+                    option_type="navigate_order_list",
+                    label="查看我的订单",
+                    value="order-list",
+                    route="/my/orders",
+                    description="进入订单中心查看全部订单",
+                    query=build_action_query(),
+                ),
+                build_option(
+                    option_type="navigate_invoice",
+                    label="发票中心",
+                    value="invoice-center",
+                    route="/my/invoices",
+                    description="查看发票申请与开票记录",
+                    query=build_action_query(),
+                ),
+                build_option(
+                    option_type="navigate_notification",
+                    label="通知中心",
+                    value="notification-center",
+                    route="/my/notifications",
+                    description="查看系统通知与提醒",
+                    query=build_action_query(),
+                ),
+                build_option(
+                    option_type="navigate_help",
+                    label="帮助中心",
+                    value="help-center",
+                    route="/help",
+                    description="查看更多常见问题与人工支持入口",
+                    query=build_action_query(),
+                ),
+            ]
+        )
+
+        deduplicated_options: list[dict[str, Any]] = []
+        seen: set[tuple[str, str, str]] = set()
+        for option in options:
+            key = (
+                str(option.get("type", "")),
+                str(option.get("route", "")),
+                json.dumps(option.get("query", {}), ensure_ascii=False, sort_keys=True),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            deduplicated_options.append(option)
+
+        deduplicated_options.sort(key=lambda item: (int(item.get("priority", 99)), str(item.get("label", ""))))
+
+        return {
+            "intent": "customer_service_actions",
+            "phase": "quick_actions",
+            "context": {
+                "detected_intent": intent,
+                "requested_order_id": requested_order.id if requested_order else None,
+                "preferred_order_id": preferred_order.id if preferred_order else None,
+                "unpaid_order_id": unpaid_order.id if unpaid_order else None,
+                "cancellable_order_id": cancellable_order.id if cancellable_order else None,
+            },
+            "options": deduplicated_options[:6],
+        }
+
+    def _detect_customer_service_intent(self, question: str) -> str:
+        content = (question or "").strip().lower()
+        if not content:
+            return "general"
+
+        if any(keyword in content for keyword in ("取消", "退订", "撤销", "不住", "取消订单")):
+            return "cancel_order"
+        if any(keyword in content for keyword in ("支付", "付款", "补款", "付钱", "未支付")):
+            return "pay_order"
+        if any(keyword in content for keyword in ("发票", "开票", "报销")):
+            return "invoice"
+        if any(keyword in content for keyword in ("通知", "消息", "提醒")):
+            return "notification"
+        if any(keyword in content for keyword in ("订酒店", "预订", "找酒店", "比价", "推荐酒店", "房型")):
+            return "booking_request"
+        if any(keyword in content for keyword in ("订单", "状态", "进度", "详情")):
+            return "order_status"
+        return "general"
+
+    def _calc_customer_service_action_priority(self, *, intent: str, option_type: str) -> int:
+        base_priority = {
+            "navigate_cancel_order": 25,
+            "navigate_payment": 30,
+            "navigate_order_detail": 35,
+            "navigate_order_list": 45,
+            "navigate_invoice": 50,
+            "navigate_notification": 55,
+            "navigate_help": 65,
+            "navigate_ai_booking": 20,
+        }
+        priority = base_priority.get(option_type, 70)
+        intent_boost_map = {
+            "cancel_order": {"navigate_cancel_order": -20, "navigate_order_detail": -10},
+            "pay_order": {"navigate_payment": -20, "navigate_order_detail": -10},
+            "invoice": {"navigate_invoice": -20},
+            "notification": {"navigate_notification": -20},
+            "booking_request": {"navigate_ai_booking": -25},
+            "order_status": {"navigate_order_detail": -15, "navigate_order_list": -10},
+        }
+        priority += intent_boost_map.get(intent, {}).get(option_type, 0)
+        return max(priority, 1)
+
     def _build_booking_assistant_prompt_context(
         self,
         *,
@@ -600,6 +863,40 @@ class AIChatService:
             force_booking_flow=requested_scene == "booking_assistant",
         ):
             return None
+
+        customer_service_intent = self._detect_booking_to_customer_service_intent(question)
+        if customer_service_intent:
+            normalized_question = (question or "").strip()
+            switch_query: dict[str, str] = {
+                "source": "ai",
+                "intent": customer_service_intent,
+                "from": "ai-booking",
+            }
+            if normalized_question:
+                switch_query["ask"] = normalized_question[:120]
+            return {
+                "intent": "hotel_booking",
+                "phase": "switch_to_customer_service",
+                "context": context,
+                "options": [
+                    {
+                        "type": "navigate_ai_customer_service",
+                        "label": "切换到 AI 智能客服",
+                        "value": "ai-chat",
+                        "description": "订单、退款、发票、会员等问题由客服助手处理更准确",
+                        "route": "/ai-chat",
+                        "query": switch_query,
+                        "action_type": "navigate",
+                        "target": "/ai-chat",
+                        "params": switch_query,
+                        "requires_confirmation": False,
+                        "priority": 10,
+                        "tracking_id": "navigate-ai-customer-service",
+                        "source_scene": "booking_assistant",
+                    }
+                ],
+                "answer": "这个问题更适合由 AI 智能客服处理。我已为您准备了一键切换入口，点击即可继续。",
+            }
 
         selected_city_from_question = self._extract_city_from_question(question, cities)
         if not selected_city_from_question and llm_slots.get("selected_city"):
@@ -808,6 +1105,32 @@ class AIChatService:
             "nearby_poi_lng": context.get("nearby_poi_lng"),
             "nearby_radius_km": context.get("nearby_radius_km") if isinstance(context.get("nearby_radius_km"), (int, float)) else None,
         }
+
+    def _detect_booking_to_customer_service_intent(self, question: str) -> str | None:
+        content = (question or "").strip().lower()
+        if not content:
+            return None
+
+        if any(keyword in content for keyword in ("客服", "人工", "转人工")):
+            return "customer_service"
+
+        intent_map = [
+            (("取消", "退订", "撤销", "退款"), "cancel_or_refund"),
+            (("支付", "付款", "补款", "扣款", "支付失败"), "payment"),
+            (("发票", "开票", "报销"), "invoice"),
+            (("会员", "积分", "等级", "权益", "成长值"), "membership"),
+            (("通知", "消息", "提醒"), "notification"),
+        ]
+        for keywords, intent in intent_map:
+            if any(keyword in content for keyword in keywords):
+                return intent
+
+        has_order_keyword = any(keyword in content for keyword in ("订单", "订单号", "改期", "改签", "售后", "投诉"))
+        has_service_action = any(keyword in content for keyword in ("状态", "进度", "查询", "处理", "问题", "失败"))
+        if has_order_keyword and has_service_action:
+            return "order_service"
+
+        return None
 
     def _fresh_booking_context(self) -> dict[str, Any]:
         return {

@@ -223,6 +223,8 @@ interface Notice {
   notice_type: string
   title: string
   content: string
+  related_order_id?: number | null
+  related_order_no?: string | null
   is_read: boolean
   created_at: string
 }
@@ -323,6 +325,20 @@ function getNoticeLinkLabel(type: string): string {
   return map[type] ?? ''
 }
 
+function extractOrderNo(text: string): string | null {
+  const normalized = String(text || '')
+  const patterns = [
+    /订单(?:号)?[\s:：#]*([A-Za-z0-9_-]{6,64})/i,
+    /\b(HT[A-Za-z0-9_-]{4,})\b/i,
+  ]
+  for (const pattern of patterns) {
+    const matched = normalized.match(pattern)
+    const value = matched?.[1]?.trim()
+    if (value) return value
+  }
+  return null
+}
+
 function formatExactTime(iso: string): string {
   const d = new Date(iso)
   const pad = (n: number) => String(n).padStart(2, '0')
@@ -332,7 +348,20 @@ function formatExactTime(iso: string): string {
 function handleNoticeClick(notice: Notice) {
   markRead(notice)
   if (isNavigable(notice.notice_type)) {
-    router.push(notice.notice_type === 'coupon' ? '/my/coupons' : '/my/orders')
+    if (notice.notice_type === 'coupon') {
+      router.push('/my/coupons')
+      return
+    }
+    if (Number.isFinite(Number(notice.related_order_id)) && Number(notice.related_order_id) > 0) {
+      router.push(`/my/orders/${notice.related_order_id}`)
+      return
+    }
+    const keyword = notice.related_order_no || extractOrderNo(`${notice.title} ${notice.content}`)
+    if (keyword) {
+      router.push({ path: '/my/orders', query: { keyword } })
+      return
+    }
+    router.push('/my/orders')
     return
   }
   expandedId.value = expandedId.value === notice.id ? null : notice.id

@@ -112,6 +112,7 @@ build_ai_client(provider) → OpenAI compatible client
 | 智能客服问答 | `POST /api/v1/user/ai/chat` | 完整实现，调用 LLM；自动写入 `ChatSession/ChatMessage` |
 | 流式客服问答 | `POST /api/v1/user/ai/chat/stream` | SSE 输出；单次调用只执行一次回复生成并持久化 |
 | AI 订房编排 | 同上，订房意图检测后自动切入 | 多轮对话状态机 |
+| 客服快捷操作 | 同上，客服场景返回 `booking_assistant.options` | 为订单、支付、发票、通知等页面提供可点击跳转按钮 |
 | FAQ 问答 | 客服场景内支持 | 通过 Prompt 约束 |
 | 入住须知解释 | 客服场景内支持 | 通过上下文注入 |
 | AI 推荐酒店 | `POST /api/v1/user/ai/recommendations` | 调用 LLM，不可用时降级为热门酒店排序 |
@@ -123,6 +124,14 @@ build_ai_client(provider) → OpenAI compatible client
 
 - 行程建议与周边推荐
 - 发票与退改政策解释
+
+客服快捷操作实现细节：
+
+- 服务端会根据用户问题识别意图（取消、支付、发票、通知、订房诉求等），并返回优先级排序后的动作列表。
+- 客服 AI 检测到订房诉求时，会返回 `navigate_ai_booking` 一键切换动作，并透传 `ask` 到订房助手继续处理。
+- 订房 AI 检测到客服诉求时，会返回 `navigate_ai_customer_service` 一键切换动作，并透传 `ask` 到客服助手继续处理。
+- 每个动作包含统一协议字段：`type`、`action_type`、`route/target`、`query/params`、`requires_confirmation`、`priority`、`tracking_id`。
+- 前端按优先级渲染动作卡片，并在高风险动作（如取消引导）前进行确认提示，随后跳转至对应页面完成操作。
 
 ### 4.2 管理端 AI 功能
 

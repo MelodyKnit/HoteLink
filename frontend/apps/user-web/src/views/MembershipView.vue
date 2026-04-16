@@ -90,10 +90,10 @@
                 <p class="text-sm font-medium text-gray-800">{{ tpl.name }}</p>
                 <p class="text-xs text-gray-400">{{ tpl.min_amount > 0 ? `满¥${tpl.min_amount}可用` : '无门槛' }} · 剩余{{ tpl.remaining }}张</p>
               </div>
-              <button @click="exchangeCoupon(tpl)" :disabled="exchanging || points < tpl.points_cost"
+              <button @click="exchangeCoupon(tpl)" :disabled="exchangingTemplateId !== null || points < tpl.points_cost"
                 class="rounded-lg px-3 py-1.5 text-xs font-medium transition"
                 :class="points >= tpl.points_cost ? 'bg-brand text-white hover:bg-brand-dark' : 'bg-gray-100 text-gray-400 cursor-not-allowed'">
-                {{ tpl.points_cost }} 积分兑换
+                {{ exchangingTemplateId === tpl.id ? '兑换中...' : `${tpl.points_cost} 积分兑换` }}
               </button>
             </div>
           </div>
@@ -167,12 +167,6 @@
       </div>
     </Teleport>
 
-    <!-- Exchange feedback toast -->
-    <Teleport to="body">
-      <div v-if="exchangeMsg" class="fixed bottom-20 left-1/2 z-50 -translate-x-1/2 rounded-xl bg-gray-800 px-4 py-2 text-sm text-white shadow-lg">
-        {{ exchangeMsg }}
-      </div>
-    </Teleport>
   </div>
 </template>
 
@@ -180,8 +174,10 @@
 import { ref, computed, onMounted } from 'vue'
 import { useUserAuthStore } from '@hotelink/store'
 import { userPointsApi, userCouponApi } from '@hotelink/api'
+import { useToast } from '@hotelink/ui'
 
 const authStore = useUserAuthStore()
+const { showToast } = useToast()
 const points = ref(0)
 const memberLevel = ref('normal')
 const pointLogs = ref<any[]>([])
@@ -189,8 +185,7 @@ const error = ref('')
 const avatarError = ref(false)
 const previewLevel = ref<(typeof levels)[number] | null>(null)
 const exchangeTemplates = ref<any[]>([])
-const exchanging = ref(false)
-const exchangeMsg = ref('')
+const exchangingTemplateId = ref<number | null>(null)
 
 const userInitial = computed(() =>
   (authStore.user?.nickname || authStore.user?.username || 'U').charAt(0).toUpperCase()
@@ -272,32 +267,34 @@ async function loadExchangeTemplates() {
       // 只显示需要积分的（积分兑换区）
       const all = (res.data as any).items || []
       exchangeTemplates.value = all.filter((t: any) => t.points_cost > 0)
+    } else {
+      showToast(res.message || '加载可兑换优惠券失败，请稍后重试', 'error')
     }
-  } catch { /* ignore */ }
+  } catch {
+    showToast('加载可兑换优惠券失败，请检查网络后重试', 'error')
+  }
 }
 
 async function exchangeCoupon(tpl: any) {
+  if (exchangingTemplateId.value !== null) return
   if (points.value < tpl.points_cost) {
-    exchangeMsg.value = `积分不足，需要 ${tpl.points_cost} 积分`
-    setTimeout(() => { exchangeMsg.value = '' }, 2000)
+    showToast(`积分不足，需要 ${tpl.points_cost} 积分`, 'warning')
     return
   }
-  exchanging.value = true
-  exchangeMsg.value = ''
+  exchangingTemplateId.value = tpl.id
   try {
     const res = await userCouponApi.claim(tpl.id)
     if (res.code === 0) {
-      exchangeMsg.value = '兑换成功！优惠券已发放到卡包'
+      showToast('兑换成功，优惠券已发放到卡包', 'success')
       points.value -= tpl.points_cost
       await loadExchangeTemplates()
     } else {
-      exchangeMsg.value = res.message || '兑换失败'
+      showToast(res.message || '兑换失败，请稍后重试', 'error')
     }
   } catch {
-    exchangeMsg.value = '网络错误'
+    showToast('兑换失败，请检查网络后重试', 'error')
   } finally {
-    exchanging.value = false
-    setTimeout(() => { exchangeMsg.value = '' }, 2500)
+    exchangingTemplateId.value = null
   }
 }
 

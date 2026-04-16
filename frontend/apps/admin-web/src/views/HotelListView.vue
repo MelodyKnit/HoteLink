@@ -35,7 +35,13 @@
 
     <!-- Table -->
     <div class="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
-      <DataTable :columns="columns" :rows="list" :loading="loading">
+      <DataTable
+        :columns="columns"
+        :rows="list"
+        :loading="loading"
+        :sort-value="filters.ordering"
+        @sort-change="onTableSortChange"
+      >
         <template #col-cover_image="{ value, row }">
           <img
             v-if="value && thumbnailMode !== 'hidden'"
@@ -70,12 +76,24 @@
       <form class="space-y-4" @submit.prevent="handleSave">
         <div>
           <label class="mb-1 block text-sm font-medium text-slate-700">酒店名称</label>
-          <input v-model="form.name" required class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-teal-500" />
+          <input
+            v-model="form.name"
+            class="w-full rounded-lg border px-3 py-2 text-sm outline-none"
+            :class="formErrors.name ? 'border-red-400 bg-red-50/60 focus:border-red-500' : 'border-slate-300 focus:border-teal-500'"
+            @blur="validateField('name')"
+          />
+          <p v-if="formErrors.name" class="mt-1 text-xs text-red-500">{{ formErrors.name }}</p>
         </div>
         <div class="grid grid-cols-2 gap-4">
           <div>
             <label class="mb-1 block text-sm font-medium text-slate-700">城市</label>
-            <input v-model="form.city" required class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-teal-500" />
+            <input
+              v-model="form.city"
+              class="w-full rounded-lg border px-3 py-2 text-sm outline-none"
+              :class="formErrors.city ? 'border-red-400 bg-red-50/60 focus:border-red-500' : 'border-slate-300 focus:border-teal-500'"
+              @blur="validateField('city')"
+            />
+            <p v-if="formErrors.city" class="mt-1 text-xs text-red-500">{{ formErrors.city }}</p>
           </div>
           <div>
             <label class="mb-1 block text-sm font-medium text-slate-700">星级</label>
@@ -89,11 +107,24 @@
         </div>
         <div>
           <label class="mb-1 block text-sm font-medium text-slate-700">地址</label>
-          <input v-model="form.address" required class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-teal-500" />
+          <input
+            v-model="form.address"
+            class="w-full rounded-lg border px-3 py-2 text-sm outline-none"
+            :class="formErrors.address ? 'border-red-400 bg-red-50/60 focus:border-red-500' : 'border-slate-300 focus:border-teal-500'"
+            @blur="validateField('address')"
+          />
+          <p v-if="formErrors.address" class="mt-1 text-xs text-red-500">{{ formErrors.address }}</p>
         </div>
         <div>
           <label class="mb-1 block text-sm font-medium text-slate-700">联系电话</label>
-          <input v-model="form.phone" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-teal-500" />
+          <input
+            v-model="form.phone"
+            class="w-full rounded-lg border px-3 py-2 text-sm outline-none"
+            :class="formErrors.phone ? 'border-red-400 bg-red-50/60 focus:border-red-500' : 'border-slate-300 focus:border-teal-500'"
+            @blur="validateField('phone')"
+          />
+          <p v-if="formErrors.phone" class="mt-1 text-xs text-red-500">{{ formErrors.phone }}</p>
+          <p v-else class="mt-1 text-xs text-slate-400">选填，支持手机号或座机号</p>
         </div>
         <div>
           <label class="mb-1 block text-sm font-medium text-slate-700">描述</label>
@@ -147,19 +178,19 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { hotelApi, commonApi } from '@hotelink/api'
-import { buildImageThumbUrl, formatMoney, HOTEL_STATUS_MAP, extractApiError } from '@hotelink/utils'
+import { buildImageThumbUrl, formatMoney, HOTEL_STATUS_MAP, extractApiError, extractApiFieldErrors } from '@hotelink/utils'
 import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, useToast, useConfirm, SelectField } from '@hotelink/ui'
 
 const { showToast } = useToast()
 const { confirm: confirmDialog } = useConfirm()
 
 const columns = [
-  { key: 'id', label: 'ID' },
+  { key: 'id', label: 'ID', sortField: 'id' },
   { key: 'cover_image', label: '封面' },
-  { key: 'name', label: '酒店名称' },
-  { key: 'city', label: '城市' },
-  { key: 'star', label: '星级' },
-  { key: 'min_price', label: '起价' },
+  { key: 'name', label: '酒店名称', sortField: 'name' },
+  { key: 'city', label: '城市', sortField: 'city' },
+  { key: 'star', label: '星级', sortField: 'star' },
+  { key: 'min_price', label: '起价', sortField: 'min_price' },
   { key: 'status', label: '状态' },
 ]
 
@@ -179,6 +210,8 @@ const thumbnailHeight = computed(() => (thumbnailMode.value === 'compact' ? 32 :
 const showModal = ref(false)
 const editingId = ref<number | null>(null)
 const saving = ref(false)
+type HotelField = 'name' | 'city' | 'address' | 'phone'
+const formErrors = ref<Partial<Record<HotelField, string>>>({})
 const form = reactive({
   name: '', city: '', address: '', star: 4, phone: '', description: '',
   cover_image: '', images: [] as string[], status: 'draft',
@@ -188,12 +221,77 @@ function resetForm() {
   form.name = ''; form.city = ''; form.address = ''; form.star = 4
   form.phone = ''; form.description = ''; form.status = 'draft'
   form.cover_image = ''; form.images = []
+  formErrors.value = {}
   editingId.value = null
+}
+
+function isValidPhone(value: string): boolean {
+  return /^[0-9+()\-\s]{6,30}$/.test(value)
+}
+
+function getFieldError(field: HotelField): string {
+  switch (field) {
+    case 'name': {
+      const value = form.name.trim()
+      if (!value) return '请填写酒店名称'
+      if (value.length > 200) return '酒店名称不能超过 200 个字符'
+      return ''
+    }
+    case 'city': {
+      const value = form.city.trim()
+      if (!value) return '请填写城市'
+      if (value.length > 100) return '城市名称不能超过 100 个字符'
+      return ''
+    }
+    case 'address': {
+      const value = form.address.trim()
+      if (!value) return '请填写地址'
+      if (value.length > 255) return '地址不能超过 255 个字符'
+      return ''
+    }
+    case 'phone': {
+      const value = form.phone.trim()
+      if (!value) return ''
+      if (!isValidPhone(value)) return '请输入有效的联系电话'
+      return ''
+    }
+    default:
+      return ''
+  }
+}
+
+function validateField(field: HotelField) {
+  const message = getFieldError(field)
+  formErrors.value = {
+    ...formErrors.value,
+    [field]: message || undefined,
+  }
+}
+
+function validateForm(): boolean {
+  form.name = form.name.trim()
+  form.city = form.city.trim()
+  form.address = form.address.trim()
+  form.phone = form.phone.trim()
+
+  const nextErrors: Partial<Record<HotelField, string>> = {}
+  ;(['name', 'city', 'address', 'phone'] as HotelField[]).forEach((field) => {
+    const message = getFieldError(field)
+    if (message) nextErrors[field] = message
+  })
+  formErrors.value = nextErrors
+  return Object.keys(nextErrors).length === 0
 }
 
 function onSortChange() {
   page.value = 1
   loadList()
+}
+
+function onTableSortChange(ordering: string) {
+  if (filters.ordering === ordering) return
+  filters.ordering = ordering
+  onSortChange()
 }
 
 function onThumbError(event: Event, fallbackSrc: string) {
@@ -279,6 +377,11 @@ async function loadList() {
 }
 
 async function handleSave() {
+  if (!validateForm()) {
+    showToast(Object.values(formErrors.value).find(Boolean) || '请先完善酒店信息', 'warning')
+    return
+  }
+
   saving.value = true
   try {
     const payload: Record<string, unknown> = { ...form }
@@ -293,7 +396,21 @@ async function handleSave() {
       showModal.value = false
       loadList()
     } else {
-      showToast(extractApiError(res, '保存失败'), 'error')
+      formErrors.value = {
+        ...formErrors.value,
+        ...extractApiFieldErrors(res, {
+          name: '酒店名称',
+          city: '城市',
+          address: '地址',
+          phone: '联系电话',
+        }),
+      }
+      showToast(extractApiError(res, '保存失败，请检查填写内容', {
+        name: '酒店名称',
+        city: '城市',
+        address: '地址',
+        phone: '联系电话',
+      }), 'error')
     }
   } catch {
     showToast('保存失败，请重试', 'error')

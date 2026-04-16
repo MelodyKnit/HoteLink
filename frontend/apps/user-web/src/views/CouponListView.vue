@@ -46,10 +46,10 @@
               </p>
             </div>
             <div class="flex items-center pr-4">
-              <button @click="claimCoupon(tpl)" :disabled="claiming || (tpl.points_cost > 0 && userPoints < tpl.points_cost)"
+              <button @click="claimCoupon(tpl)" :disabled="claimingTemplateId !== null || (tpl.points_cost > 0 && userPoints < tpl.points_cost)"
                 class="rounded-lg px-3 py-1.5 text-xs font-medium transition"
                 :class="(tpl.points_cost > 0 && userPoints < tpl.points_cost) ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-brand text-white hover:bg-brand-dark disabled:opacity-50'">
-                {{ tpl.points_cost > 0 ? (userPoints < tpl.points_cost ? '积分不足' : '兑换') : '领取' }}
+                {{ claimingTemplateId === tpl.id ? '处理中…' : (tpl.points_cost > 0 ? (userPoints < tpl.points_cost ? '积分不足' : '兑换') : '领取') }}
               </button>
             </div>
           </div>
@@ -85,10 +85,6 @@
         </div>
       </div>
 
-      <!-- Claim feedback -->
-      <div v-if="claimMsg" class="fixed bottom-20 left-1/2 z-50 -translate-x-1/2 rounded-xl bg-gray-800 px-4 py-2 text-sm text-white shadow-lg">
-        {{ claimMsg }}
-      </div>
     </div>
   </div>
 </template>
@@ -96,6 +92,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { userCouponApi, userPointsApi } from '@hotelink/api'
+import { useToast, useConfirm } from '@hotelink/ui'
+
+const { showToast } = useToast()
+const { confirm: confirmDialog } = useConfirm()
 
 const tabs = [
   { label: '领券中心', value: 'claim' },
@@ -107,8 +107,7 @@ const activeTab = ref('claim')
 const loading = ref(true)
 const coupons = ref<any[]>([])
 const availableTemplates = ref<any[]>([])
-const claiming = ref(false)
-const claimMsg = ref('')
+const claimingTemplateId = ref<number | null>(null)
 const userPoints = ref(0)
 
 const filtered = computed(() => coupons.value.filter(c => c.status === activeTab.value))
@@ -128,23 +127,27 @@ async function loadAvailable() {
 }
 
 async function claimCoupon(tpl: any) {
-  claiming.value = true
-  claimMsg.value = ''
+  const needPoints = Number(tpl.points_cost || 0)
+  const confirmText = needPoints > 0
+    ? `确认使用 ${needPoints} 积分兑换「${tpl.name}」吗？`
+    : `确认领取「${tpl.name}」吗？`
+  if (!await confirmDialog(confirmText)) return
+
+  claimingTemplateId.value = Number(tpl.id)
   try {
     const res = await userCouponApi.claim(tpl.id)
     if (res.code === 0) {
-      claimMsg.value = tpl.points_cost > 0 ? '兑换成功！' : '领取成功！'
-      if (tpl.points_cost > 0) userPoints.value -= tpl.points_cost
+      if (needPoints > 0) userPoints.value = Math.max(0, userPoints.value - needPoints)
       await loadAvailable()
       await loadMyCoupons()
+      showToast(needPoints > 0 ? '兑换成功' : '领取成功', 'success')
     } else {
-      claimMsg.value = res.message || '领取失败'
+      showToast(res.message || '领取失败，请稍后重试', 'error')
     }
   } catch {
-    claimMsg.value = '网络错误'
+    showToast('网络错误，请稍后重试', 'error')
   } finally {
-    claiming.value = false
-    setTimeout(() => { claimMsg.value = '' }, 2000)
+    claimingTemplateId.value = null
   }
 }
 

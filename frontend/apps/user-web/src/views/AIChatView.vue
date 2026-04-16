@@ -1,7 +1,7 @@
 <template>
-  <div class="flex min-h-[100dvh] flex-col bg-gradient-to-br from-gray-50 to-gray-100">
+  <div class="flex h-[100dvh] flex-col overflow-hidden bg-gradient-to-br from-gray-50 to-gray-100">
     <!-- Header -->
-    <header class="flex h-14 items-center justify-between border-b border-gray-200 bg-white px-4 shadow-sm">
+    <header class="sticky top-0 z-20 flex h-14 shrink-0 items-center justify-between border-b border-gray-200 bg-white px-4 shadow-sm">
       <button @click="$router.back()" class="rounded-lg p-1 text-gray-600 hover:bg-gray-100">← 返回</button>
       <div class="flex items-center gap-2">
         <span class="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-brand to-brand/80 text-white shadow-sm">🤖</span>
@@ -83,7 +83,7 @@
     </div>
 
     <!-- Messages -->
-    <div ref="chatBox" class="flex-1 space-y-4 overflow-y-auto p-4">
+    <div ref="chatBox" @scroll="handleChatScroll" class="flex-1 space-y-4 overflow-y-auto p-4">
       <div v-for="msg in messages" :key="msg.id"
         class="flex animate-fadeIn" :class="msg.role === 'user' ? 'justify-end' : 'justify-start'">
         <div class="max-w-[85%] rounded-2xl px-4 py-3 text-sm"
@@ -98,11 +98,11 @@
           <template v-else-if="msg.role === 'assistant'">
             <div class="ai-markdown space-y-2" v-html="renderMd(msg.content)" />
             <!-- Smart Options -->
-            <div v-if="isBookingMode && msg.bookingAssistant?.options?.length" class="mt-4 space-y-2 border-t border-gray-100 pt-3">
-              <p class="text-xs font-medium text-gray-500">💡 推荐选项：</p>
+            <div v-if="msg.bookingAssistant?.options?.length" class="mt-4 space-y-2 border-t border-gray-100 pt-3">
+              <p class="text-xs font-medium text-gray-500">⚡ 快捷操作：</p>
               <div
-                v-for="option in msg.bookingAssistant.options"
-                :key="`${option.type}-${option.value}`"
+                v-for="(option, optionIndex) in resolveAssistantOptions(msg.bookingAssistant?.options)"
+                :key="`${option.type}-${option.value}-${optionIndex}`"
                 @click="handleAssistantOption(option)"
                 @keydown.enter="handleAssistantOption(option)"
                 tabindex="0"
@@ -113,6 +113,20 @@
                   <div class="flex-1">
                     <p class="font-semibold text-gray-800 group-hover:text-brand">{{ option.label }}</p>
                     <p v-if="option.description" class="mt-1 text-xs leading-5 text-gray-500">{{ option.description }}</p>
+                    <div class="mt-1.5 flex flex-wrap items-center gap-1.5 text-[10px]">
+                      <span
+                        v-if="isRecommendedOption(option)"
+                        class="rounded-full bg-brand/10 px-2 py-0.5 font-medium text-brand"
+                      >
+                        推荐
+                      </span>
+                      <span
+                        v-if="option.requires_confirmation"
+                        class="rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-700"
+                      >
+                        需确认
+                      </span>
+                    </div>
                   </div>
                   <div class="shrink-0 flex items-center gap-2">
                     <button
@@ -133,6 +147,14 @@
           <!-- User Message -->
           <p v-else class="whitespace-pre-wrap">{{ msg.content }}</p>
         </div>
+        <button
+          v-if="msg.role === 'user' && msg.sendState === 'failed'"
+          @click.stop="retryFailedMessage(msg)"
+          class="ml-2 mt-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-red-200 bg-red-50 text-xs font-bold text-red-600 transition hover:bg-red-100"
+          title="消息发送失败，点击重发"
+        >
+          ↻
+        </button>
       </div>
 
       <!-- Empty State Suggestion -->
@@ -162,8 +184,17 @@
       </div>
     </div>
 
+    <button
+      v-if="showScrollToBottom"
+      @click="scrollBottom()"
+      class="fixed bottom-24 right-4 z-30 flex h-10 min-w-10 items-center justify-center rounded-full border border-brand/30 bg-white/95 px-3 text-xs font-medium text-brand shadow-lg backdrop-blur transition hover:bg-brand/5"
+      title="回到底部"
+    >
+      ↓ 最新
+    </button>
+
     <!-- Quick Actions -->
-    <div v-if="shouldShowQuickActions" class="flex flex-wrap gap-2 px-4 pb-2">
+    <div v-if="shouldShowQuickActions" class="shrink-0 flex flex-wrap gap-2 px-4 pb-2">
       <button v-for="q in dynamicQuickQuestions" :key="q" @click="sendMessage(q)"
         class="rounded-full border-2 border-brand/30 px-3 py-1.5 text-xs font-medium text-brand hover:border-brand/60 hover:bg-brand/5 transition-colors">
         {{ q }}
@@ -171,7 +202,7 @@
     </div>
 
     <!-- Input -->
-    <div class="safe-area-bottom border-t border-gray-200 bg-white p-3 shadow-lg">
+    <div class="safe-area-bottom shrink-0 border-t border-gray-200 bg-white p-3 shadow-lg">
       <div class="flex gap-2">
         <input v-model="input" @keydown.enter="sendMessage()" @focus="onInputFocus" :placeholder="inputPlaceholder"
           class="flex-1 rounded-2xl border-2 border-gray-200 px-4 py-2.5 text-sm outline-none focus:border-brand transition-colors" />
@@ -190,9 +221,12 @@ import { useRouter } from 'vue-router'
 import { useRoute } from 'vue-router'
 import { marked } from 'marked'
 import { userAiApi } from '@hotelink/api'
+import { useConfirm, useToast } from '@hotelink/ui'
 
 const router = useRouter()
 const route = useRoute()
+const { showToast } = useToast()
+const { confirm: confirmDialog } = useConfirm()
 const chatBox = ref<HTMLElement | null>(null)
 const input = ref('')
 const sending = ref(false)
@@ -201,6 +235,7 @@ const showHistoryPanel = ref(false)
 const showClearConfirm = ref(false)
 const chatHistories = ref<ChatHistory[]>([])
 const backendSessionId = ref<number | null>(null)
+const showScrollToBottom = ref(false)
 
 interface ChatHistory {
   timestamp: number
@@ -212,7 +247,7 @@ interface ChatHistory {
 }
 
 interface BookingContext {
-  [key: string]: string | number | null | undefined
+  [key: string]: unknown
   intent?: string
   selected_city?: string | null
   selected_hotel_id?: number | null
@@ -223,6 +258,13 @@ interface AssistantOption {
   label: string
   value: string
   description?: string
+  action_type?: string
+  target?: string
+  params?: Record<string, unknown>
+  requires_confirmation?: boolean
+  priority?: number
+  tracking_id?: string
+  source_scene?: string
   payload?: Record<string, unknown>
   route?: string
   query?: Record<string, string>
@@ -240,6 +282,7 @@ interface Msg {
   role: 'user' | 'assistant'
   content: string
   loading?: boolean
+  sendState?: 'sending' | 'failed' | 'sent'
   bookingAssistant?: BookingAssistant | null
 }
 
@@ -253,13 +296,14 @@ function createMsgId(role: 'user' | 'assistant'): string {
 function createMessage(
   role: 'user' | 'assistant',
   content: string,
-  extras?: { loading?: boolean; bookingAssistant?: BookingAssistant | null }
+  extras?: { loading?: boolean; bookingAssistant?: BookingAssistant | null; sendState?: 'sending' | 'failed' | 'sent' }
 ): Msg {
   return {
     id: createMsgId(role),
     role,
     content,
     loading: extras?.loading,
+    sendState: extras?.sendState,
     bookingAssistant: extras?.bookingAssistant,
   }
 }
@@ -278,28 +322,56 @@ function normalizeMessages(raw: unknown): Msg[] {
       role: record.role,
       content: record.content,
       loading: record.loading === true ? true : undefined,
+      sendState: record.sendState === 'sending' || record.sendState === 'failed' || record.sendState === 'sent'
+        ? record.sendState
+        : undefined,
       bookingAssistant: record.bookingAssistant || null,
     })
   }
   return normalized
 }
 
-const isBookingMode = route.path === '/ai-booking'
-const scene = isBookingMode ? 'booking_assistant' : 'customer_service'
+const BOOKING_PATH = '/ai-booking'
+const BOOKING_SESSION_KEY = 'hotelink_ai_booking_chat_state'
+const CUSTOMER_SESSION_KEY = 'hotelink_ai_customer_chat_state'
+const BOOKING_HISTORY_STORAGE_KEY = 'hotelink_ai_booking_history'
+const CUSTOMER_HISTORY_STORAGE_KEY = 'hotelink_ai_customer_history'
 
-const pageTitle = isBookingMode ? 'AI 订房助手 🧭' : 'AI 智能客服 💬'
-const inputPlaceholder = isBookingMode
-  ? '直接描述您的订房需求，我会帮您快速筛选酒店与房型...'
-  : '直接咨询订单、退款、发票、会员等问题...'
+function isBookingPath(path: string): boolean {
+  return path === BOOKING_PATH
+}
 
-const sessionKey = isBookingMode ? 'hotelink_ai_booking_chat_state' : 'hotelink_ai_customer_chat_state'
-const historyStorageKey = isBookingMode ? 'hotelink_ai_booking_history' : 'hotelink_ai_customer_history'
-const defaultWelcome = isBookingMode
-  ? '嗨，我是您的 AI 订房助手 🧭\n\n直接告诉我您想在哪里订酒店，什么时间？我会帮您快速找到最适合的房间。'
-  : '您好！我是 HoteLink 的智能助理 💬\n\n有什么我可以帮您的吗？（预订、取消、退款、会员权益...）'
+function resolveScene(path: string): 'booking_assistant' | 'customer_service' {
+  return isBookingPath(path) ? 'booking_assistant' : 'customer_service'
+}
+
+function resolveSessionKey(path: string): string {
+  return isBookingPath(path) ? BOOKING_SESSION_KEY : CUSTOMER_SESSION_KEY
+}
+
+function resolveHistoryStorageKey(path: string): string {
+  return isBookingPath(path) ? BOOKING_HISTORY_STORAGE_KEY : CUSTOMER_HISTORY_STORAGE_KEY
+}
+
+function resolveDefaultWelcome(path: string): string {
+  if (isBookingPath(path)) {
+    return '嗨，我是您的 AI 订房助手 🧭\n\n直接告诉我您想在哪里订酒店，什么时间？我会帮您快速找到最适合的房间。'
+  }
+  return '您好！我是 HoteLink 的智能助理 💬\n\n有什么我可以帮您的吗？（预订、取消、退款、会员权益...）'
+}
+
+const isBookingMode = computed(() => isBookingPath(route.path))
+const scene = computed(() => resolveScene(route.path))
+
+const pageTitle = computed(() => (isBookingMode.value ? 'AI 订房助手 🧭' : 'AI 智能客服 💬'))
+const inputPlaceholder = computed(() => (
+  isBookingMode.value
+    ? '直接描述您的订房需求，我会帮您快速筛选酒店与房型...'
+    : '直接咨询订单、退款、发票、会员等问题...'
+))
 
 const messages = ref<Msg[]>([
-  createMessage('assistant', defaultWelcome),
+  createMessage('assistant', resolveDefaultWelcome(route.path)),
 ])
 
 const bookingContext = ref<BookingContext>({})
@@ -307,7 +379,7 @@ const bookingContext = ref<BookingContext>({})
 // 动态快速问题：根据对话进度显示
 const dynamicQuickQuestions = computed(() => {
   if (messages.value.length <= 1) {
-    if (isBookingMode) {
+    if (isBookingMode.value) {
       return ['上海出差订酒店', '北京五星酒店', '杭州近地铁的', '南京亲子房', '广州高评分的']
     } else {
       return ['如何预订？', '怎么取消？', '有退款吗？', '会员权益？', '在线客服？']
@@ -326,6 +398,15 @@ function getOptionEmoji(type: string): string {
   const emojiMap: Record<string, string> = {
     'navigate_booking': '🛏️',
     'navigate_hotel': '🗺️',
+    'navigate_order_list': '📋',
+    'navigate_order_detail': '🧾',
+    'navigate_payment': '💳',
+    'navigate_cancel_order': '✖️',
+    'navigate_invoice': '🧾',
+    'navigate_notification': '🔔',
+    'navigate_help': '🆘',
+    'navigate_ai_booking': '🧭',
+    'navigate_ai_customer_service': '💬',
     'select_city': '📍',
     'select_hotel': '🏨',
     'select_radius': '📏',
@@ -337,6 +418,45 @@ function getOptionEmoji(type: string): string {
     'confirm': '✅',
   }
   return emojiMap[type] || '→'
+}
+
+function isRecommendedOption(option: AssistantOption): boolean {
+  return Number(option.priority ?? 99) <= 25
+}
+
+function resolveAssistantOptions(options?: AssistantOption[]): AssistantOption[] {
+  if (!Array.isArray(options) || !options.length) return []
+  return [...options].sort((a, b) => Number(a.priority ?? 99) - Number(b.priority ?? 99))
+}
+
+function resolveOptionRoute(option: AssistantOption): string {
+  const target = option.route || option.target
+  return typeof target === 'string' ? target : ''
+}
+
+function resolveAssistantSceneFromPath(path: string): 'booking_assistant' | 'customer_service' | null {
+  if (path === BOOKING_PATH) return 'booking_assistant'
+  if (path === '/ai-chat') return 'customer_service'
+  return null
+}
+
+function resolveOptionQuery(option: AssistantOption): Record<string, string> {
+  const query = option.query || option.params || {}
+  if (!query || typeof query !== 'object') return {}
+  const normalized: Record<string, string> = {}
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined || value === null) continue
+    normalized[key] = String(value)
+  }
+  return normalized
+}
+
+async function confirmBeforeNavigate(option: AssistantOption): Promise<boolean> {
+  if (!option.requires_confirmation) return true
+  const message = option.type === 'navigate_cancel_order'
+    ? '将跳转到订单详情并打开取消流程，确认继续吗？'
+    : `将执行「${option.label}」，确认继续吗？`
+  return confirmDialog(message)
 }
 
 // 焦点时的处理
@@ -361,10 +481,9 @@ function formatHistoryTime(timestamp: number): string {
   return date.toLocaleDateString('zh-CN')
 }
 
-// 保存当前聊天到历史
-function saveCurrentChatToHistory() {
+function saveCurrentChatToHistoryForPath(path: string) {
   if (messages.value.length <= 1) return // 只有欢迎词，不保存
-  
+
   const userMessages = messages.value.filter(m => m.role === 'user')
   if (userMessages.length === 0) return // 没有用户消息，不保存
 
@@ -378,17 +497,23 @@ function saveCurrentChatToHistory() {
     backendSessionId: backendSessionId.value,
   }
 
-  const existing = loadHistories()
+  const existing = loadHistoriesForPath(path)
   existing.unshift(history) // 新聊天放在最前面
   if (existing.length > 20) existing.pop() // 最多保留20条历史
 
-  localStorage.setItem(historyStorageKey, JSON.stringify(existing))
-  chatHistories.value = existing
+  localStorage.setItem(resolveHistoryStorageKey(path), JSON.stringify(existing))
+  if (path === route.path) {
+    chatHistories.value = existing
+  }
 }
 
-// 从存储加载历史
-function loadHistories(): ChatHistory[] {
-  const raw = localStorage.getItem(historyStorageKey)
+// 保存当前聊天到历史
+function saveCurrentChatToHistory() {
+  saveCurrentChatToHistoryForPath(route.path)
+}
+
+function loadHistoriesForPath(path: string): ChatHistory[] {
+  const raw = localStorage.getItem(resolveHistoryStorageKey(path))
   if (!raw) return []
   try {
     const parsed = JSON.parse(raw) as ChatHistory[]
@@ -408,13 +533,18 @@ function loadHistories(): ChatHistory[] {
   }
 }
 
+// 从存储加载历史
+function loadHistories(): ChatHistory[] {
+  return loadHistoriesForPath(route.path)
+}
+
 // 恢复历史聊天
 function restoreHistory(idx: number) {
   const history = chatHistories.value[idx]
   if (!history) return
 
   messages.value = normalizeMessages(history.messages).filter(m => !m.loading)
-  bookingContext.value = isBookingMode ? { ...history.bookingContext } : {}
+  bookingContext.value = isBookingMode.value ? { ...history.bookingContext } : {}
   backendSessionId.value = Number.isFinite(Number(history.backendSessionId)) ? Number(history.backendSessionId) : null
   showHistoryPanel.value = false
   scrollBottom()
@@ -427,7 +557,7 @@ function restoreHistory(idx: number) {
 function deleteHistory(idx: number) {
   const remaining = chatHistories.value.filter((_, i) => i !== idx)
   chatHistories.value = remaining
-  localStorage.setItem(historyStorageKey, JSON.stringify(remaining))
+  localStorage.setItem(resolveHistoryStorageKey(route.path), JSON.stringify(remaining))
 }
 
 // 确认清空
@@ -439,7 +569,7 @@ function confirmClear() {
 // 清空当前聊天
 function clearChat() {
   messages.value = [
-    createMessage('assistant', defaultWelcome),
+    createMessage('assistant', resolveDefaultWelcome(route.path)),
   ]
   bookingContext.value = {}
   backendSessionId.value = null
@@ -448,17 +578,21 @@ function clearChat() {
   scrollBottom()
 }
 
-function saveSessionState() {
+function saveSessionStateForPath(path: string) {
   const payload = {
     messages: messages.value,
     bookingContext: bookingContext.value,
     backendSessionId: backendSessionId.value,
   }
-  sessionStorage.setItem(sessionKey, JSON.stringify(payload))
+  sessionStorage.setItem(resolveSessionKey(path), JSON.stringify(payload))
 }
 
-function restoreSessionState() {
-  const raw = sessionStorage.getItem(sessionKey)
+function saveSessionState() {
+  saveSessionStateForPath(route.path)
+}
+
+function restoreSessionStateForPath(path: string) {
+  const raw = sessionStorage.getItem(resolveSessionKey(path))
   if (!raw) return false
   try {
     const parsed = JSON.parse(raw) as { messages?: Msg[]; bookingContext?: BookingContext; backendSessionId?: number | null }
@@ -474,6 +608,10 @@ function restoreSessionState() {
   } catch {
     return false
   }
+}
+
+function restoreSessionState() {
+  return restoreSessionStateForPath(route.path)
 }
 
 function escapeHtml(text: string): string {
@@ -509,7 +647,7 @@ function mergeBookingContext(contextPatch?: Record<string, unknown>): BookingCon
 }
 
 function shouldCarryBookingContext(message: string, contextPatch?: Record<string, unknown>): boolean {
-  if (!isBookingMode) return false
+  if (!isBookingMode.value) return false
   if (contextPatch) return true
   if (!bookingContext.value.intent) return false
   const value = message.trim()
@@ -517,18 +655,62 @@ function shouldCarryBookingContext(message: string, contextPatch?: Record<string
   return ['订', '预订', '房型', '入住', '酒店', '城市', '地点', '地区'].some(keyword => value.includes(keyword))
 }
 
+function updateUserSendState(messageId: string, state: 'sending' | 'failed' | 'sent') {
+  const target = messages.value.find((item) => item.id === messageId && item.role === 'user')
+  if (target) {
+    target.sendState = state
+  }
+}
+
+function getDistanceToBottom(): number {
+  const el = chatBox.value
+  if (!el) return 0
+  return el.scrollHeight - el.scrollTop - el.clientHeight
+}
+
+function isNearBottom(threshold = 120): boolean {
+  return getDistanceToBottom() <= threshold
+}
+
+function handleChatScroll() {
+  showScrollToBottom.value = !isNearBottom()
+}
+
 // 将列表滚动到容器底部
-function scrollBottom() {
+function scrollBottom(behavior: ScrollBehavior = 'smooth') {
   nextTick(() => { 
     if (chatBox.value) {
-      chatBox.value.scrollTo({ top: chatBox.value.scrollHeight, behavior: 'smooth' })
+      chatBox.value.scrollTo({ top: chatBox.value.scrollHeight, behavior })
+      showScrollToBottom.value = false
     }
   })
 }
 
+async function retryFailedMessage(message: Msg) {
+  if (message.role !== 'user' || message.sendState !== 'failed' || sending.value) return
+  const accepted = await confirmDialog('这条消息发送失败，是否重新发送？')
+  if (!accepted) return
+  await sendMessage(message.content, undefined, message.id)
+}
+
 async function handleAssistantOption(option: AssistantOption) {
-  if (option.route) {
-    await router.push({ path: option.route, query: option.query || {} })
+  const routePath = resolveOptionRoute(option)
+  if (routePath) {
+    const optionQuery = resolveOptionQuery(option)
+    const targetScene = resolveAssistantSceneFromPath(routePath)
+    const hasAskQuery = Boolean(optionQuery.ask && String(optionQuery.ask).trim())
+    if (targetScene && targetScene === scene.value && routePath === route.path && !hasAskQuery) {
+      showToast(targetScene === 'booking_assistant' ? '当前已在 AI 订房助手' : '当前已在 AI 智能客服', 'info')
+      return
+    }
+    const accepted = await confirmBeforeNavigate(option)
+    if (!accepted) return
+    await router.push({ path: routePath, query: optionQuery })
+    showToast(`已打开「${option.label}」`, 'success')
+    return
+  }
+  if ((option.action_type || '').toLowerCase() === 'send_message') {
+    await sendMessage(option.label, option.payload)
     return
   }
   await sendMessage(option.label, option.payload)
@@ -558,15 +740,25 @@ async function openHotelDetail(option: AssistantOption) {
 }
 
 // 处理 sendMessage 业务流程（流式）
-async function sendMessage(text?: string, contextPatch?: Record<string, unknown>) {
+async function sendMessage(text?: string, contextPatch?: Record<string, unknown>, retryMessageId?: string) {
   const msg = (text || input.value).trim()
   if (!msg || sending.value) return
+
+  let userMessageId = retryMessageId || ''
+  if (retryMessageId) {
+    const retryMessage = messages.value.find((item) => item.id === retryMessageId && item.role === 'user')
+    if (!retryMessage) return
+    updateUserSendState(retryMessageId, 'sending')
+  } else {
+    const userMessage = createMessage('user', msg, { sendState: 'sending' })
+    messages.value.push(userMessage)
+    userMessageId = userMessage.id
+    scrollBottom()
+  }
   
-  const carryBookingContext = isBookingMode && shouldCarryBookingContext(msg, contextPatch)
+  const carryBookingContext = isBookingMode.value && shouldCarryBookingContext(msg, contextPatch)
   const nextBookingContext = carryBookingContext ? mergeBookingContext(contextPatch) : undefined
   input.value = ''
-  messages.value.push(createMessage('user', msg))
-  scrollBottom()
 
   // Loading placeholder until first token arrives
   messages.value.push(createMessage('assistant', '', { loading: true }))
@@ -577,21 +769,19 @@ async function sendMessage(text?: string, contextPatch?: Record<string, unknown>
   let pendingBookingAssistant: BookingAssistant | null = null
   try {
     for await (const event of userAiApi.chatStream({
-      scene,
+      scene: scene.value,
       question: msg,
       hotel_id: nextBookingContext?.selected_hotel_id || undefined,
       session_id: backendSessionId.value || undefined,
-      booking_context: isBookingMode ? nextBookingContext : undefined,
+      booking_context: isBookingMode.value ? nextBookingContext : undefined,
     })) {
       if (event.type === 'meta') {
-        pendingBookingAssistant = isBookingMode
-          ? ((event.booking_assistant as BookingAssistant) || null)
-          : null
+        pendingBookingAssistant = (event.booking_assistant as BookingAssistant) || null
         const incomingSessionId = Number(event.session_id)
         if (Number.isFinite(incomingSessionId) && incomingSessionId > 0) {
           backendSessionId.value = incomingSessionId
         }
-        if (isBookingMode && pendingBookingAssistant?.context) {
+        if (isBookingMode.value && pendingBookingAssistant?.context) {
           bookingContext.value = { ...pendingBookingAssistant.context }
         }
         continue
@@ -604,24 +794,39 @@ async function sendMessage(text?: string, contextPatch?: Record<string, unknown>
         backendSessionId.value = incomingSessionId
       }
       if (!receivedAny) {
+        const stickToBottom = isNearBottom()
         messages.value.pop()
         messages.value.push(createMessage('assistant', '', { bookingAssistant: pendingBookingAssistant }))
         receivedAny = true
+        if (stickToBottom) {
+          scrollBottom()
+        } else {
+          showScrollToBottom.value = true
+        }
       }
       if (chunk) {
+        const stickToBottom = isNearBottom()
         messages.value[messages.value.length - 1].content += chunk
-        scrollBottom()
+        if (stickToBottom) {
+          scrollBottom()
+        } else {
+          showScrollToBottom.value = true
+        }
       }
       if (isDone) break
     }
     if (!receivedAny) throw new Error('no reply')
-    if (!isBookingMode || (!pendingBookingAssistant && !carryBookingContext)) {
+    updateUserSendState(userMessageId, 'sent')
+    if (!isBookingMode.value || (!pendingBookingAssistant && !carryBookingContext)) {
       bookingContext.value = {}
     }
   } catch (err) {
-    if (!receivedAny) messages.value.pop()
-    messages.value.push(createMessage('assistant', generateFallback(msg)))
-    if (!isBookingMode || !carryBookingContext) {
+    if (!receivedAny) {
+      messages.value.pop()
+    }
+    updateUserSendState(userMessageId, 'failed')
+    showToast('消息发送失败，可点击右侧重发', 'warning')
+    if (!isBookingMode.value || !carryBookingContext) {
       bookingContext.value = {}
     }
   }
@@ -629,37 +834,47 @@ async function sendMessage(text?: string, contextPatch?: Record<string, unknown>
   scrollBottom()
 }
 
-// 处理 generateFallback 业务流程。优化的业务逻辑
-function generateFallback(q: string): string {
-  // 订房相关
-  if (isBookingMode) {
-    if (q.includes('上海') || q.includes('北京') || q.includes('广东') || q.includes('浙江')) {
-      return '我没能完整理解您的需求，但我可以帮您：\n\n📍 指定您想要的具体城市\n📅 告诉我入住日期\n💰 预算范围\n\n这样我就能为您推荐最合适的酒店了！'
-    }
-    return '抱歉，我暂时遇到了问题。您可以：\n\n1️⃣ 在首页直接搜索酒店\n2️⃣ 重新描述您的需求，比如"我要在上海预订酒店，5月1日入住"\n3️⃣ 如需帮助请拨打 400-123-4567'
-  }
-
-  // 客服相关
-  if (q.includes('预订')) return '预订酒店只需 3 步：\n\n1️⃣ 搜索目的地和日期\n2️⃣ 选择心仪的房型\n3️⃣ 填写信息并支付\n\n就能完成预订了！'
-  if (q.includes('取消')) return '您可以在「我的订单」页面找到订单，点击「取消」即可。\n\n⚠️ 请注意查看酒店的取消政策和最后退订时间。'
-  if (q.includes('退款')) return '取消订单后，根据酒店政策：\n\n✅ 可退款订单 → 1-3 个工作日内原路返还\n⏳ 不可退款 → 无法退款但可能支持改期\n\n具体请查看订单详情。'
-  if (q.includes('会员') || q.includes('权益')) return '会员权益包括：\n\n⭐ 预订享折扣\n🎁 积分返利\n🛏️ 高级房型免费升级\n⏱️ 延迟退房\n\n入住即可升级会员等级！'
-  if (q.includes('推荐') || q.includes('热门')) return '我可以为您推荐热门酒店！请告诉我：\n\n📍 想去哪个城市？\n🎯 什么时间入住？\n💰 预算范围？\n\n我会给您最合适的推荐。'
-
-  return '感谢您的提问！😊\n\n我暂时还无法理解这个问题，请：\n\n💬 换个方式描述您的需求\n📞 拨打客服：400-123-4567\n🌐 访问帮助中心'
-}
-
-onMounted(async () => {
+function initializeCurrentModeState() {
   const restored = restoreSessionState()
-  if (!isBookingMode) {
+  if (!restored) {
+    messages.value = [createMessage('assistant', resolveDefaultWelcome(route.path))]
+    bookingContext.value = {}
+    backendSessionId.value = null
+  }
+  if (!isBookingMode.value) {
     bookingContext.value = {}
   }
   chatHistories.value = loadHistories()
-  scrollBottom()
+  showScrollToBottom.value = false
+}
+
+async function consumeAskQueryIfNeeded() {
   const ask = typeof route.query.ask === 'string' ? route.query.ask.trim() : ''
-  if (ask && !restored) {
-    await sendMessage(ask)
-  }
+  if (!ask) return
+  await sendMessage(ask)
+  const nextQuery = { ...route.query }
+  delete nextQuery.ask
+  await router.replace({ path: route.path, query: nextQuery })
+}
+
+onMounted(async () => {
+  initializeCurrentModeState()
+  scrollBottom()
+  await consumeAskQueryIfNeeded()
+  window.addEventListener('beforeunload', handleBeforeUnload)
+})
+
+watch(() => route.path, async (nextPath, prevPath) => {
+  if (nextPath === prevPath) return
+  saveCurrentChatToHistoryForPath(prevPath)
+  saveSessionStateForPath(prevPath)
+  showMenu.value = false
+  showHistoryPanel.value = false
+  showClearConfirm.value = false
+  input.value = ''
+  initializeCurrentModeState()
+  scrollBottom()
+  await consumeAskQueryIfNeeded()
 })
 
 watch(messages, () => {
@@ -675,11 +890,6 @@ function handleBeforeUnload() {
     saveCurrentChatToHistory()
   }
 }
-
-// 在离开页面时保存聊天到历史
-onMounted(() => {
-  window.addEventListener('beforeunload', handleBeforeUnload)
-})
 
 onBeforeUnmount(() => {
   handleBeforeUnload()

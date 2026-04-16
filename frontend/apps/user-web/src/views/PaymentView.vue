@@ -71,6 +71,9 @@ import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { userOrderApi } from '@hotelink/api'
 import { formatMoney } from '@hotelink/utils'
+import { useToast } from '@hotelink/ui'
+
+const { showToast } = useToast()
 
 const route = useRoute()
 const router = useRouter()
@@ -113,12 +116,15 @@ async function handlePay() {
   try {
     const res = await userOrderApi.pay({ order_id: orderId, payment_method: payMethod.value })
     if (res.code === 0) {
+      showToast('支付成功，正在跳转结果页', 'success')
       router.replace(`/payment/result/${orderId}`)
     } else {
       error.value = res.message || '支付失败'
+      showToast(error.value, 'error')
     }
   } catch {
     error.value = '网络错误，请重试'
+    showToast(error.value, 'error')
   } finally {
     paying.value = false
   }
@@ -132,9 +138,11 @@ onMounted(async () => {
       order.value = res.data
     } else {
       error.value = res.message || '订单信息加载失败，请稍后重试'
+      showToast(error.value, 'error')
     }
   } catch {
     error.value = '订单信息加载失败，请稍后重试'
+    showToast(error.value, 'error')
   } finally {
     loading.value = false
   }

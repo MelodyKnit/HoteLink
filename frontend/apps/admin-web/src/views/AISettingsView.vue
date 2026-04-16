@@ -47,14 +47,28 @@
               </p>
             </div>
             <div class="flex items-center gap-2">
-              <button v-if="!p.is_active" class="rounded-lg bg-teal-100 px-3 py-1 text-xs font-medium text-teal-700 hover:bg-teal-200" @click="switchProvider(p.name)">
-                切换使用
+              <button
+                v-if="!p.is_active"
+                class="rounded-lg bg-teal-100 px-3 py-1 text-xs font-medium text-teal-700 hover:bg-teal-200 disabled:cursor-not-allowed disabled:opacity-60"
+                :disabled="providerActionLoading"
+                @click="switchProvider(p.name)"
+              >
+                {{ providerActionLoading ? '切换中…' : '切换使用' }}
               </button>
-              <button class="rounded-lg bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600 hover:bg-slate-200" @click="openEditForm(p)">
+              <button
+                class="rounded-lg bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-60"
+                :disabled="providerActionLoading"
+                @click="openEditForm(p)"
+              >
                 编辑
               </button>
-              <button v-if="!p.is_active" class="rounded-lg bg-red-100 px-3 py-1 text-xs font-medium text-red-600 hover:bg-red-200" @click="deleteProvider(p.name)">
-                删除
+              <button
+                v-if="!p.is_active"
+                class="rounded-lg bg-red-100 px-3 py-1 text-xs font-medium text-red-600 hover:bg-red-200 disabled:cursor-not-allowed disabled:opacity-60"
+                :disabled="providerActionLoading"
+                @click="deleteProvider(p.name)"
+              >
+                {{ providerActionLoading ? '处理中…' : '删除' }}
               </button>
             </div>
           </div>
@@ -225,6 +239,7 @@ const saving = ref(false)
 const showForm = ref(false)
 const isEditing = ref(false)
 const showApiKey = ref(false)
+const providerActionLoading = ref(false)
 
 const aiEnabled = ref(false)
 const providers = ref<ProviderInfo[]>([])
@@ -265,24 +280,40 @@ async function toggleEnabled() {
 
 // 切换活跃供应商
 async function switchProvider(name: string) {
-  const res = await aiApi.switchProvider(name)
-  if (res.code === 0) {
-    await loadSettings()
-    showToast(`已切换到 ${name}`, 'success')
-  } else {
-    showToast(res.message || '切换失败', 'error')
+  if (providerActionLoading.value) return
+  providerActionLoading.value = true
+  try {
+    const res = await aiApi.switchProvider(name)
+    if (res.code === 0) {
+      await loadSettings()
+      showToast(`已切换到 ${name}`, 'success')
+    } else {
+      showToast(res.message || '切换失败', 'error')
+    }
+  } catch {
+    showToast('切换失败，请检查网络后重试', 'error')
+  } finally {
+    providerActionLoading.value = false
   }
 }
 
 // 删除供应商
 async function deleteProvider(name: string) {
+  if (providerActionLoading.value) return
   if (!await confirmDialog(`确认删除供应商 ${name}？`, { type: 'danger' })) return
-  const res = await aiApi.deleteProvider(name)
-  if (res.code === 0) {
-    await loadSettings()
-    showToast(`已删除 ${name}`, 'success')
-  } else {
-    showToast(res.message || '删除失败', 'error')
+  providerActionLoading.value = true
+  try {
+    const res = await aiApi.deleteProvider(name)
+    if (res.code === 0) {
+      await loadSettings()
+      showToast(`已删除 ${name}`, 'success')
+    } else {
+      showToast(res.message || '删除失败', 'error')
+    }
+  } catch {
+    showToast('删除失败，请检查网络后重试', 'error')
+  } finally {
+    providerActionLoading.value = false
   }
 }
 
@@ -324,6 +355,34 @@ function quickAdd(bp: string) {
 
 // 保存供应商
 async function saveProvider() {
+  const name = form.name.trim()
+  const label = form.label.trim()
+  const baseUrl = form.base_url.trim()
+  const chatModel = form.chat_model.trim()
+
+  if (!name) {
+    showToast('请填写标识名称', 'warning')
+    return
+  }
+  if (!label) {
+    showToast('请填写显示名称', 'warning')
+    return
+  }
+  if (!baseUrl) {
+    showToast('请填写 Base URL', 'warning')
+    return
+  }
+  if (!chatModel) {
+    showToast('请填写 Chat 模型', 'warning')
+    return
+  }
+
+  form.name = name
+  form.label = label
+  form.base_url = baseUrl
+  form.chat_model = chatModel
+  form.reasoning_model = form.reasoning_model.trim()
+
   saving.value = true
   const payload: Record<string, unknown> = { ...form }
   if (!payload.api_key) delete payload.api_key
@@ -334,7 +393,14 @@ async function saveProvider() {
     await loadSettings()
     showToast('保存成功', 'success')
   } else {
-    showToast(extractApiError(res, '保存失败，请检查填写内容'), 'error')
+    showToast(extractApiError(res, '保存失败，请检查填写内容', {
+      name: '标识名称',
+      label: '显示名称',
+      base_url: 'Base URL',
+      api_key: 'API Key',
+      chat_model: 'Chat 模型',
+      reasoning_model: 'Reasoning 模型',
+    }), 'error')
   }
 }
 

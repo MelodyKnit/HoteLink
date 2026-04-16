@@ -32,7 +32,13 @@
             </div>
             <div class="flex items-end justify-between">
               <span class="text-base font-bold text-orange-600">¥{{ hotel.min_price || '--' }}<span class="text-xs font-normal text-gray-400">起</span></span>
-              <button @click="removeFav(hotel.id)" class="rounded-lg px-2 py-1 text-xs text-red-400 hover:bg-red-50">取消收藏</button>
+              <button
+                @click="removeFav(hotel.id)"
+                :disabled="removingId === hotel.id"
+                class="rounded-lg px-2 py-1 text-xs text-red-400 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {{ removingId === hotel.id ? '处理中…' : '取消收藏' }}
+              </button>
             </div>
           </div>
         </div>
@@ -45,10 +51,15 @@
 import { ref, onMounted } from 'vue'
 import { userFavoriteApi } from '@hotelink/api'
 import { buildImageThumbUrl } from '@hotelink/utils'
+import { useToast, useConfirm } from '@hotelink/ui'
+
+const { showToast } = useToast()
+const { confirm: confirmDialog } = useConfirm()
 
 const loading = ref(true)
 const hotels = ref<any[]>([])
 const error = ref('')
+const removingId = ref<number | null>(null)
 
 function normalizeFavoriteItem(item: any) {
   const rawHotel = item?.hotel && typeof item.hotel === 'object' ? item.hotel : item
@@ -68,10 +79,21 @@ function normalizeFavoriteItem(item: any) {
 
 // 删除 Fav 数据。
 async function removeFav(id: number) {
+  if (!await confirmDialog('确认取消收藏该酒店？')) return
+  removingId.value = id
   try {
     const res = await userFavoriteApi.remove(id)
-    if (res.code === 0) hotels.value = hotels.value.filter(h => h.id !== id)
-  } catch { /* ignore */ }
+    if (res.code === 0) {
+      hotels.value = hotels.value.filter(h => h.id !== id)
+      showToast('已取消收藏', 'success')
+    } else {
+      showToast(res.message || '取消收藏失败，请重试', 'error')
+    }
+  } catch {
+    showToast('取消收藏失败，请检查网络后重试', 'error')
+  } finally {
+    removingId.value = null
+  }
 }
 
 onMounted(async () => {
@@ -86,6 +108,7 @@ onMounted(async () => {
   } catch {
     hotels.value = []
     error.value = '收藏数据加载失败，请稍后重试'
+    showToast('收藏数据加载失败，请稍后重试', 'error')
   } finally { loading.value = false }
 })
 </script>

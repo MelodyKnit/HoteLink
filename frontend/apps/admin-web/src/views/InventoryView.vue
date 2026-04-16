@@ -37,11 +37,27 @@
         </div>
         <div>
           <label class="mb-1 block text-sm font-medium">价格</label>
-          <input v-model.number="editForm.price" type="number" step="0.01" required class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-teal-500" />
+          <input
+            v-model.number="editForm.price"
+            type="number"
+            step="0.01"
+            class="w-full rounded-lg border px-3 py-2 text-sm outline-none"
+            :class="formErrors.price ? 'border-red-400 bg-red-50/60 focus:border-red-500' : 'border-slate-300 focus:border-teal-500'"
+            @blur="validateField('price')"
+          />
+          <p v-if="formErrors.price" class="mt-1 text-xs text-red-500">{{ formErrors.price }}</p>
         </div>
         <div>
           <label class="mb-1 block text-sm font-medium">库存</label>
-          <input v-model.number="editForm.stock" type="number" min="0" required class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-teal-500" />
+          <input
+            v-model.number="editForm.stock"
+            type="number"
+            min="0"
+            class="w-full rounded-lg border px-3 py-2 text-sm outline-none"
+            :class="formErrors.stock ? 'border-red-400 bg-red-50/60 focus:border-red-500' : 'border-slate-300 focus:border-teal-500'"
+            @blur="validateField('stock')"
+          />
+          <p v-if="formErrors.stock" class="mt-1 text-xs text-red-500">{{ formErrors.stock }}</p>
         </div>
         <div>
           <label class="mb-1 block text-sm font-medium">状态</label>
@@ -92,7 +108,40 @@ const endDate = ref(formatDate(endDateD))
 
 const showModal = ref(false)
 const saving = ref(false)
+type InventoryField = 'price' | 'stock'
+const formErrors = ref<Partial<Record<InventoryField, string>>>({})
 const editForm = reactive({ date: '', price: 0, stock: 0, status: 'available' })
+
+function getFieldError(field: InventoryField): string {
+  switch (field) {
+    case 'price':
+      if (!Number.isFinite(Number(editForm.price)) || Number(editForm.price) < 0) return '价格不能小于 0'
+      return ''
+    case 'stock':
+      if (!Number.isFinite(Number(editForm.stock)) || Number(editForm.stock) < 0) return '库存不能小于 0'
+      return ''
+    default:
+      return ''
+  }
+}
+
+function validateField(field: InventoryField) {
+  const message = getFieldError(field)
+  formErrors.value = {
+    ...formErrors.value,
+    [field]: message || undefined,
+  }
+}
+
+function validateForm(): boolean {
+  const nextErrors: Partial<Record<InventoryField, string>> = {}
+  ;(['price', 'stock'] as InventoryField[]).forEach((field) => {
+    const message = getFieldError(field)
+    if (message) nextErrors[field] = message
+  })
+  formErrors.value = nextErrors
+  return Object.keys(nextErrors).length === 0
+}
 
 // 加载 RoomTypes 相关数据。
 async function loadRoomTypes() {
@@ -110,7 +159,14 @@ async function loadRoomTypes() {
 
 // 加载 Calendar 相关数据。
 async function loadCalendar() {
-  if (!selectedRoomType.value) return
+  if (!selectedRoomType.value) {
+    showToast('请先选择房型', 'warning')
+    return
+  }
+  if (startDate.value && endDate.value && startDate.value > endDate.value) {
+    showToast('开始日期不能晚于结束日期', 'warning')
+    return
+  }
   loading.value = true
   try {
     const res = await inventoryApi.calendar({
@@ -139,11 +195,17 @@ function openEdit(row: Record<string, unknown>) {
   editForm.price = row.price as number
   editForm.stock = row.stock as number
   editForm.status = (row.status as string) || 'available'
+  formErrors.value = {}
   showModal.value = true
 }
 
 // 处理 Save 交互逻辑。
 async function handleSave() {
+  if (!validateForm()) {
+    showToast(Object.values(formErrors.value).find(Boolean) || '请先完善库存信息', 'warning')
+    return
+  }
+
   saving.value = true
   try {
     const res = await inventoryApi.update({

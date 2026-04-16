@@ -13,11 +13,33 @@
         <option value="completed">已完成</option>
         <option value="cancelled">已取消</option>
       </SelectField>
+      <SelectField v-model="filters.ordering" size="sm" @change="onSortChange">
+        <option value="-id">ID 最新优先</option>
+        <option value="id">ID 最旧优先</option>
+        <option value="order_no">订单号 A→Z</option>
+        <option value="-order_no">订单号 Z→A</option>
+        <option value="guest_name">入住人 A→Z</option>
+        <option value="-guest_name">入住人 Z→A</option>
+        <option value="hotel__name">酒店 A→Z</option>
+        <option value="-hotel__name">酒店 Z→A</option>
+        <option value="room_type__name">房型 A→Z</option>
+        <option value="-room_type__name">房型 Z→A</option>
+        <option value="check_in_date">入住日期升序</option>
+        <option value="-check_in_date">入住日期降序</option>
+        <option value="check_out_date">离店日期升序</option>
+        <option value="-check_out_date">离店日期降序</option>
+        <option value="pay_amount">金额从低到高</option>
+        <option value="-pay_amount">金额从高到低</option>
+        <option value="status">订单状态升序</option>
+        <option value="-status">订单状态降序</option>
+        <option value="payment_status">支付状态升序</option>
+        <option value="-payment_status">支付状态降序</option>
+      </SelectField>
       <button class="rounded-lg bg-slate-100 px-3 py-2 text-sm hover:bg-slate-200" @click="loadList">搜索</button>
     </div>
 
     <div class="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
-      <DataTable :columns="columns" :rows="list" :loading="loading">
+      <DataTable :columns="columns" :rows="list" :loading="loading" :sort-value="filters.ordering" @sort-change="onTableSortChange">
         <template #col-order_no="{ value }">
           <span class="inline-block max-w-[220px] truncate align-middle" :title="String(value || '')">
             {{ value || '-' }}
@@ -55,9 +77,9 @@
         <template #actions="{ row }">
           <div class="flex min-w-[152px] flex-wrap gap-2">
             <router-link :to="`/admin/orders/${row.id}`" class="inline-flex whitespace-nowrap text-sm text-teal-600 hover:underline">详情</router-link>
-            <button v-if="row.status === 'paid'" class="inline-flex whitespace-nowrap text-sm text-indigo-600 hover:underline" @click="confirmOrder(row)">确认</button>
-            <button v-if="row.status === 'confirmed' || row.status === 'paid'" class="inline-flex whitespace-nowrap text-sm text-green-600 hover:underline" @click="openCheckIn(row)">入住</button>
-            <button v-if="row.status === 'checked_in'" class="inline-flex whitespace-nowrap text-sm text-orange-600 hover:underline" @click="openCheckOut(row)">退房</button>
+            <button v-if="row.status === 'paid'" class="inline-flex whitespace-nowrap text-sm text-indigo-600 hover:underline disabled:cursor-not-allowed disabled:opacity-60" :disabled="actionLoading" @click="confirmOrder(row)">确认</button>
+            <button v-if="row.status === 'confirmed' || row.status === 'paid'" class="inline-flex whitespace-nowrap text-sm text-green-600 hover:underline disabled:cursor-not-allowed disabled:opacity-60" :disabled="actionLoading" @click="openCheckIn(row)">入住</button>
+            <button v-if="row.status === 'checked_in'" class="inline-flex whitespace-nowrap text-sm text-orange-600 hover:underline disabled:cursor-not-allowed disabled:opacity-60" :disabled="actionLoading" @click="openCheckOut(row)">退房</button>
           </div>
         </template>
       </DataTable>
@@ -82,7 +104,7 @@
       </form>
       <template #footer>
         <button class="rounded-lg border border-slate-200 px-4 py-2 text-sm hover:bg-slate-50" @click="showCheckIn = false">取消</button>
-        <button class="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700" @click="handleCheckIn">确认入住</button>
+        <button class="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60" :disabled="actionLoading" @click="handleCheckIn">{{ actionLoading ? '处理中…' : '确认入住' }}</button>
       </template>
     </ModalDialog>
 
@@ -104,7 +126,7 @@
       </form>
       <template #footer>
         <button class="rounded-lg border border-slate-200 px-4 py-2 text-sm hover:bg-slate-50" @click="showCheckOut = false">取消</button>
-        <button class="rounded-lg bg-orange-600 px-4 py-2 text-sm font-medium text-white hover:bg-orange-700" @click="handleCheckOut">确认退房</button>
+        <button class="rounded-lg bg-orange-600 px-4 py-2 text-sm font-medium text-white hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-60" :disabled="actionLoading" @click="handleCheckOut">{{ actionLoading ? '处理中…' : '确认退房' }}</button>
       </template>
     </ModalDialog>
 
@@ -121,16 +143,16 @@ const { showToast } = useToast()
 const { confirm: confirmDialog } = useConfirm()
 
 const columns = [
-  { key: 'order_no', label: '订单号' },
-  { key: 'guest_name', label: '入住人' },
-  { key: 'hotel_name', label: '酒店' },
-  { key: 'room_type_name', label: '房型' },
-  { key: 'check_in_date', label: '入住日期' },
-  { key: 'check_out_date', label: '离店日期' },
-  { key: 'pay_amount', label: '金额' },
-  { key: 'status', label: '订单状态' },
+  { key: 'order_no', label: '订单号', sortField: 'order_no' },
+  { key: 'guest_name', label: '入住人', sortField: 'guest_name' },
+  { key: 'hotel_name', label: '酒店', sortField: 'hotel__name' },
+  { key: 'room_type_name', label: '房型', sortField: 'room_type__name' },
+  { key: 'check_in_date', label: '入住日期', sortField: 'check_in_date' },
+  { key: 'check_out_date', label: '离店日期', sortField: 'check_out_date' },
+  { key: 'pay_amount', label: '金额', sortField: 'pay_amount' },
+  { key: 'status', label: '订单状态', sortField: 'status' },
   { key: 'lifecycle_warning', label: '异常' },
-  { key: 'payment_status', label: '支付状态' },
+  { key: 'payment_status', label: '支付状态', sortField: 'payment_status' },
 ]
 
 const list = ref<Record<string, unknown>[]>([])
@@ -138,13 +160,14 @@ const loading = ref(false)
 const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
-const filters = reactive({ keyword: '', status: '' })
+const filters = reactive({ keyword: '', status: '', ordering: '-id' })
 
 const showCheckIn = ref(false)
 const checkInForm = reactive({ order_id: 0, order_no: '', room_no: '', operator_remark: '' })
 
 const showCheckOut = ref(false)
 const checkOutForm = reactive({ order_id: 0, order_no: '', consume_amount: 0, operator_remark: '' })
+const actionLoading = ref(false)
 
 // 根据状态值返回对应展示信息。
 function statusType(status: string) {
@@ -154,11 +177,22 @@ function statusType(status: string) {
   return 'info' as const
 }
 
+function onSortChange() {
+  page.value = 1
+  loadList()
+}
+
+function onTableSortChange(ordering: string) {
+  if (filters.ordering === ordering) return
+  filters.ordering = ordering
+  onSortChange()
+}
+
 // 加载 List 相关数据。
 async function loadList() {
   loading.value = true
   try {
-    const params: Record<string, unknown> = { page: page.value, page_size: pageSize.value }
+    const params: Record<string, unknown> = { page: page.value, page_size: pageSize.value, ordering: filters.ordering }
     if (filters.keyword) params.keyword = filters.keyword
     if (filters.status) params.status = filters.status
     const res = await orderApi.list(params)
@@ -177,7 +211,9 @@ async function loadList() {
 
 // 处理 confirmOrder 业务流程。
 async function confirmOrder(row: Record<string, unknown>) {
+  if (actionLoading.value) return
   if (!await confirmDialog('确认此订单？')) return
+  actionLoading.value = true
   try {
     const res = await orderApi.changeStatus({ order_id: row.id as number, target_status: 'confirmed' })
     if (res.code === 0) {
@@ -188,6 +224,8 @@ async function confirmOrder(row: Record<string, unknown>) {
     }
   } catch {
     showToast('确认订单失败，请重试', 'error')
+  } finally {
+    actionLoading.value = false
   }
 }
 
@@ -202,10 +240,12 @@ function openCheckIn(row: Record<string, unknown>) {
 
 // 处理 CheckIn 交互逻辑。
 async function handleCheckIn() {
+  if (actionLoading.value) return
   if (!checkInForm.room_no.trim()) {
     showToast('请填写房间号', 'error')
     return
   }
+  actionLoading.value = true
   try {
     const res = await orderApi.checkIn({
       order_id: checkInForm.order_id,
@@ -221,6 +261,8 @@ async function handleCheckIn() {
     }
   } catch {
     showToast('入住办理失败，请重试', 'error')
+  } finally {
+    actionLoading.value = false
   }
 }
 
@@ -235,6 +277,8 @@ function openCheckOut(row: Record<string, unknown>) {
 
 // 处理 CheckOut 交互逻辑。
 async function handleCheckOut() {
+  if (actionLoading.value) return
+  actionLoading.value = true
   try {
     const res = await orderApi.checkOut({
       order_id: checkOutForm.order_id,
@@ -250,6 +294,8 @@ async function handleCheckOut() {
     }
   } catch {
     showToast('退房办理失败，请重试', 'error')
+  } finally {
+    actionLoading.value = false
   }
 }
 

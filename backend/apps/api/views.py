@@ -458,7 +458,7 @@ def record_ai_call_log(
             cost_estimate=cost_estimate,
             latency_ms=max(0, int(latency_ms)),
             status=status,
-            error_message=(error_message or "")[:500],
+            error_message=(error_message or "")[:5000],
         )
     except Exception:
         logger.exception("Failed to persist AI call log", extra={"scene": scene, "status": status})
@@ -1075,6 +1075,76 @@ class UserOrdersView(APIView):
         status_param = request.query_params.get("status")
         if status_param:
             queryset = queryset.filter(status=status_param)
+
+        payment_status_param = request.query_params.get("payment_status")
+        if payment_status_param:
+            queryset = queryset.filter(payment_status=payment_status_param)
+
+        keyword = str(request.query_params.get("keyword") or "").strip()
+        if keyword:
+            queryset = queryset.filter(
+                Q(order_no__icontains=keyword)
+                | Q(hotel__name__icontains=keyword)
+                | Q(room_type__name__icontains=keyword)
+                | Q(guest_name__icontains=keyword)
+                | Q(guest_mobile__icontains=keyword)
+            )
+
+        errors: dict[str, list[str]] = {}
+
+        def parse_date_param(name: str):
+            raw = request.query_params.get(name)
+            if not raw:
+                return None
+            parsed = parse_date(raw)
+            if parsed is None:
+                errors.setdefault(name, []).append("日期格式错误，应为 YYYY-MM-DD")
+            return parsed
+
+        def parse_amount_param(name: str):
+            raw = request.query_params.get(name)
+            if raw in (None, ""):
+                return None
+            try:
+                value = Decimal(str(raw))
+            except (InvalidOperation, TypeError, ValueError):
+                errors.setdefault(name, []).append("金额格式错误")
+                return None
+            if value < 0:
+                errors.setdefault(name, []).append("金额不能为负数")
+                return None
+            return value
+
+        check_in_start = parse_date_param("check_in_start")
+        check_in_end = parse_date_param("check_in_end")
+        created_start = parse_date_param("created_start")
+        created_end = parse_date_param("created_end")
+        amount_min = parse_amount_param("amount_min")
+        amount_max = parse_amount_param("amount_max")
+
+        if check_in_start and check_in_end and check_in_start > check_in_end:
+            errors.setdefault("check_in_range", []).append("入住开始日期不能晚于结束日期")
+        if created_start and created_end and created_start > created_end:
+            errors.setdefault("created_range", []).append("下单开始日期不能晚于结束日期")
+        if amount_min is not None and amount_max is not None and amount_min > amount_max:
+            errors.setdefault("amount_range", []).append("最低金额不能大于最高金额")
+
+        if errors:
+            return api_response(code=4001, message="参数错误", data={"errors": errors}, status_code=400)
+
+        if check_in_start:
+            queryset = queryset.filter(check_in_date__gte=check_in_start)
+        if check_in_end:
+            queryset = queryset.filter(check_in_date__lte=check_in_end)
+        if created_start:
+            queryset = queryset.filter(created_at__date__gte=created_start)
+        if created_end:
+            queryset = queryset.filter(created_at__date__lte=created_end)
+        if amount_min is not None:
+            queryset = queryset.filter(pay_amount__gte=amount_min)
+        if amount_max is not None:
+            queryset = queryset.filter(pay_amount__lte=amount_max)
+
         page, page_size = get_page_params(request)
         page_queryset, total = paginate_queryset(queryset, page, page_size)
         return paginated_response(
@@ -1221,6 +1291,7 @@ class UserOrdersCreateView(APIView):
             notice_type=SystemNotice.TYPE_ORDER,
             title="订单创建成功",
             content=f"订单 {order.order_no} 已创建，请在{PlatformConfig.load().order_auto_cancel_minutes}分钟内完成支付，逾期将自动取消。",
+            related_order=order,
         )
 
         # 自动取消未支付订单
@@ -1329,6 +1400,7 @@ class UserOrdersPayView(APIView):
             notice_type=SystemNotice.TYPE_PAYMENT,
             title="支付成功",
             content=f"订单 {order.order_no} 已完成支付。",
+            related_order=order,
         )
         return api_response(data={"order_id": order.id, "payment_id": payment.id, "payment_status": order.payment_status})
 
@@ -2100,10 +2172,27 @@ class AdminOrdersView(APIView):
     """管理员订单列表接口：支持关键词与状态筛选。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
 
+    _ORDERING_WHITELIST = {
+        "id", "-id",
+        "order_no", "-order_no",
+        "guest_name", "-guest_name",
+        "guest_mobile", "-guest_mobile",
+        "hotel__name", "-hotel__name",
+        "room_type__name", "-room_type__name",
+        "check_in_date", "-check_in_date",
+        "check_out_date", "-check_out_date",
+        "pay_amount", "-pay_amount",
+        "status", "-status",
+        "payment_status", "-payment_status",
+        "created_at", "-created_at",
+        "updated_at", "-updated_at",
+    }
+
     def get(self, request):
         queryset = BookingOrder.objects.select_related("hotel", "room_type", "user")
         keyword = request.query_params.get("keyword")
         status = request.query_params.get("status")
+        ordering = request.query_params.get("ordering", "-id")
         if keyword:
             queryset = queryset.filter(
                 Q(order_no__icontains=keyword)
@@ -2112,6 +2201,9 @@ class AdminOrdersView(APIView):
             )
         if status:
             queryset = queryset.filter(status=status)
+        if ordering not in self._ORDERING_WHITELIST:
+            ordering = "-id"
+        queryset = queryset.order_by(ordering)
         page, page_size = get_page_params(request)
         page_queryset, total = paginate_queryset(queryset, page, page_size)
         return paginated_response(items=BookingOrderSerializer(page_queryset, many=True).data, page=page, page_size=page_size, total=total)
@@ -2217,6 +2309,7 @@ class AdminOrdersChangeStatusView(APIView):
                 notice_type=SystemNotice.TYPE_ORDER,
                 title=title,
                 content=content,
+                related_order=order,
             )
         return api_response(data={"order_id": order.id, "status": order.status})
 
@@ -2255,6 +2348,7 @@ class AdminOrdersCheckInView(APIView):
             notice_type=SystemNotice.TYPE_ORDER,
             title="已确认入住",
             content=f"订单 {order.order_no} 已办理入住，您的房间号为 {order.room_no}，祝您入住愉快！",
+            related_order=order,
         )
         return api_response(data={"order_id": order.id, "status": order.status, "room_no": order.room_no})
 
@@ -2309,6 +2403,7 @@ class AdminOrdersCheckOutView(APIView):
             notice_type=SystemNotice.TYPE_ORDER,
             title="退房完成",
             content=f"订单 {order.order_no} 已办理退房，感谢您的入住，期待再次欢迎您！",
+            related_order=order,
         )
         # 退房完成后奖励积分
         if previous_status == BookingOrder.STATUS_CHECKED_IN:
@@ -2364,11 +2459,29 @@ class AdminUsersView(APIView):
     """管理员用户列表接口。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
 
+    _ORDERING_WHITELIST = {
+        "id", "-id",
+        "user__username", "-user__username",
+        "nickname", "-nickname",
+        "mobile", "-mobile",
+        "gender", "-gender",
+        "role", "-role",
+        "member_level", "-member_level",
+        "points", "-points",
+        "status", "-status",
+        "created_at", "-created_at",
+        "updated_at", "-updated_at",
+    }
+
     def get(self, request):
         queryset = UserProfile.objects.select_related("user")
         keyword = request.query_params.get("keyword")
+        ordering = request.query_params.get("ordering", "-id")
         if keyword:
             queryset = queryset.filter(Q(user__username__icontains=keyword) | Q(mobile__icontains=keyword) | Q(nickname__icontains=keyword))
+        if ordering not in self._ORDERING_WHITELIST:
+            ordering = "-id"
+        queryset = queryset.order_by(ordering)
         page, page_size = get_page_params(request)
         page_queryset, total = paginate_queryset(queryset, page, page_size)
         return paginated_response(items=UserProfileSerializer(page_queryset, many=True).data, page=page, page_size=page_size, total=total)
@@ -2394,8 +2507,23 @@ class AdminEmployeesView(APIView):
     """管理员员工管理接口：查询员工列表（hotel_admin 可操作），创建管理员账号（仅 system_admin）。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
 
+    _ORDERING_WHITELIST = {
+        "id", "-id",
+        "user__username", "-user__username",
+        "nickname", "-nickname",
+        "mobile", "-mobile",
+        "role", "-role",
+        "status", "-status",
+        "created_at", "-created_at",
+        "updated_at", "-updated_at",
+    }
+
     def get(self, request):
         queryset = UserProfile.objects.select_related("user").filter(role__in=[UserProfile.ROLE_HOTEL_ADMIN, UserProfile.ROLE_SYSTEM_ADMIN])
+        ordering = request.query_params.get("ordering", "-id")
+        if ordering not in self._ORDERING_WHITELIST:
+            ordering = "-id"
+        queryset = queryset.order_by(ordering)
         page, page_size = get_page_params(request)
         page_queryset, total = paginate_queryset(queryset, page, page_size)
         return paginated_response(items=UserProfileSerializer(page_queryset, many=True).data, page=page, page_size=page_size, total=total)
@@ -2935,11 +3063,26 @@ class AdminReportTasksView(APIView):
     """报表任务接口：查询任务列表并创建示例报表任务。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
 
+    _ORDERING_WHITELIST = {
+        "id", "-id",
+        "report_type", "-report_type",
+        "hotel__name", "-hotel__name",
+        "start_date", "-start_date",
+        "end_date", "-end_date",
+        "status", "-status",
+        "created_at", "-created_at",
+        "updated_at", "-updated_at",
+    }
+
     def get(self, request):
         queryset = ReportTask.objects.select_related("hotel")
         status = request.query_params.get("status")
+        ordering = request.query_params.get("ordering", "-id")
         if status:
             queryset = queryset.filter(status=status)
+        if ordering not in self._ORDERING_WHITELIST:
+            ordering = "-id"
+        queryset = queryset.order_by(ordering)
         page, page_size = get_page_params(request)
         page_queryset, total = paginate_queryset(queryset, page, page_size)
         items = []

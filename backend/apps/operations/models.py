@@ -66,6 +66,7 @@ class SystemNotice(models.Model):
     notice_type = models.CharField(max_length=20, choices=TYPE_CHOICES, default=TYPE_SYSTEM)
     title = models.CharField(max_length=100)
     content = models.CharField(max_length=255)
+    related_order = models.ForeignKey("bookings.BookingOrder", on_delete=models.SET_NULL, null=True, blank=True, related_name="system_notices")
     is_read = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -106,7 +107,7 @@ class AICallLog(models.Model):
     cost_estimate = models.DecimalField(max_digits=10, decimal_places=6, default=0, help_text="估算费用（元）")
     latency_ms = models.PositiveIntegerField(default=0, help_text="响应延迟（毫秒）")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_SUCCESS)
-    error_message = models.CharField(max_length=500, blank=True)
+    error_message = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

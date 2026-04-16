@@ -66,6 +66,7 @@ def cancel_timeout_unpaid_order(order, *, cancel_minutes: int) -> bool:
         notice_type=SystemNotice.TYPE_ORDER,
         title="订单已自动取消",
         content=f"订单 {order.order_no} 因超过{cancel_minutes}分钟未支付已被系统自动取消。如需预订请重新下单。",
+        related_order=order,
     )
     return True
 
@@ -94,6 +95,7 @@ def complete_overdue_checked_in_order(order, *, today) -> bool:
         notice_type=SystemNotice.TYPE_ORDER,
         title="订单已自动完结",
         content=f"订单 {order.order_no} 因超过离店日期未办理退房，系统已自动完结。如有疑问请联系客服。",
+        related_order=order,
     )
     return True
 

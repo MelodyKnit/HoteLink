@@ -8,8 +8,17 @@
       <button @click="toggleFav" class="text-xl" :class="isFav ? 'text-red-500' : 'text-gray-300'">{{ isFav ? '❤️' : '🤍' }}</button>
     </header>
 
-    <div v-if="loading" class="flex items-center justify-center py-40">
-      <div class="h-8 w-8 animate-spin rounded-full border-4 border-brand border-t-transparent" />
+    <div v-if="loading" class="mx-auto max-w-5xl space-y-4 px-4 py-6">
+      <div class="h-56 animate-pulse rounded-2xl bg-gray-200 md:h-80" />
+      <div class="rounded-2xl bg-white p-5 shadow-sm">
+        <div class="mb-3 h-6 w-1/3 animate-pulse rounded bg-gray-200" />
+        <div class="mb-2 h-4 w-2/3 animate-pulse rounded bg-gray-100" />
+        <div class="h-4 w-1/2 animate-pulse rounded bg-gray-100" />
+      </div>
+      <div class="rounded-2xl bg-white p-5 shadow-sm">
+        <div class="mb-3 h-5 w-1/4 animate-pulse rounded bg-gray-200" />
+        <div class="h-4 w-full animate-pulse rounded bg-gray-100" />
+      </div>
     </div>
 
     <div v-else-if="error" class="mx-auto max-w-5xl px-4 py-16 text-center">
@@ -249,6 +258,9 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { publicApi, userFavoriteApi, getToken } from '@hotelink/api'
 import { BED_TYPE_MAP, buildImageThumbUrl } from '@hotelink/utils'
+import { useToast } from '@hotelink/ui'
+
+const { showToast } = useToast()
 
 const route = useRoute()
 const router = useRouter()
@@ -635,17 +647,33 @@ function onPreviewTouchEnd() {
 // 切换Fav显示状态。
 async function toggleFav() {
   const hotelId = Number(route.params.id)
-  if (!getToken()) { router.push({ name: 'login', query: { redirect: route.fullPath } }); return }
+  if (!getToken()) {
+    showToast('请先登录后再进行收藏操作', 'warning')
+    router.push({ name: 'login', query: { redirect: route.fullPath } })
+    return
+  }
   if (!Number.isFinite(hotelId) || hotelId <= 0) return
   try {
     if (isFav.value) {
-      await userFavoriteApi.remove(hotelId)
-      isFav.value = false
+      const res = await userFavoriteApi.remove(hotelId)
+      if (res.code === 0) {
+        isFav.value = false
+        showToast('已取消收藏', 'success')
+      } else {
+        showToast(res.message || '取消收藏失败，请稍后重试', 'error')
+      }
     } else {
-      await userFavoriteApi.add(hotelId)
-      isFav.value = true
+      const res = await userFavoriteApi.add(hotelId)
+      if (res.code === 0) {
+        isFav.value = true
+        showToast('收藏成功', 'success')
+      } else {
+        showToast(res.message || '收藏失败，请稍后重试', 'error')
+      }
     }
-  } catch { /* ignore */ }
+  } catch {
+    showToast('收藏操作失败，请检查网络后重试', 'error')
+  }
 }
 
 // 处理 Book 交互逻辑。

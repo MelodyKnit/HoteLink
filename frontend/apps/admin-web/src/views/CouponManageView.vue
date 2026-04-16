@@ -199,8 +199,14 @@ function levelLabel(level: string) { return levelLabels[level || ''] || '不限'
 async function loadData() {
   try {
     const res = await adminCouponApi.list({ page_size: 100 })
-    if (res.code === 0 && res.data) templates.value = (res.data as any).items || []
-  } catch { /* ignore */ }
+    if (res.code === 0 && res.data) {
+      templates.value = (res.data as any).items || []
+    } else {
+      showToast(res.message || '优惠券模板加载失败', 'error')
+    }
+  } catch {
+    showToast('优惠券模板加载失败，请检查网络后重试', 'error')
+  }
 }
 
 async function handleCreate() {
@@ -216,9 +222,11 @@ async function handleCreate() {
       await loadData()
     } else {
       createError.value = res.message || '创建失败'
+      showToast(createError.value, 'error')
     }
   } catch {
     createError.value = '网络错误'
+    showToast('创建优惠券失败，请检查网络后重试', 'error')
   } finally {
     creating.value = false
   }

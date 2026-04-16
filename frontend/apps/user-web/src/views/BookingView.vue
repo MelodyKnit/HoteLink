@@ -215,12 +215,13 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { userOrderApi, userCouponApi, userProfileApi } from '@hotelink/api'
 import { extractApiError, extractApiFieldErrors, formatDate, isValidChineseMobile } from '@hotelink/utils'
-import { SelectField } from '@hotelink/ui'
+import { SelectField, useToast } from '@hotelink/ui'
 
 const GUEST_HISTORY_KEY = 'hotelink_guest_history'
 
 const route = useRoute()
 const router = useRouter()
+const { showToast } = useToast()
 const hotelId = Number(route.query.hotel_id)
 const roomTypeId = Number(route.query.room_type_id)
 const hotelName = (route.query.hotel_name as string) || ''
@@ -560,7 +561,9 @@ onMounted(async () => {
       const rates: Record<string, number> = { normal: 1.0, silver: 0.98, gold: 0.95, platinum: 0.92, diamond: 0.88 }
       memberDiscountRate.value = rates[memberLevel.value] ?? 1.0
     }
-  } catch { /* ignore */ }
+  } catch {
+    showToast('会员信息加载失败，已按普通会员价格展示', 'warning')
+  }
 })
 
 // 当总价变化时重新加载可用优惠券
@@ -570,8 +573,12 @@ watch(totalPrice, async (val) => {
       const couponRes = await userCouponApi.forOrder(+val)
       if (couponRes.code === 0 && couponRes.data) {
         availableCoupons.value = (couponRes.data as any).items || couponRes.data || []
+      } else {
+        showToast(couponRes.message || '优惠券加载失败，请稍后重试', 'error')
       }
-    } catch { /* ignore */ }
+    } catch {
+      showToast('优惠券加载失败，请检查网络后重试', 'error')
+    }
   }
 }, { immediate: true })
 </script>

@@ -282,9 +282,12 @@ class ReportTaskSerializer(serializers.ModelSerializer):
 
 class SystemNoticeSerializer(serializers.ModelSerializer):
     """SystemNotice 序列化器：用于接口参数校验或响应数据转换。"""
+    related_order_id = serializers.IntegerField(read_only=True)
+    related_order_no = serializers.CharField(source="related_order.order_no", read_only=True)
+
     class Meta:
         model = SystemNotice
-        fields = ["id", "notice_type", "title", "content", "is_read", "created_at"]
+        fields = ["id", "notice_type", "title", "content", "related_order_id", "related_order_no", "is_read", "created_at"]
 
 
 class RegisterSerializer(serializers.Serializer):

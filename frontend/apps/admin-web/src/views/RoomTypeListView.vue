@@ -30,7 +30,13 @@
     </div>
 
     <div class="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
-      <DataTable :columns="columns" :rows="list" :loading="loading">
+      <DataTable
+        :columns="columns"
+        :rows="list"
+        :loading="loading"
+        :sort-value="filters.ordering"
+        @sort-change="onTableSortChange"
+      >
         <template #col-image="{ value, row }">
           <img
             v-if="value && thumbnailMode !== 'hidden'"
@@ -64,13 +70,20 @@
       <form class="grid gap-4 sm:grid-cols-2" @submit.prevent="handleSave">
         <div class="sm:col-span-2">
           <label class="mb-1 block text-sm font-medium">房型名称</label>
-          <input v-model="form.name" required class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-teal-500" />
+          <input
+            v-model="form.name"
+            class="w-full rounded-lg border px-3 py-2 text-sm outline-none"
+            :class="formErrors.name ? 'border-red-400 bg-red-50/60 focus:border-red-500' : 'border-slate-300 focus:border-teal-500'"
+            @blur="validateField('name')"
+          />
+          <p v-if="formErrors.name" class="mt-1 text-xs text-red-500">{{ formErrors.name }}</p>
         </div>
         <div>
           <label class="mb-1 block text-sm font-medium">所属酒店</label>
-          <SelectField v-model="form.hotel_id" required class="w-full">
+          <SelectField v-model="form.hotel" class="w-full" @change="validateField('hotel')">
             <option v-for="h in hotels" :key="h.id" :value="h.id">{{ h.name }}</option>
           </SelectField>
+          <p v-if="formErrors.hotel" class="mt-1 text-xs text-red-500">{{ formErrors.hotel }}</p>
         </div>
         <div>
           <label class="mb-1 block text-sm font-medium">床型</label>
@@ -84,19 +97,50 @@
         </div>
         <div>
           <label class="mb-1 block text-sm font-medium">面积 (㎡)</label>
-          <input v-model.number="form.area" type="number" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-teal-500" />
+          <input
+            v-model.number="form.area"
+            type="number"
+            class="w-full rounded-lg border px-3 py-2 text-sm outline-none"
+            :class="formErrors.area ? 'border-red-400 bg-red-50/60 focus:border-red-500' : 'border-slate-300 focus:border-teal-500'"
+            @blur="validateField('area')"
+          />
+          <p v-if="formErrors.area" class="mt-1 text-xs text-red-500">{{ formErrors.area }}</p>
         </div>
         <div>
           <label class="mb-1 block text-sm font-medium">基础价格</label>
-          <input v-model.number="form.base_price" type="number" step="0.01" required class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-teal-500" />
+          <input
+            v-model.number="form.base_price"
+            type="number"
+            step="0.01"
+            class="w-full rounded-lg border px-3 py-2 text-sm outline-none"
+            :class="formErrors.base_price ? 'border-red-400 bg-red-50/60 focus:border-red-500' : 'border-slate-300 focus:border-teal-500'"
+            @blur="validateField('base_price')"
+          />
+          <p v-if="formErrors.base_price" class="mt-1 text-xs text-red-500">{{ formErrors.base_price }}</p>
         </div>
         <div>
           <label class="mb-1 block text-sm font-medium">早餐份数</label>
-          <input v-model.number="form.breakfast_count" type="number" min="0" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-teal-500" />
+          <input
+            v-model.number="form.breakfast_count"
+            type="number"
+            min="0"
+            class="w-full rounded-lg border px-3 py-2 text-sm outline-none"
+            :class="formErrors.breakfast_count ? 'border-red-400 bg-red-50/60 focus:border-red-500' : 'border-slate-300 focus:border-teal-500'"
+            @blur="validateField('breakfast_count')"
+          />
+          <p v-if="formErrors.breakfast_count" class="mt-1 text-xs text-red-500">{{ formErrors.breakfast_count }}</p>
         </div>
         <div>
           <label class="mb-1 block text-sm font-medium">最大入住人数</label>
-          <input v-model.number="form.max_guest_count" type="number" min="1" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-teal-500" />
+          <input
+            v-model.number="form.max_guest_count"
+            type="number"
+            min="1"
+            class="w-full rounded-lg border px-3 py-2 text-sm outline-none"
+            :class="formErrors.max_guest_count ? 'border-red-400 bg-red-50/60 focus:border-red-500' : 'border-slate-300 focus:border-teal-500'"
+            @blur="validateField('max_guest_count')"
+          />
+          <p v-if="formErrors.max_guest_count" class="mt-1 text-xs text-red-500">{{ formErrors.max_guest_count }}</p>
         </div>
         <div>
           <label class="mb-1 block text-sm font-medium">状态</label>
@@ -132,20 +176,20 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { roomTypeApi, hotelApi, commonApi } from '@hotelink/api'
-import { buildImageThumbUrl, formatMoney, BED_TYPE_MAP, extractApiError } from '@hotelink/utils'
+import { buildImageThumbUrl, formatMoney, BED_TYPE_MAP, extractApiError, extractApiFieldErrors } from '@hotelink/utils'
 import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, useToast, useConfirm, SelectField } from '@hotelink/ui'
 
 const { showToast } = useToast()
 const { confirm: confirmDialog } = useConfirm()
 
 const columns = [
-  { key: 'id', label: 'ID' },
+  { key: 'id', label: 'ID', sortField: 'id' },
   { key: 'image', label: '图片' },
-  { key: 'name', label: '房型名称' },
+  { key: 'name', label: '房型名称', sortField: 'name' },
   { key: 'hotel_name', label: '所属酒店' },
-  { key: 'bed_type', label: '床型' },
+  { key: 'bed_type', label: '床型', sortField: 'bed_type' },
   { key: 'area', label: '面积' },
-  { key: 'base_price', label: '基础价格' },
+  { key: 'base_price', label: '基础价格', sortField: 'base_price' },
   { key: 'max_guest_count', label: '最大入住' },
   { key: 'status', label: '状态' },
 ]
@@ -167,21 +211,77 @@ const thumbnailHeight = computed(() => (thumbnailMode.value === 'compact' ? 32 :
 const showModal = ref(false)
 const editingId = ref<number | null>(null)
 const saving = ref(false)
+type RoomTypeField = 'name' | 'hotel' | 'area' | 'base_price' | 'breakfast_count' | 'max_guest_count'
+const formErrors = ref<Partial<Record<RoomTypeField, string>>>({})
 const form = reactive({
-  name: '', hotel_id: 0, bed_type: 'queen', area: 30, base_price: 399,
+  name: '', hotel: 0, bed_type: 'queen', area: 30, base_price: 399,
   breakfast_count: 0, max_guest_count: 2, status: 'online', image: '',
 })
 
 function resetForm() {
-  form.name = ''; form.hotel_id = hotels.value[0]?.id || 0; form.bed_type = 'queen'
+  form.name = ''; form.hotel = hotels.value[0]?.id || 0; form.bed_type = 'queen'
   form.area = 30; form.base_price = 399; form.breakfast_count = 0
   form.max_guest_count = 2; form.status = 'online'; form.image = ''
+  formErrors.value = {}
   editingId.value = null
+}
+
+function getFieldError(field: RoomTypeField): string {
+  switch (field) {
+    case 'name': {
+      const value = form.name.trim()
+      if (!value) return '请填写房型名称'
+      if (value.length > 120) return '房型名称不能超过 120 个字符'
+      return ''
+    }
+    case 'hotel':
+      if (!Number.isFinite(Number(form.hotel)) || Number(form.hotel) <= 0) return '请选择所属酒店'
+      return ''
+    case 'area':
+      if (!Number.isFinite(Number(form.area)) || Number(form.area) <= 0) return '面积必须大于 0'
+      return ''
+    case 'base_price':
+      if (!Number.isFinite(Number(form.base_price)) || Number(form.base_price) < 0) return '基础价格不能小于 0'
+      return ''
+    case 'breakfast_count':
+      if (!Number.isFinite(Number(form.breakfast_count)) || Number(form.breakfast_count) < 0) return '早餐份数不能小于 0'
+      return ''
+    case 'max_guest_count':
+      if (!Number.isFinite(Number(form.max_guest_count)) || Number(form.max_guest_count) < 1) return '最大入住人数不能小于 1'
+      return ''
+    default:
+      return ''
+  }
+}
+
+function validateField(field: RoomTypeField) {
+  const message = getFieldError(field)
+  formErrors.value = {
+    ...formErrors.value,
+    [field]: message || undefined,
+  }
+}
+
+function validateForm(): boolean {
+  form.name = form.name.trim()
+  const nextErrors: Partial<Record<RoomTypeField, string>> = {}
+  ;(['name', 'hotel', 'area', 'base_price', 'breakfast_count', 'max_guest_count'] as RoomTypeField[]).forEach((field) => {
+    const message = getFieldError(field)
+    if (message) nextErrors[field] = message
+  })
+  formErrors.value = nextErrors
+  return Object.keys(nextErrors).length === 0
 }
 
 function onSortChange() {
   page.value = 1
   loadList()
+}
+
+function onTableSortChange(ordering: string) {
+  if (filters.ordering === ordering) return
+  filters.ordering = ordering
+  onSortChange()
 }
 
 function onThumbError(event: Event, fallbackSrc: string) {
@@ -195,7 +295,7 @@ function openCreate() { resetForm(); showModal.value = true }
 function openEdit(row: Record<string, unknown>) {
   editingId.value = row.id as number
   form.name = (row.name as string) || ''
-  form.hotel_id = (row.hotel as number) || (row.hotel_id as number) || 0
+  form.hotel = (row.hotel as number) || (row.hotel_id as number) || 0
   form.bed_type = (row.bed_type as string) || 'queen'
   form.area = (row.area as number) || 30
   form.base_price = (row.base_price as number) || 399
@@ -258,20 +358,44 @@ async function loadList() {
 }
 
 async function handleSave() {
+  if (!validateForm()) {
+    showToast(Object.values(formErrors.value).find(Boolean) || '请先完善房型信息', 'warning')
+    return
+  }
+
   saving.value = true
   try {
+    const payload = { ...form }
     let res
     if (editingId.value) {
-      res = await roomTypeApi.update({ room_type_id: editingId.value, ...form })
+      res = await roomTypeApi.update({ room_type_id: editingId.value, ...payload })
     } else {
-      res = await roomTypeApi.create({ ...form })
+      res = await roomTypeApi.create(payload)
     }
     if (res.code === 0) {
       showToast(editingId.value ? '房型更新成功' : '房型创建成功', 'success')
       showModal.value = false
       loadList()
     } else {
-      showToast(extractApiError(res, '保存失败'), 'error')
+      formErrors.value = {
+        ...formErrors.value,
+        ...extractApiFieldErrors(res, {
+          name: '房型名称',
+          hotel: '所属酒店',
+          area: '面积',
+          base_price: '基础价格',
+          breakfast_count: '早餐份数',
+          max_guest_count: '最大入住人数',
+        }),
+      }
+      showToast(extractApiError(res, '保存失败，请检查填写内容', {
+        name: '房型名称',
+        hotel: '所属酒店',
+        area: '面积',
+        base_price: '基础价格',
+        breakfast_count: '早餐份数',
+        max_guest_count: '最大入住人数',
+      }), 'error')
     }
   } catch {
     showToast('保存失败，请重试', 'error')

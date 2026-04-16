@@ -27,9 +27,27 @@
     <div class="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
       <div class="flex items-center justify-between border-b border-slate-100 px-6 py-4">
         <h3 class="text-sm font-semibold text-slate-700">报表任务</h3>
-        <button class="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700" @click="openCreate">新建报表</button>
+        <div class="flex items-center gap-2">
+          <SelectField v-model="taskFilters.ordering" size="sm" @change="onTaskSortChange">
+            <option value="-id">ID 最新优先</option>
+            <option value="id">ID 最旧优先</option>
+            <option value="report_type">类型 A→Z</option>
+            <option value="-report_type">类型 Z→A</option>
+            <option value="hotel__name">酒店 A→Z</option>
+            <option value="-hotel__name">酒店 Z→A</option>
+            <option value="start_date">开始日期升序</option>
+            <option value="-start_date">开始日期降序</option>
+            <option value="end_date">结束日期升序</option>
+            <option value="-end_date">结束日期降序</option>
+            <option value="status">状态升序</option>
+            <option value="-status">状态降序</option>
+            <option value="created_at">创建时间升序</option>
+            <option value="-created_at">创建时间降序</option>
+          </SelectField>
+          <button class="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700" @click="openCreate">新建报表</button>
+        </div>
       </div>
-      <DataTable :columns="taskColumns" :rows="tasks" :loading="tasksLoading">
+      <DataTable :columns="taskColumns" :rows="tasks" :loading="tasksLoading" :sort-value="taskFilters.ordering" @sort-change="onTaskTableSortChange">
         <template #col-status="{ value }">
           <StatusBadge :label="value === 'success' ? '已完成' : value === 'running' ? '运行中' : value === 'failed' ? '失败' : String(value)" :type="value === 'success' ? 'success' : value === 'failed' ? 'danger' : 'info'" />
         </template>
@@ -71,7 +89,9 @@
       </form>
       <template #footer>
         <button class="rounded-lg border border-slate-200 px-4 py-2 text-sm hover:bg-slate-50" @click="showCreate = false">取消</button>
-        <button class="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700" @click="handleCreate">创建</button>
+        <button class="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-60" :disabled="creating" @click="handleCreate">
+          {{ creating ? '创建中…' : '创建' }}
+        </button>
       </template>
     </ModalDialog>
   </section>
@@ -81,7 +101,10 @@
 import { ref, reactive, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import * as echarts from 'echarts'
 import { dashboardApi, reportApi, hotelApi } from '@hotelink/api'
-import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, SelectField } from '@hotelink/ui'
+import { extractApiError } from '@hotelink/utils'
+import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, SelectField, useToast } from '@hotelink/ui'
+
+const { showToast } = useToast()
 
 interface HotelOption {
   id: number
@@ -99,14 +122,14 @@ const chartStart = ref(thirtyDaysAgo.toISOString().slice(0, 10))
 const chartEnd = ref(today.toISOString().slice(0, 10))
 
 const taskColumns = [
-  { key: 'id', label: 'ID' },
-  { key: 'report_type', label: '类型' },
-  { key: 'hotel_name', label: '酒店' },
-  { key: 'start_date', label: '开始日期' },
-  { key: 'end_date', label: '结束日期' },
-  { key: 'status', label: '状态' },
+  { key: 'id', label: 'ID', sortField: 'id' },
+  { key: 'report_type', label: '类型', sortField: 'report_type' },
+  { key: 'hotel_name', label: '酒店', sortField: 'hotel__name' },
+  { key: 'start_date', label: '开始日期', sortField: 'start_date' },
+  { key: 'end_date', label: '结束日期', sortField: 'end_date' },
+  { key: 'status', label: '状态', sortField: 'status' },
   { key: 'result_summary', label: '结果摘要' },
-  { key: 'created_at', label: '创建时间' },
+  { key: 'created_at', label: '创建时间', sortField: 'created_at' },
 ]
 
 const tasks = ref<Record<string, unknown>[]>([])
@@ -114,15 +137,31 @@ const tasksLoading = ref(false)
 const taskPage = ref(1)
 const taskPageSize = ref(10)
 const taskTotal = ref(0)
+const taskFilters = reactive({ ordering: '-id' })
 
 const hotels = ref<HotelOption[]>([])
 const showCreate = ref(false)
+const creating = ref(false)
 const form = reactive({ report_type: 'revenue', hotel_id: '' as string | number, start_date: '', end_date: '' })
+
+function onTaskSortChange() {
+  taskPage.value = 1
+  loadTasks()
+}
+
+function onTaskTableSortChange(ordering: string) {
+  if (taskFilters.ordering === ordering) return
+  taskFilters.ordering = ordering
+  onTaskSortChange()
+}
 
 // 加载 Charts 相关数据。
 async function loadCharts() {
   const res = await dashboardApi.charts({ start_date: chartStart.value, end_date: chartEnd.value })
-  if (res.code !== 0 || !res.data) return
+  if (res.code !== 0 || !res.data) {
+    showToast(res.message || '图表数据加载失败', 'error')
+    return
+  }
   const items = (res.data as Record<string, unknown>).items as { date: string; order_count: number; revenue: number }[]
   const dates = items.map(i => i.date)
   const revenues = items.map(i => i.revenue)
@@ -154,23 +193,35 @@ async function loadCharts() {
 // 加载 Tasks 相关数据。
 async function loadTasks() {
   tasksLoading.value = true
-  const res = await reportApi.tasks({ page: taskPage.value, page_size: taskPageSize.value })
-  if (res.code === 0 && res.data) {
-    const d = res.data as unknown as { items: Record<string, unknown>[]; total: number }
-    tasks.value = d.items || []
-    taskTotal.value = d.total || 0
+  try {
+    const res = await reportApi.tasks({ page: taskPage.value, page_size: taskPageSize.value, ordering: taskFilters.ordering })
+    if (res.code === 0 && res.data) {
+      const d = res.data as unknown as { items: Record<string, unknown>[]; total: number }
+      tasks.value = d.items || []
+      taskTotal.value = d.total || 0
+    } else {
+      showToast(res.message || '报表任务加载失败', 'error')
+    }
+  } catch {
+    showToast('报表任务加载失败，请检查网络后重试', 'error')
   }
   tasksLoading.value = false
 }
 
 // 加载 Hotels 相关数据。
 async function loadHotels() {
-  const res = await hotelApi.list({ page: 1, page_size: 200 })
-  if (res.code === 0 && res.data) {
-    hotels.value = ((res.data as unknown as { items: HotelOption[] }).items || []).map(item => ({
-      id: Number(item.id),
-      name: String(item.name || ''),
-    }))
+  try {
+    const res = await hotelApi.list({ page: 1, page_size: 200 })
+    if (res.code === 0 && res.data) {
+      hotels.value = ((res.data as unknown as { items: HotelOption[] }).items || []).map(item => ({
+        id: Number(item.id),
+        name: String(item.name || ''),
+      }))
+    } else {
+      showToast(res.message || '酒店列表加载失败', 'error')
+    }
+  } catch {
+    showToast('酒店列表加载失败，请检查网络后重试', 'error')
   }
 }
 
@@ -185,11 +236,38 @@ function openCreate() {
 
 // 处理 Create 交互逻辑。
 async function handleCreate() {
+  if (creating.value) return
+  if (!form.start_date || !form.end_date) {
+    showToast('请先选择报表日期范围', 'warning')
+    return
+  }
+  if (form.start_date > form.end_date) {
+    showToast('开始日期不能晚于结束日期', 'warning')
+    return
+  }
+
   const payload: Record<string, unknown> = { report_type: form.report_type, start_date: form.start_date, end_date: form.end_date }
   if (form.hotel_id) payload.hotel_id = form.hotel_id
-  await reportApi.createTask(payload)
-  showCreate.value = false
-  loadTasks()
+  creating.value = true
+  try {
+    const res = await reportApi.createTask(payload)
+    if (res.code === 0) {
+      showToast('报表任务创建成功', 'success')
+      showCreate.value = false
+      loadTasks()
+    } else {
+      showToast(extractApiError(res, '创建失败，请检查填写内容', {
+        report_type: '报表类型',
+        hotel_id: '酒店',
+        start_date: '开始日期',
+        end_date: '结束日期',
+      }), 'error')
+    }
+  } catch {
+    showToast('创建报表任务失败，请稍后重试', 'error')
+  } finally {
+    creating.value = false
+  }
 }
 
 // 处理 Resize 交互逻辑。

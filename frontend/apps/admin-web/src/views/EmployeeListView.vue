@@ -6,8 +6,26 @@
       </template>
     </PageHeader>
 
+    <div class="mb-4 flex flex-wrap gap-3">
+      <SelectField v-model="ordering" size="sm" @change="onSortChange">
+        <option value="-id">ID 最新优先</option>
+        <option value="id">ID 最旧优先</option>
+        <option value="user__username">用户名 A→Z</option>
+        <option value="-user__username">用户名 Z→A</option>
+        <option value="nickname">姓名 A→Z</option>
+        <option value="-nickname">姓名 Z→A</option>
+        <option value="mobile">手机号升序</option>
+        <option value="-mobile">手机号降序</option>
+        <option value="role">角色升序</option>
+        <option value="-role">角色降序</option>
+        <option value="status">状态升序</option>
+        <option value="-status">状态降序</option>
+      </SelectField>
+      <button class="rounded-lg bg-slate-100 px-3 py-2 text-sm hover:bg-slate-200" @click="loadList">刷新</button>
+    </div>
+
     <div class="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
-      <DataTable :columns="columns" :rows="list" :loading="loading">
+      <DataTable :columns="columns" :rows="list" :loading="loading" :sort-value="ordering" @sort-change="onTableSortChange">
         <template #col-role="{ value }">
           <StatusBadge :label="value === 'system_admin' ? '系统管理员' : value === 'hotel_admin' ? '酒店管理员' : String(value)" :type="value === 'system_admin' ? 'info' : 'default'" />
         </template>
@@ -106,12 +124,12 @@ type EmployeeField = 'username' | 'password' | 'name' | 'mobile'
 const { showToast } = useToast()
 
 const columns = [
-  { key: 'id', label: 'ID' },
-  { key: 'username', label: '用户名' },
-  { key: 'nickname', label: '姓名' },
-  { key: 'mobile', label: '手机号' },
-  { key: 'role', label: '角色' },
-  { key: 'status', label: '状态' },
+  { key: 'id', label: 'ID', sortField: 'id' },
+  { key: 'username', label: '用户名', sortField: 'user__username' },
+  { key: 'nickname', label: '姓名', sortField: 'nickname' },
+  { key: 'mobile', label: '手机号', sortField: 'mobile' },
+  { key: 'role', label: '角色', sortField: 'role' },
+  { key: 'status', label: '状态', sortField: 'status' },
 ]
 
 const list = ref<Record<string, unknown>[]>([])
@@ -119,6 +137,7 @@ const loading = ref(false)
 const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
+const ordering = ref('-id')
 
 const showCreate = ref(false)
 const form = reactive({ username: '', password: '', name: '', mobile: '', role: 'hotel_admin' })
@@ -153,11 +172,22 @@ const passwordStrengthTextClass = computed(() => {
   }
 })
 
+function onSortChange() {
+  page.value = 1
+  loadList()
+}
+
+function onTableSortChange(nextOrdering: string) {
+  if (ordering.value === nextOrdering) return
+  ordering.value = nextOrdering
+  onSortChange()
+}
+
 // 加载 List 相关数据。
 async function loadList() {
   loading.value = true
   try {
-    const res = await employeeApi.list({ page: page.value, page_size: pageSize.value })
+    const res = await employeeApi.list({ page: page.value, page_size: pageSize.value, ordering: ordering.value })
     if (res.code === 0 && res.data) {
       const d = res.data as unknown as { items: Record<string, unknown>[]; total: number }
       list.value = d.items || []

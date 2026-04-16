@@ -79,7 +79,13 @@
           <span class="rounded-full bg-gradient-to-r from-brand to-teal-500 px-2.5 py-0.5 text-[11px] font-semibold text-white">AI 推荐</span>
           <h2 class="text-base font-bold text-gray-900">专属为您推荐</h2>
         </div>
-        <button @click="refreshRecommendations" class="text-xs text-gray-400 hover:text-brand transition">🔄 换一批</button>
+        <button
+          @click="refreshRecommendations(true)"
+          :disabled="refreshingRecommendations"
+          class="text-xs text-gray-400 transition hover:text-brand disabled:cursor-not-allowed disabled:text-gray-300"
+        >
+          {{ refreshingRecommendations ? '加载中...' : '🔄 换一批' }}
+        </button>
       </div>
       <div class="flex gap-4 overflow-x-auto pb-2 scrollbar-hide">
         <router-link
@@ -190,9 +196,11 @@ import { useRouter } from 'vue-router'
 import { publicApi, userAiApi } from '@hotelink/api'
 import { useUserAuthStore } from '@hotelink/store'
 import { buildImageThumbUrl, formatDate } from '@hotelink/utils'
+import { useToast } from '@hotelink/ui'
 
 const router = useRouter()
 const auth = useUserAuthStore()
+const { showToast } = useToast()
 const loading = ref(true)
 const error = ref('')
 const keyword = ref('')
@@ -204,6 +212,7 @@ const checkOut = ref(formatDate(tomorrow))
 
 const recommendedHotels = ref<any[]>([])
 const aiRecommendations = ref<any[]>([])
+const refreshingRecommendations = ref(false)
 
 function formatRating(value: unknown): string {
   const n = Number(value)
@@ -254,8 +263,9 @@ const previewReviews = ref([
   { name: '王先生', score: 4, content: '整体不错，性价比很高。前台服务热情周到，退房流程也很便捷。' },
 ])
 
-async function refreshRecommendations() {
+async function refreshRecommendations(showFeedback = false) {
   if (!auth.isLoggedIn) return
+  refreshingRecommendations.value = true
   try {
     const res = await userAiApi.recommendations({ scene: 'home', limit: 6 })
     if (res.code === 0 && res.data) {
@@ -263,8 +273,19 @@ async function refreshRecommendations() {
         ...item,
         cover_thumb: buildHomeThumb(String(item?.cover_image || ''), 'ai'),
       }))
+      if (showFeedback) {
+        showToast('推荐已更新', 'success')
+      }
+    } else if (showFeedback) {
+      showToast(res.message || '刷新推荐失败，请稍后重试', 'error')
     }
-  } catch { /* silent */ }
+  } catch {
+    if (showFeedback) {
+      showToast('刷新推荐失败，请检查网络后重试', 'error')
+    }
+  } finally {
+    refreshingRecommendations.value = false
+  }
 }
 
 // 处理 Search 交互逻辑。

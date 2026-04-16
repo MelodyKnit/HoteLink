@@ -105,7 +105,11 @@ export type FieldErrors = Record<string, string>
 
 const DEFAULT_API_FIELD_LABELS: Record<string, string> = {
   amount: '金额',
+  area: '面积',
+  base_price: '基础价格',
+  bed_type: '床型',
   birthday: '生日',
+  breakfast_count: '早餐份数',
   check_in_date: '入住日期',
   check_out_date: '离店日期',
   confirm_password: '确认密码',
@@ -116,9 +120,11 @@ const DEFAULT_API_FIELD_LABELS: Record<string, string> = {
   guest_count: '入住人数',
   guest_mobile: '手机号',
   guest_name: '入住人姓名',
+  hotel: '所属酒店',
   hotel_id: '酒店',
   invoice_title_id: '发票抬头',
   invoice_type: '发票类型',
+  max_guest_count: '最大入住人数',
   mobile: '手机号',
   name: '名称',
   new_password: '新密码',
@@ -131,7 +137,9 @@ const DEFAULT_API_FIELD_LABELS: Record<string, string> = {
   room_no: '房间号',
   room_type_id: '房型',
   score: '评分',
+  stock: '库存',
   start_date: '开始日期',
+  status: '状态',
   target_status: '目标状态',
   tax_no: '税号',
   title: '抬头名称',
@@ -150,6 +158,9 @@ const GENERIC_API_MESSAGES = [
   /^Ensure this field has at least \d+ characters\.$/,
   /^Ensure this value is greater than or equal to \d+\.$/,
   /^Ensure this value is less than or equal to \d+\.$/,
+  /^该字段是必填项。?$/,
+  /^该字段不能为空。?$/,
+  /^不能为空。?$/,
 ]
 
 function translateApiMessage(message: string): string {
@@ -157,6 +168,9 @@ function translateApiMessage(message: string): string {
     .replace('This field may not be blank.', '不能为空')
     .replace('This field is required.', '为必填项')
     .replace('This field may not be null.', '不能为空')
+    .replace('该字段是必填项。', '为必填项')
+    .replace('该字段不能为空。', '不能为空')
+    .replace('不能为空。', '不能为空')
     .replace('Not a valid string.', '格式不正确')
     .replace('Not a valid integer.', '格式不正确')
     .replace('Enter a valid email address.', '格式不正确，请填写有效邮箱')
@@ -318,7 +332,7 @@ export function extractApiError(
   fieldMap?: Record<string, string>,
 ): string {
   const fieldErrors = extractApiFieldErrors(res, fieldMap)
-  const parts = Object.values(fieldErrors)
+  const parts = [...new Set(Object.values(fieldErrors))]
   if (parts.length) return parts.join('；')
   return translateApiMessage(res.message || fallback)
 }

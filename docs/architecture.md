@@ -107,7 +107,7 @@
 
 - `PlatformConfig`
 - `AuditLog`
-- `SystemNotice`
+- `SystemNotice`（支持 `related_order` 关联字段，用于订单/支付通知精确跳转）
 - `AICallLog`
 - `RuntimeConfig`
 

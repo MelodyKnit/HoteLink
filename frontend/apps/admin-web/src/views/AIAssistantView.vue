@@ -517,8 +517,12 @@ async function loadHotels() {
     const res = await hotelApi.list({ page: 1, page_size: 200 })
     if (res.code === 0 && res.data) {
       hotels.value = ((res.data as { items: HotelOption[] }).items || []).map((item: HotelOption) => ({ id: Number(item.id), name: String(item.name || '') }))
+    } else {
+      showToast(res.message || '酒店列表加载失败，请稍后重试', 'error')
     }
-  } catch { /* silent */ }
+  } catch {
+    showToast('酒店列表加载失败，请检查网络后重试', 'error')
+  }
 }
 async function loadRoomTypes() {
   try {
@@ -529,8 +533,12 @@ async function loadRoomTypes() {
         name: String(item.name || ''),
         hotel_name: String((item as unknown as Record<string, unknown>).hotel_name || ''),
       }))
+    } else {
+      showToast(res.message || '房型列表加载失败，请稍后重试', 'error')
     }
-  } catch { /* silent */ }
+  } catch {
+    showToast('房型列表加载失败，请检查网络后重试', 'error')
+  }
 }
 async function loadRecentReviews() {
   try {
@@ -542,8 +550,12 @@ async function loadRecentReviews() {
         score: Number(r.score),
         content: String(r.content || ''),
       }))
+    } else {
+      showToast(res.message || '近期评价加载失败，请稍后重试', 'error')
     }
-  } catch { /* silent */ }
+  } catch {
+    showToast('近期评价加载失败，请检查网络后重试', 'error')
+  }
 }
 
 function copyToClipboard(text: string) {
@@ -565,6 +577,7 @@ async function getReportSummary() {
     const res = await aiApi.reportSummary(payload)
     if (res.code === 0 && res.data) {
       reportResult.value = (res.data as Record<string, unknown>).summary as string || '暂无分析结果'
+      showToast('报告分析完成', 'success')
     } else {
       showApiError(res, '报告分析失败')
     }
@@ -589,6 +602,7 @@ async function getReviewSummary() {
     const res = await aiApi.reviewSummary(payload)
     if (res.code === 0 && res.data) {
       reviewResult.value = (res.data as Record<string, unknown>).summary as string || '暂无分析结果'
+      showToast('评价总结已生成', 'success')
     } else {
       showApiError(res, '评价总结失败')
     }
@@ -630,6 +644,7 @@ async function getPricingSuggestion() {
     })
     if (res.code === 0 && res.data) {
       pricingResult.value = res.data as { suggestions: { date: string; suggested_price: number; reason: string }[] }
+      showToast('定价建议已生成', 'success')
     } else {
       showApiError(res, '定价建议失败')
     }
@@ -672,6 +687,9 @@ async function getBusinessReport() {
           if (event.type === 'chunk') bizResult.value += event.content
           if (event.done) break
         }
+        if (bizResult.value.trim()) {
+          showToast('经营报告流式生成完成', 'success')
+        }
       } finally {
         bizStreaming.value = false
       }
@@ -679,6 +697,7 @@ async function getBusinessReport() {
       const res = await aiApi.businessReport(payload)
       if (res.code === 0 && res.data) {
         bizResult.value = (res.data as { report: string }).report || '暂无内容'
+        showToast('经营报告已生成', 'success')
       } else {
         showApiError(res, '报告生成失败')
       }
@@ -703,6 +722,7 @@ async function getSentiment() {
     const res = await aiApi.reviewSentiment(Number(sentimentForm.review_id))
     if (res.code === 0 && res.data) {
       sentimentResult.value = (res.data as { result: { score: number; label: string; keywords: string[]; tags: string[]; summary: string } }).result
+      showToast('情感分析完成', 'success')
     } else {
       showApiError(res, '情感分析失败')
     }
@@ -741,6 +761,7 @@ async function getMarketingCopy() {
     if (res.code === 0 && res.data) {
       marketingResult.value = (res.data as { copies: { title: string; content: string; tags: string[] }[] }).copies || []
       if (!marketingResult.value.length) showToast('AI 未生成文案，请稍后重试', 'error')
+      else showToast('营销文案已生成', 'success')
     } else {
       showApiError(res, '文案生成失败')
     }
@@ -777,6 +798,7 @@ async function getContent() {
     if (res.code === 0 && res.data) {
       contentResult.value = (res.data as { results: { content: string; highlights: string[] }[] }).results || []
       if (!contentResult.value.length) showToast('AI 未生成内容，请稍后重试', 'error')
+      else showToast('内容生成完成', 'success')
     } else {
       showApiError(res, '内容生成失败')
     }
@@ -803,6 +825,7 @@ async function getAnomalyReport() {
     })
     if (res.code === 0 && res.data) {
       anomalyResult.value = res.data as AnomalyResult
+      showToast('异常检测完成', 'success')
     } else {
       showApiError(res, '异常检测失败')
     }
@@ -825,6 +848,7 @@ async function getOrderAnomalySummary() {
     const res = await aiApi.orderAnomalySummary(orderAnomalyForm.date ? { date: orderAnomalyForm.date } : undefined)
     if (res.code === 0 && res.data) {
       orderAnomalyResult.value = res.data as OrderAnomalyResult
+      showToast('订单异常统计已生成', 'success')
     } else {
       showApiError(res, '订单异常统计失败')
     }

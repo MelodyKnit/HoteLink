@@ -89,9 +89,30 @@
 
       <!-- 操作按钮 -->
       <div class="mt-6 flex flex-wrap gap-3">
-        <button v-if="order.status === 'paid'" class="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-medium text-white hover:bg-indigo-700" @click="confirmOrder">确认订单</button>
-        <button v-if="order.status === 'confirmed' || order.status === 'paid'" class="rounded-lg bg-green-600 px-5 py-2 text-sm font-medium text-white hover:bg-green-700" @click="openCheckIn">办理入住</button>
-        <button v-if="order.status === 'checked_in'" class="rounded-lg bg-orange-600 px-5 py-2 text-sm font-medium text-white hover:bg-orange-700" @click="doCheckOut">办理退房</button>
+        <button
+          v-if="order.status === 'paid'"
+          class="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+          :disabled="actionLoading"
+          @click="confirmOrder"
+        >
+          {{ actionLoading ? '处理中…' : '确认订单' }}
+        </button>
+        <button
+          v-if="order.status === 'confirmed' || order.status === 'paid'"
+          class="rounded-lg bg-green-600 px-5 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60"
+          :disabled="actionLoading"
+          @click="openCheckIn"
+        >
+          {{ actionLoading ? '处理中…' : '办理入住' }}
+        </button>
+        <button
+          v-if="order.status === 'checked_in'"
+          class="rounded-lg bg-orange-600 px-5 py-2 text-sm font-medium text-white hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-60"
+          :disabled="actionLoading"
+          @click="doCheckOut"
+        >
+          {{ actionLoading ? '处理中…' : '办理退房' }}
+        </button>
       </div>
     </template>
 
@@ -109,7 +130,13 @@
     </div>
     <template #footer>
       <button class="rounded-lg border border-slate-200 px-4 py-2 text-sm hover:bg-slate-50" @click="showCheckInModal = false">取消</button>
-      <button class="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700" @click="submitCheckIn">确认入住</button>
+      <button
+        class="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60"
+        :disabled="actionLoading"
+        @click="submitCheckIn"
+      >
+        {{ actionLoading ? '办理中…' : '确认入住' }}
+      </button>
     </template>
   </ModalDialog>
 </template>
@@ -137,6 +164,7 @@ const route = useRoute()
 
 const showCheckInModal = ref(false)
 const checkInRoomNo = ref('')
+const actionLoading = ref(false)
 
 const loading = ref(true)
 const order = ref<Record<string, unknown> | null>(null)
@@ -187,7 +215,9 @@ async function loadDetail() {
 
 // 处理 confirmOrder 业务流程。
 async function confirmOrder() {
+  if (actionLoading.value) return
   if (!await confirmDialog('确认此订单？', { type: 'warning' })) return
+  actionLoading.value = true
   try {
     const res = await orderApi.changeStatus({ order_id: order.value!.id as number, target_status: 'confirmed' })
     if (res.code === 0) {
@@ -198,6 +228,8 @@ async function confirmOrder() {
     }
   } catch {
     showToast('操作失败，请重试', 'error')
+  } finally {
+    actionLoading.value = false
   }
 }
 
@@ -209,10 +241,12 @@ function openCheckIn() {
 
 // 提交入住并办理。
 async function submitCheckIn() {
+  if (actionLoading.value) return
   if (!checkInRoomNo.value.trim()) {
     showToast('请输入房间号', 'warning')
     return
   }
+  actionLoading.value = true
   try {
     const res = await orderApi.checkIn({ order_id: order.value!.id as number, room_no: checkInRoomNo.value.trim() })
     if (res.code === 0) {
@@ -224,12 +258,16 @@ async function submitCheckIn() {
     }
   } catch {
     showToast('操作失败，请重试', 'error')
+  } finally {
+    actionLoading.value = false
   }
 }
 
 // 处理 doCheckOut 业务流程。
 async function doCheckOut() {
+  if (actionLoading.value) return
   if (!await confirmDialog('确认办理退房？', { type: 'warning' })) return
+  actionLoading.value = true
   try {
     const res = await orderApi.checkOut({ order_id: order.value!.id as number })
     if (res.code === 0) {
@@ -240,6 +278,8 @@ async function doCheckOut() {
     }
   } catch {
     showToast('操作失败，请重试', 'error')
+  } finally {
+    actionLoading.value = false
   }
 }
 
