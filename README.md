@@ -56,7 +56,8 @@ python manage.py check
   以上目录均被 `.gitignore` 忽略，不参与提交。
 - 目前已桥接的命令：
   - `python scripts/generate/seed_demo_data.py`
-  - `python scripts/generate/import_hotels_from_dist_images.py --count 200 --images-dir dist/images`
+  - `python scripts/generate/seed_hotels_bulk.py --count 200 --overwrite --images-dir dist/hotel_photo_crawler/photos`
+  - `python scripts/generate/import_hotels_from_dist_images.py --count 200 --images-dir dist/hotel_photo_crawler/photos`
 - 若本地缺少对应脚本，命令会直接报错提示，不会影响生产代码。
 
 ## 已确定技术方向

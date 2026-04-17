@@ -146,14 +146,14 @@ npm run type-check
 
 - 演示数据：[`../scripts/generate/seed_demo_data.py`](../scripts/generate/seed_demo_data.py)
 - 批量酒店种子：[`../scripts/generate/seed_hotels_bulk.py`](../scripts/generate/seed_hotels_bulk.py)
-- 从 `dist/images` 导入酒店：[`../scripts/generate/import_hotels_from_dist_images.py`](../scripts/generate/import_hotels_from_dist_images.py)
+- 从酒店图片池导入酒店：[`../scripts/generate/import_hotels_from_dist_images.py`](../scripts/generate/import_hotels_from_dist_images.py)
 
 示例：
 
 ```bash
 python scripts/generate/seed_demo_data.py
-python scripts/generate/seed_hotels_bulk.py --count 200 --overwrite
-python scripts/generate/import_hotels_from_dist_images.py --count 200
+python scripts/generate/seed_hotels_bulk.py --count 200 --overwrite --images-dir dist/hotel_photo_crawler/photos
+python scripts/generate/import_hotels_from_dist_images.py --count 200 --images-dir dist/hotel_photo_crawler/photos
 ```
 
 ---

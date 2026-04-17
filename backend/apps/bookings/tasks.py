@@ -54,6 +54,16 @@ def cancel_timeout_unpaid_order(order, *, cancel_minutes: int) -> bool:
     order.operator_remark = f"系统自动取消：超过{cancel_minutes}分钟未支付"
     order.save(update_fields=["status", "cancelled_at", "operator_remark", "updated_at"])
 
+    # 归还库存
+    from datetime import timedelta
+    from django.db.models import F
+    from apps.hotels.models import RoomInventory
+    nights = (order.check_out_date - order.check_in_date).days
+    date_range = [order.check_in_date + timedelta(days=i) for i in range(nights)]
+    RoomInventory.objects.filter(
+        room_type_id=order.room_type_id, date__in=date_range,
+    ).update(stock=F("stock") + 1)
+
     if order.coupon_id:
         UserCoupon.objects.filter(
             pk=order.coupon_id,

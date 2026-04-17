@@ -4,6 +4,11 @@ config/settings/prod.py —— 生产环境配置。
 对抗 XSS/CSRF/点击劫持等常见 Web 攻击。
 """
 from .base import *
+from django.core.exceptions import ImproperlyConfigured
+
+# 确保生产环境使用安全的 SECRET_KEY
+if SECRET_KEY.startswith("django-insecure"):
+    raise ImproperlyConfigured("生产环境必须设置 DJANGO_SECRET_KEY 环境变量，不得使用默认密钥。")
 
 # 关闭调试模式，隐藏内部错误详情
 DEBUG = False
@@ -32,3 +37,12 @@ X_FRAME_OPTIONS = "DENY"
 SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
 # 将不同站点上下文隔离，减少窗口引用与资源窃取风险
 SECURE_CROSS_ORIGIN_OPENER_POLICY = "same-origin"
+
+# 生产环境使用 Redis 作为缓存后端（多 worker 共享）
+_redis_url = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0")
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": _redis_url,
+    }
+}

@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-poetry install --only main --no-root
+poetry install --no-root
 
 if [ ! -f "/app/manage.py" ]; then
   echo "Django project is not initialized yet."

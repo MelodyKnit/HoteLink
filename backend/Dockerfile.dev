@@ -17,7 +17,7 @@ RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.l
 RUN curl -sSL https://install.python-poetry.org | python3 -
 
 COPY backend/pyproject.toml backend/poetry.lock ./
-RUN poetry install --only main --no-root
+RUN poetry install --no-root
 
 COPY backend/docker/entrypoint.dev.sh /entrypoint.dev.sh
 RUN chmod +x /entrypoint.dev.sh

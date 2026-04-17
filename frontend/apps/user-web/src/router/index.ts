@@ -57,7 +57,21 @@ router.beforeEach(async (to) => {
   if (token) {
     const auth = useUserAuthStore()
     if (!auth.user) {
-      await auth.fetchMe()
+      try {
+        await auth.fetchMe()
+      } catch {
+        auth.logout()
+        if (to.meta.auth) {
+          return { name: 'login', query: { redirect: to.fullPath } }
+        }
+      }
+      // fetchMe 返回但 user 仍为空（如 code !== 0），视为 token 失效
+      if (!auth.user) {
+        auth.logout()
+        if (to.meta.auth) {
+          return { name: 'login', query: { redirect: to.fullPath } }
+        }
+      }
     }
   }
 })

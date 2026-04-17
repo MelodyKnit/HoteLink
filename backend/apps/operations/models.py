@@ -81,7 +81,7 @@ class SystemNotice(models.Model):
     title = models.CharField(max_length=100)
     content = models.CharField(max_length=255)
     related_order = models.ForeignKey("bookings.BookingOrder", on_delete=models.SET_NULL, null=True, blank=True, related_name="system_notices")
-    is_read = models.BooleanField(default=False)
+    is_read = models.BooleanField(default=False, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

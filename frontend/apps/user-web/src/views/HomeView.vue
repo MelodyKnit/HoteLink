@@ -330,10 +330,4 @@ onMounted(async () => {
   background-color: #fff;
   color-scheme: light;
 }
-
-.home-date-input::-webkit-date-and-time-value,
-.home-date-input::-webkit-datetime-edit,
-.home-date-input::-webkit-datetime-edit-fields-wrapper {
-  background: transparent;
-}
 </style>

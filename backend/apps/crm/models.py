@@ -177,7 +177,7 @@ class UserCoupon(models.Model):
     amount = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text="满减金额")
     discount = models.DecimalField(max_digits=3, decimal_places=1, default=10, help_text="折扣值")
     min_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text="最低消费门槛")
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_UNUSED)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_UNUSED, db_index=True)
     used_order = models.ForeignKey("bookings.BookingOrder", on_delete=models.SET_NULL, null=True, blank=True, related_name="used_coupons")
     valid_start = models.DateField()
     valid_end = models.DateField()

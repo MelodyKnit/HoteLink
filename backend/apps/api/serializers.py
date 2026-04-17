@@ -200,14 +200,19 @@ class BookingOrderSerializer(serializers.ModelSerializer):
     is_lifecycle_anomaly = serializers.SerializerMethodField()
     lifecycle_warning = serializers.SerializerMethodField()
 
+    def _latest_payment(self, obj):
+        """从预取缓存中获取最新支付记录，避免额外查询。"""
+        payments = list(obj.payments.all())
+        return max(payments, key=lambda p: p.id) if payments else None
+
     def get_payment_method(self, obj):
-        latest_payment = obj.payments.order_by("-id").first()
+        latest_payment = self._latest_payment(obj)
         return latest_payment.method if latest_payment else ""
 
     def get_paid_at(self, obj):
         if obj.paid_at:
             return obj.paid_at
-        latest_payment = obj.payments.order_by("-id").first()
+        latest_payment = self._latest_payment(obj)
         if latest_payment and latest_payment.paid_at:
             return latest_payment.paid_at
         return None
@@ -331,7 +336,7 @@ class InitSetupSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         if attrs["password"] != attrs["confirm_password"]:
-            raise serializers.ValidationError({"confirm_password": "两次输入的密码不一致"})
+            raise serializers.ValidationError({"confirm_password": ["两次输入的密码不一致"]})
         ensure_password_strength(attrs["password"])
         return attrs
 
@@ -508,7 +513,7 @@ class OrderSwitchRoomSerializer(serializers.Serializer):
 class ReplyReviewSerializer(serializers.Serializer):
     """ReplyReview 序列化器：用于接口参数校验或响应数据转换。"""
     review_id = serializers.IntegerField(min_value=1)
-    content = serializers.CharField()
+    content = serializers.CharField(max_length=2000)
 
 
 class ChangeUserStatusSerializer(serializers.Serializer):
@@ -673,6 +678,11 @@ class CouponTemplateCreateSerializer(serializers.Serializer):
     valid_days = serializers.IntegerField(min_value=1, default=30)
     valid_start = serializers.DateField()
     valid_end = serializers.DateField()
+
+    def validate(self, attrs):
+        if attrs["valid_start"] > attrs["valid_end"]:
+            raise serializers.ValidationError({"valid_end": ["结束日期不能早于开始日期"]})
+        return attrs
 
 
 class ClaimCouponSerializer(serializers.Serializer):

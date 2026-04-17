@@ -25,7 +25,7 @@ class Hotel(models.Model):
 
     name = models.CharField(max_length=200, unique=True)
     type = models.CharField(max_length=20, choices=TYPE_CHOICES, default=TYPE_HOTEL, db_index=True)
-    city = models.CharField(max_length=100, blank=True)
+    city = models.CharField(max_length=100, blank=True, db_index=True)
     address = models.CharField(max_length=255, blank=True)
     star = models.PositiveSmallIntegerField(default=3)
     phone = models.CharField(max_length=30, blank=True)
@@ -39,7 +39,7 @@ class Hotel(models.Model):
     latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     is_recommended = models.BooleanField(default=False)
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_DRAFT)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_DRAFT, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -130,7 +130,9 @@ class RoomInventory(models.Model):
         verbose_name = "Room Inventory"
         verbose_name_plural = "Room Inventories"
         ordering = ["date", "room_type_id"]
-        unique_together = ("room_type", "date")
+        constraints = [
+            models.UniqueConstraint(fields=["room_type", "date"], name="uniq_roomtype_date"),
+        ]
 
     def __str__(self) -> str:
         return f"{self.room_type_id}-{self.date}"

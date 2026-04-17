@@ -47,12 +47,13 @@ from pathlib import Path
 import hashlib
 
 from django.db import transaction
+from django.db.models import F
 from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model
 from django.core.files.storage import default_storage
 from django.core.cache import cache
 from django.http import HttpResponse
-from django.db.models import Avg, Q, Sum
+from django.db.models import Avg, Count, Q, Sum
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 from django.utils.crypto import get_random_string
@@ -1152,7 +1153,7 @@ class UserOrdersView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        queryset = BookingOrder.objects.filter(user=request.user).select_related("hotel", "room_type")
+        queryset = BookingOrder.objects.filter(user=request.user).select_related("hotel", "room_type").prefetch_related("payments")
         status_param = request.query_params.get("status")
         if status_param:
             queryset = queryset.filter(status=status_param)
@@ -1324,6 +1325,21 @@ class UserOrdersCreateView(APIView):
         coupon_id = data.get("coupon_id")
 
         with transaction.atomic():
+            # 0. 库存校验与扣减（行锁防并发超卖）
+            date_range = [data["check_in_date"] + timedelta(days=i) for i in range(nights)]
+            inventories = list(
+                RoomInventory.objects.select_for_update()
+                .filter(room_type=room_type, date__in=date_range, status="available")
+            )
+            inv_map = {inv.date: inv for inv in inventories}
+            for d in date_range:
+                inv = inv_map.get(d)
+                if not inv or inv.stock <= 0:
+                    return api_response(code=4003, message=f"{d} 库存不足", data=None, status_code=400)
+            for inv in inventories:
+                inv.stock -= 1
+                inv.save(update_fields=["stock", "updated_at"])
+
             if coupon_id:
                 from django.utils import timezone as tz
                 today = tz.localdate()
@@ -1411,10 +1427,14 @@ class UserOrdersUpdateView(APIView):
         order = BookingOrder.objects.filter(id=data["order_id"], user=request.user).first()
         if not order:
             return api_response(code=4040, message="订单不存在", data=None, status_code=404)
+        updated_fields = []
         for field in ["guest_name", "guest_mobile", "remark"]:
             if field in data:
                 setattr(order, field, data[field])
-        order.save()
+                updated_fields.append(field)
+        if updated_fields:
+            updated_fields.append("updated_at")
+            order.save(update_fields=updated_fields)
         return api_response(data=BookingOrderSerializer(order).data)
 
 
@@ -1500,10 +1520,24 @@ class UserOrdersCancelView(APIView):
             return api_response(code=4040, message="订单不存在", data=None, status_code=404)
         if order.status in {BookingOrder.STATUS_COMPLETED, BookingOrder.STATUS_CANCELLED, BookingOrder.STATUS_CHECKED_IN}:
             return api_response(code=4093, message="当前状态不允许取消", data=None, status_code=409)
-        order.status = BookingOrder.STATUS_CANCELLED
-        order.cancelled_at = timezone.now()
-        order.operator_remark = data.get("reason", "")
-        order.save(update_fields=["status", "cancelled_at", "operator_remark", "updated_at"])
+        with transaction.atomic():
+            order.status = BookingOrder.STATUS_CANCELLED
+            order.cancelled_at = timezone.now()
+            order.operator_remark = data.get("reason", "")
+            order.save(update_fields=["status", "cancelled_at", "operator_remark", "updated_at"])
+            # 归还库存
+            nights = (order.check_out_date - order.check_in_date).days
+            date_range = [order.check_in_date + timedelta(days=i) for i in range(nights)]
+            RoomInventory.objects.filter(
+                room_type_id=order.room_type_id, date__in=date_range,
+            ).update(stock=F("stock") + 1)
+            # 归还优惠券
+            if order.coupon_id:
+                UserCoupon.objects.filter(
+                    pk=order.coupon_id,
+                    status=UserCoupon.STATUS_USED,
+                    used_order_id=order.id,
+                ).update(status=UserCoupon.STATUS_UNUSED, used_order=None, used_at=None)
         return api_response(data={"order_id": order.id, "status": order.status})
 
 
@@ -1566,8 +1600,7 @@ class UserReviewsListView(APIView):
             .select_related("hotel", "order")
             .order_by("-created_at")
         )
-        page = max(int(request.query_params.get("page", 1)), 1)
-        page_size = min(int(request.query_params.get("page_size", 10)), 50)
+        page, page_size = get_page_params(request)
         total = qs.count()
         items = qs[(page - 1) * page_size: page * page_size]
         data = []
@@ -2019,20 +2052,39 @@ class AdminDashboardChartsView(APIView):
     permission_classes = [IsAuthenticated, IsAdminRole]
 
     def get(self, request):
+        from django.db.models.functions import TruncDate
+
         end_date = parse_date(request.query_params.get("end_date", "")) or timezone.localdate()
         start_date = parse_date(request.query_params.get("start_date", "")) or (end_date - timedelta(days=6))
+
+        # 单次聚合查询：按日期分组统计订单量
+        order_stats = dict(
+            BookingOrder.objects.filter(created_at__date__gte=start_date, created_at__date__lte=end_date)
+            .annotate(day=TruncDate("created_at"))
+            .values("day")
+            .annotate(cnt=Count("id"))
+            .values_list("day", "cnt")
+        )
+        # 单次聚合查询：按日期分组统计已支付营收
+        revenue_stats = dict(
+            BookingOrder.objects.filter(
+                created_at__date__gte=start_date, created_at__date__lte=end_date,
+                payment_status=BookingOrder.PAYMENT_PAID,
+            )
+            .annotate(day=TruncDate("created_at"))
+            .values("day")
+            .annotate(total=Sum("pay_amount"))
+            .values_list("day", "total")
+        )
+
         items = []
         current = start_date
         while current <= end_date:
-            day_orders = BookingOrder.objects.filter(created_at__date=current).count()
-            day_revenue = BookingOrder.objects.filter(created_at__date=current, payment_status=BookingOrder.PAYMENT_PAID).aggregate(total=Sum("pay_amount"))["total"] or Decimal("0.00")
-            items.append(
-                {
-                    "date": current.strftime("%Y-%m-%d"),
-                    "order_count": day_orders,
-                    "revenue": float(day_revenue),
-                }
-            )
+            items.append({
+                "date": current.strftime("%Y-%m-%d"),
+                "order_count": order_stats.get(current, 0),
+                "revenue": float(revenue_stats.get(current, Decimal("0.00"))),
+            })
             current += timedelta(days=1)
         return api_response(data={"items": items})
 
@@ -2351,7 +2403,7 @@ class AdminOrdersView(APIView):
     }
 
     def get(self, request):
-        queryset = BookingOrder.objects.select_related("hotel", "room_type", "user")
+        queryset = BookingOrder.objects.select_related("hotel", "room_type", "user").prefetch_related("payments")
         keyword = request.query_params.get("keyword")
         status = request.query_params.get("status")
         ordering = request.query_params.get("ordering", "-id")
@@ -2875,7 +2927,16 @@ class AdminEmployeeResetPasswordView(APIView):
     """管理员重置员工密码接口（仅 system_admin）。"""
     permission_classes = [IsAuthenticated, IsSystemAdminRole]
 
-    DEFAULT_PASSWORD = "Abc123456"
+    @staticmethod
+    def _generate_password(length=12):
+        import secrets
+        import string
+        alphabet = string.ascii_letters + string.digits + "!@#$%"
+        while True:
+            pw = ''.join(secrets.choice(alphabet) for _ in range(length))
+            if (any(c.islower() for c in pw) and any(c.isupper() for c in pw)
+                    and any(c.isdigit() for c in pw)):
+                return pw
 
     def post(self, request):
         user_id = request.data.get("user_id")
@@ -2886,9 +2947,10 @@ class AdminEmployeeResetPasswordView(APIView):
             return api_response(code=4040, message="员工不存在", data=None, status_code=404)
         if profile.role == UserProfile.ROLE_SYSTEM_ADMIN:
             return api_response(code=4030, message="不能重置系统管理员密码", data=None, status_code=403)
-        profile.user.set_password(self.DEFAULT_PASSWORD)
+        new_password = self._generate_password()
+        profile.user.set_password(new_password)
         profile.user.save(update_fields=["password"])
-        return api_response(data={"user_id": user_id, "message": "密码已重置为默认密码"})
+        return api_response(data={"user_id": user_id, "new_password": new_password, "message": "密码已重置，请尽快通知用户修改"})
 
 
 class AdminUserUpdateView(APIView):
@@ -2914,8 +2976,6 @@ class AdminUserResetPasswordView(APIView):
     """管理端重置用户密码接口（仅 system_admin）。"""
     permission_classes = [IsAuthenticated, IsSystemAdminRole]
 
-    DEFAULT_PASSWORD = "Abc123456"
-
     def post(self, request):
         user_id = request.data.get("user_id")
         if not user_id:
@@ -2923,9 +2983,10 @@ class AdminUserResetPasswordView(APIView):
         user = User.objects.filter(pk=user_id).first()
         if not user:
             return api_response(code=4040, message="用户不存在", data=None, status_code=404)
-        user.set_password(self.DEFAULT_PASSWORD)
+        new_password = AdminEmployeeResetPasswordView._generate_password()
+        user.set_password(new_password)
         user.save(update_fields=["password"])
-        return api_response(data={"user_id": user_id, "message": "密码已重置为默认密码"})
+        return api_response(data={"user_id": user_id, "new_password": new_password, "message": "密码已重置"})
 
 
 class AdminSettingsView(APIView):
