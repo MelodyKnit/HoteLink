@@ -1,8 +1,8 @@
 # HoteLink API 路由清单（源码自动生成）
 
-- 生成时间：2026-04-13 21:49:06
+- 生成时间：2026-04-17 14:28:41
 - 来源文件：`backend/apps/api/urls.py` + `backend/apps/api/views.py`
-- 总路由数：**103**
+- 总路由数：**114**
 
 > 本文件由 `scripts/docs/generate_api_inventory.py` 生成，请勿手工编辑。
 
@@ -64,6 +64,8 @@
 | `GET` | `/api/v1/user/invoices` | `UserInvoicesView` | `user-invoices` |
 | `POST` | `/api/v1/user/invoices/apply` | `UserInvoiceApplyView` | `user-invoices-apply` |
 | `POST` | `/api/v1/user/invoices/create` | `UserInvoiceTitleCreateView` | `user-invoices-create` |
+| `POST` | `/api/v1/user/invoices/title/delete` | `UserInvoiceTitleDeleteView` | `user-invoices-title-delete` |
+| `POST` | `/api/v1/user/invoices/title/update` | `UserInvoiceTitleUpdateView` | `user-invoices-title-update` |
 | `DELETE,GET,POST` | `/api/v1/user/notices` | `UserNoticesView` | `user-notices` |
 | `GET` | `/api/v1/user/notices/unread-count` | `UserNoticeUnreadCountView` | `user-notices-unread-count` |
 | `GET` | `/api/v1/user/orders` | `UserOrdersView` | `user-orders` |
@@ -103,15 +105,21 @@
 | `POST` | `/api/v1/admin/ai/review-summary` | `AdminAIReviewSummaryView` | `admin-ai-review-summary` |
 | `GET,POST` | `/api/v1/admin/ai/settings` | `AdminAISettingsView` | `admin-ai-settings` |
 | `GET,POST` | `/api/v1/admin/ai/settings/update` | `AdminAISettingsView` | `admin-ai-settings-update` |
+| `POST` | `/api/v1/admin/ai/test` | `AdminAITestView` | `admin-ai-test` |
 | `GET` | `/api/v1/admin/ai/usage-stats` | `AdminAIUsageStatsView` | `admin-ai-usage-stats` |
 | `GET,POST` | `/api/v1/admin/coupons` | `AdminCouponTemplatesView` | `admin-coupons` |
 | `GET,POST` | `/api/v1/admin/coupons/create` | `AdminCouponTemplatesView` | `admin-coupons-create` |
+| `POST` | `/api/v1/admin/coupons/delete` | `AdminCouponTemplateDeleteView` | `admin-coupons-delete` |
 | `POST` | `/api/v1/admin/coupons/update` | `AdminCouponTemplateUpdateView` | `admin-coupons-update` |
 | `GET` | `/api/v1/admin/dashboard/charts` | `AdminDashboardChartsView` | `admin-dashboard-charts` |
 | `GET` | `/api/v1/admin/dashboard/overview` | `AdminDashboardOverviewView` | `admin-dashboard-overview` |
 | `GET,POST` | `/api/v1/admin/employees` | `AdminEmployeesView` | `admin-employees` |
+| `POST` | `/api/v1/admin/employees/change-status` | `AdminEmployeeChangeStatusView` | `admin-employees-change-status` |
 | `GET,POST` | `/api/v1/admin/employees/create` | `AdminEmployeesView` | `admin-employees-create` |
+| `POST` | `/api/v1/admin/employees/reset-password` | `AdminEmployeeResetPasswordView` | `admin-employees-reset-password` |
+| `POST` | `/api/v1/admin/employees/update` | `AdminEmployeeUpdateView` | `admin-employees-update` |
 | `GET,POST` | `/api/v1/admin/hotels` | `AdminHotelsView` | `admin-hotels` |
+| `POST` | `/api/v1/admin/hotels/batch-update` | `AdminHotelsBatchUpdateView` | `admin-hotels-batch-update` |
 | `GET,POST` | `/api/v1/admin/hotels/create` | `AdminHotelsView` | `admin-hotels-create` |
 | `GET,POST` | `/api/v1/admin/hotels/delete` | `AdminHotelsView` | `admin-hotels-delete` |
 | `GET,POST` | `/api/v1/admin/hotels/update` | `AdminHotelsView` | `admin-hotels-update` |
@@ -125,6 +133,7 @@
 | `GET` | `/api/v1/admin/orders/detail` | `AdminOrdersDetailView` | `admin-orders-detail` |
 | `GET,POST` | `/api/v1/admin/reports/tasks` | `AdminReportTasksView` | `admin-report-tasks` |
 | `GET,POST` | `/api/v1/admin/reports/tasks/create` | `AdminReportTasksView` | `admin-report-tasks-create` |
+| `POST` | `/api/v1/admin/reports/tasks/delete` | `AdminReportTaskDeleteView` | `admin-report-tasks-delete` |
 | `GET` | `/api/v1/admin/reviews` | `AdminReviewsView` | `admin-reviews` |
 | `POST` | `/api/v1/admin/reviews/delete` | `AdminReviewDeleteView` | `admin-reviews-delete` |
 | `POST` | `/api/v1/admin/reviews/reply` | `AdminReviewsReplyView` | `admin-reviews-reply` |
@@ -138,3 +147,5 @@
 | `GET` | `/api/v1/admin/system/status` | `AdminSystemStatusView` | `admin-system-status` |
 | `GET` | `/api/v1/admin/users` | `AdminUsersView` | `admin-users` |
 | `POST` | `/api/v1/admin/users/change-status` | `AdminUsersChangeStatusView` | `admin-users-change-status` |
+| `POST` | `/api/v1/admin/users/reset-password` | `AdminUserResetPasswordView` | `admin-users-reset-password` |
+| `POST` | `/api/v1/admin/users/update` | `AdminUserUpdateView` | `admin-users-update` |

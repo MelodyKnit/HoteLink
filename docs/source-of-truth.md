@@ -1,4 +1,4 @@
-# HoteLink 源码对齐基线（2026-04-13）
+# HoteLink 源码对齐基线（2026-04-17）
 
 ## 1. 目的
 
@@ -17,24 +17,24 @@
 
 ### 2.1 后端路由与接口
 
-- 已注册路由：`103`（含 `/api/v1/` 根路由）
+- 已注册路由：`114`（含 `/api/v1/` 根路由）
 - 系统：`2`
 - 通用：`4`
 - 公共：`10`
-- 用户端：`34`
-- 管理端：`52`
+- 用户端：`36`
+- 管理端：`61`
 - 完整清单见：[`api-inventory.md`](./api-inventory.md)（由脚本自动生成）
 
 ### 2.2 数据模型
 
-- 业务模型总数：`21`（`backend/apps` 7 个业务模块）
+- 业务模型总数：`22`（`backend/apps` 7 个业务模块）
 - users: 1（`UserProfile`）
 - hotels: 3（`Hotel`/`RoomType`/`RoomInventory`）
 - bookings: 1（`BookingOrder`）
 - payments: 1（`PaymentRecord`）
 - crm: 10（含 `ChatSession`、`ChatMessage`）
 - reports: 1（`ReportTask`）
-- operations: 4（含 `AICallLog`、`PlatformConfig`）
+- operations: 5（含 `AICallLog`、`PlatformConfig`、`RuntimeConfig`）
 
 ### 2.3 Celery 与定时任务
 
@@ -64,8 +64,8 @@
 
 ### 2.5 前端路由
 
-- user-web：`26` 个路由项（含 404 捕获），`24` 个视图文件
-- admin-web：`20` 个路由项（含 404 捕获），`19` 个视图文件
+- user-web：`28` 个路由项（含 404 捕获），`25` 个视图文件
+- admin-web：`22` 个路由项（含 404 捕获），`20` 个视图文件
 
 ---
 

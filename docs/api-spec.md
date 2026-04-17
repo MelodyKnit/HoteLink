@@ -1,6 +1,6 @@
 # HoteLink API 规范（源码对齐版）
 
-> 更新时间：2026-04-16  
+> 更新时间：2026-04-17  
 > 对齐基线：`backend/apps/api/urls.py`、`backend/apps/api/views.py`
 
 ## 1. 文档范围
@@ -17,13 +17,13 @@
 ## 2. 当前实现快照
 
 - API 前缀：`/api/v1/`
-- 已注册路由：`103`
+- 已注册路由：`114`
 - 分组统计：
   - system：`2`
   - common：`4`
   - public：`10`
-  - user：`34`
-  - admin：`52`
+  - user：`36`
+  - admin：`61`
 
 ---
 
