@@ -27,6 +27,7 @@ const router = createRouter({
     { path: '/payment/result/:orderId', name: 'payment-result', component: () => import('../views/PaymentResultView.vue'), meta: { auth: true } },
     { path: '/my/orders/:id', name: 'order-detail', component: () => import('../views/OrderDetailView.vue'), meta: { auth: true } },
     { path: '/my/profile', name: 'profile', component: () => import('../views/ProfileView.vue'), meta: { auth: true } },
+    { path: '/my/security', name: 'account-security', component: () => import('../views/AccountSecurityView.vue'), meta: { auth: true } },
     { path: '/my/membership', name: 'membership', component: () => import('../views/MembershipView.vue'), meta: { auth: true } },
     { path: '/my/coupons', name: 'coupons', component: () => import('../views/CouponListView.vue'), meta: { auth: true } },
     { path: '/my/favorites', name: 'favorites', component: () => import('../views/FavoriteListView.vue'), meta: { auth: true } },

@@ -1,6 +1,7 @@
 """apps/operations/models.py —— 审计日志、系统通知与平台配置模型。"""
 
 from django.conf import settings
+from django.core.cache import cache
 from django.db import models
 
 
@@ -9,7 +10,12 @@ class PlatformConfig(models.Model):
     platform_name = models.CharField(max_length=100, default="HoteLink 酒店管理系统")
     admin_name = models.CharField(max_length=100, default="HoteLink 管理端")
     support_phone = models.CharField(max_length=30, default="400-000-0000")
+    support_email = models.EmailField(default="support@hotelink.com")
+    business_hours = models.CharField(max_length=100, default="09:00-18:00")
+    platform_notice = models.CharField(max_length=255, default="欢迎使用 HoteLink 酒店管理系统")
     order_auto_cancel_minutes = models.PositiveIntegerField(default=30)
+
+    _cache_key = "operations.platform_config.singleton"
 
     class Meta:
         verbose_name = "Platform Config"
@@ -20,8 +26,16 @@ class PlatformConfig(models.Model):
 
     @classmethod
     def load(cls) -> "PlatformConfig":
+        cached = cache.get(cls._cache_key)
+        if cached is not None:
+            return cached
         obj, _ = cls.objects.get_or_create(pk=1)
+        cache.set(cls._cache_key, obj, 300)
         return obj
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        cache.delete(self._cache_key)
 
 
 class AuditLog(models.Model):

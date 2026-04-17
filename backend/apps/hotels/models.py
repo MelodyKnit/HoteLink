@@ -14,7 +14,17 @@ class Hotel(models.Model):
         (STATUS_OFFLINE, "已下架"),
     ]
 
+    TYPE_HOTEL = "hotel"
+    TYPE_HOMESTAY = "homestay"
+    TYPE_SHORT_RENT = "short_rent"
+    TYPE_CHOICES = [
+        (TYPE_HOTEL, "酒店"),
+        (TYPE_HOMESTAY, "民宿"),
+        (TYPE_SHORT_RENT, "短租"),
+    ]
+
     name = models.CharField(max_length=200, unique=True)
+    type = models.CharField(max_length=20, choices=TYPE_CHOICES, default=TYPE_HOTEL, db_index=True)
     city = models.CharField(max_length=100, blank=True)
     address = models.CharField(max_length=255, blank=True)
     star = models.PositiveSmallIntegerField(default=3)
@@ -24,6 +34,8 @@ class Hotel(models.Model):
     images = models.JSONField(default=list, blank=True, help_text="酒店图片 URL 列表")
     rating = models.DecimalField(max_digits=3, decimal_places=1, default=4.5)
     min_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    facilities = models.JSONField(default=list, blank=True, help_text="设施标签列表，如 ['wifi','parking','pool']")
+    tags = models.JSONField(default=list, blank=True, help_text="自定义标签，如 ['免费取消','含早','近地铁']")
     latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     is_recommended = models.BooleanField(default=False)

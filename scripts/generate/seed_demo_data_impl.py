@@ -54,6 +54,7 @@ def run(command, *args, **options):
     hotel, _ = Hotel.objects.get_or_create(
         name="HoteLink 北京国贸店",
         defaults={
+            "type": "hotel",
             "city": "北京",
             "address": "北京市朝阳区示例路 1 号",
             "star": 4,
@@ -61,6 +62,8 @@ def run(command, *args, **options):
             "description": "适合商务与休闲入住的现代化酒店。",
             "rating": Decimal("4.7"),
             "min_price": Decimal("399.00"),
+            "facilities": ["wifi", "parking", "restaurant", "gym", "elevator", "front_desk_24h"],
+            "tags": ["含早", "免费取消"],
             "is_recommended": True,
             "status": Hotel.STATUS_ONLINE,
         },

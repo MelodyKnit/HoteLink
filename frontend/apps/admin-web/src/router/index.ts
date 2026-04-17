@@ -4,12 +4,19 @@ import { useAuthStore } from '@hotelink/store'
 import AdminLayout from '../layouts/AdminLayout.vue'
 
 let systemInitialized: boolean | null = null
+const INIT_CHECK_TIMEOUT_MS = 5000
+const FETCH_ME_TIMEOUT_MS = 5000
 
 // 检查 Initialized 条件是否满足。
 async function checkInitialized(): Promise<boolean> {
   if (systemInitialized !== null) return systemInitialized
   try {
-    const res = await systemApi.initCheck()
+    const res = await Promise.race([
+      systemApi.initCheck(),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('init-check timeout')), INIT_CHECK_TIMEOUT_MS)
+      }),
+    ])
     systemInitialized = res.code === 0 && res.data?.initialized === true
   } catch {
     systemInitialized = true
@@ -20,6 +27,23 @@ async function checkInitialized(): Promise<boolean> {
 // 重置 InitCache 状态。
 export function resetInitCache() {
   systemInitialized = null
+}
+
+async function waitForUserLoaded(auth: ReturnType<typeof useAuthStore>): Promise<boolean> {
+  if (auth.user) return true
+
+  try {
+    await Promise.race([
+      auth.fetchMe(),
+      new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('fetchMe timeout')), FETCH_ME_TIMEOUT_MS)
+      }),
+    ])
+  } catch {
+    return false
+  }
+
+  return !!auth.user
 }
 
 const router = createRouter({
@@ -54,6 +78,7 @@ const router = createRouter({
         { path: 'reports', name: 'reports', component: () => import('../views/ReportView.vue') },
         { path: 'employees', name: 'employees', component: () => import('../views/EmployeeListView.vue') },
         { path: 'settings', name: 'settings', component: () => import('../views/SettingsView.vue') },
+        { path: 'system-status', name: 'system-status', component: () => import('../views/SystemStatusView.vue') },
         { path: 'ai', name: 'ai', component: () => import('../views/AIAssistantView.vue') },
         { path: 'ai-settings', name: 'ai-settings', component: () => import('../views/AISettingsView.vue') },
         { path: 'ai-logs', name: 'ai-logs', component: () => import('../views/AICallLogsView.vue') },
@@ -93,12 +118,17 @@ router.beforeEach(async (to) => {
   if (token) {
     const auth = useAuthStore()
     if (!auth.user) {
-      await auth.fetchMe()
-      // 验证管理员角色
-      if (auth.user && !auth.isAdmin) {
+      const loaded = await waitForUserLoaded(auth)
+      if (!loaded) {
         auth.logout()
-        return { name: 'login' }
+        return { name: 'login', query: { redirect: to.fullPath } }
       }
+    }
+
+    // 验证管理员角色
+    if (auth.user && !auth.isAdmin) {
+      auth.logout()
+      return { name: 'login' }
     }
   }
 })

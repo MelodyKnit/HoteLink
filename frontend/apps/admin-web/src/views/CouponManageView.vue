@@ -62,8 +62,12 @@
               </span>
             </td>
             <td class="px-4 py-3">
-              <button v-if="tpl.status === 'active'" @click="toggleStatus(tpl, 'inactive')" class="text-xs text-red-500 hover:underline">下架</button>
-              <button v-else @click="toggleStatus(tpl, 'active')" class="text-xs text-brand hover:underline">上架</button>
+              <div class="flex gap-2">
+                <button @click="openEdit(tpl)" class="text-xs text-teal-600 hover:underline">编辑</button>
+                <button v-if="tpl.status === 'active'" @click="toggleStatus(tpl, 'inactive')" class="text-xs text-red-500 hover:underline">下架</button>
+                <button v-else @click="toggleStatus(tpl, 'active')" class="text-xs text-brand hover:underline">上架</button>
+                <button @click="handleDelete(tpl)" class="text-xs text-red-500 hover:underline">删除</button>
+              </div>
             </td>
           </tr>
           <tr v-if="templates.length === 0">
@@ -149,15 +153,100 @@
         </div>
       </div>
     </div>
+
+    <!-- Edit Modal -->
+    <div v-if="showEdit" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40" @click.self="showEdit = false">
+      <div class="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl">
+        <h3 class="mb-4 text-lg font-bold text-gray-800">编辑优惠券</h3>
+        <div class="space-y-3">
+          <div>
+            <label class="mb-1 block text-xs text-gray-500">券名称</label>
+            <input v-model="editFormData.name" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="mb-1 block text-xs text-gray-500">类型</label>
+              <SelectField v-model="editFormData.coupon_type" class="w-full">
+                <option value="cash">满减券</option>
+                <option value="discount">折扣券</option>
+              </SelectField>
+            </div>
+            <div v-if="editFormData.coupon_type === 'cash'">
+              <label class="mb-1 block text-xs text-gray-500">减免金额(¥)</label>
+              <input v-model.number="editFormData.amount" type="number" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
+            </div>
+            <div v-else>
+              <label class="mb-1 block text-xs text-gray-500">折扣(如9=9折)</label>
+              <input v-model.number="editFormData.discount" type="number" step="0.1" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="mb-1 block text-xs text-gray-500">最低消费(¥)</label>
+              <input v-model.number="editFormData.min_amount" type="number" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
+            </div>
+            <div>
+              <label class="mb-1 block text-xs text-gray-500">发行数量</label>
+              <input v-model.number="editFormData.total_count" type="number" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="mb-1 block text-xs text-gray-500">积分成本(0=免费)</label>
+              <input v-model.number="editFormData.points_cost" type="number" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
+            </div>
+            <div>
+              <label class="mb-1 block text-xs text-gray-500">会员等级要求</label>
+              <SelectField v-model="editFormData.required_level" class="w-full">
+                <option value="">不限</option>
+                <option value="silver">銀卡会员</option>
+                <option value="gold">金卡会员</option>
+                <option value="platinum">铂金会员</option>
+                <option value="diamond">钒石会员</option>
+              </SelectField>
+            </div>
+          </div>
+          <div class="grid grid-cols-3 gap-3">
+            <div>
+              <label class="mb-1 block text-xs text-gray-500">有效天数</label>
+              <input v-model.number="editFormData.valid_days" type="number" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
+            </div>
+            <div>
+              <label class="mb-1 block text-xs text-gray-500">活动开始</label>
+              <input v-model="editFormData.valid_start" type="date" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
+            </div>
+            <div>
+              <label class="mb-1 block text-xs text-gray-500">活动结束</label>
+              <input v-model="editFormData.valid_end" type="date" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
+            </div>
+          </div>
+          <div>
+            <label class="mb-1 block text-xs text-gray-500">状态</label>
+            <SelectField v-model="editFormData.status" class="w-full">
+              <option value="active">有效</option>
+              <option value="inactive">下架</option>
+            </SelectField>
+          </div>
+          <div v-if="editError" class="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">{{ editError }}</div>
+        </div>
+        <div class="mt-5 flex justify-end gap-3">
+          <button @click="showEdit = false" class="rounded-lg border border-gray-200 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50">取消</button>
+          <button @click="handleEdit" :disabled="editing" class="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-50">
+            {{ editing ? '保存中...' : '保存' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { adminCouponApi } from '@hotelink/api'
-import { SelectField, useToast } from '@hotelink/ui'
+import { SelectField, useToast, useConfirm } from '@hotelink/ui'
 
 const { showToast } = useToast()
+const { confirm: confirmDialog } = useConfirm()
 
 const templates = ref<any[]>([])
 const showCreate = ref(false)
@@ -186,6 +275,14 @@ const stats = computed(() => {
   const totalClaimed = templates.value.reduce((s: number, t: any) => s + (t.claimed_count || 0), 0)
   return { active, totalIssued, totalClaimed }
 })
+
+function patchTemplateRow(templateId: number, patch: Record<string, unknown>) {
+  templates.value = templates.value.map((item) => (Number(item.id) === templateId ? { ...item, ...patch } : item))
+}
+
+function removeTemplateRow(templateId: number) {
+  templates.value = templates.value.filter((item) => Number(item.id) !== templateId)
+}
 
 const levelLabels: Record<string, string> = {
   '': '不限',
@@ -219,7 +316,12 @@ async function handleCreate() {
     if (res.code === 0) {
       showToast('优惠券创建成功', 'success')
       showCreate.value = false
-      await loadData()
+      const created = res.data as Record<string, unknown> | undefined
+      if (created && typeof created === 'object' && !Array.isArray(created)) {
+        templates.value = [created, ...templates.value]
+      } else {
+        await loadData()
+      }
     } else {
       createError.value = res.message || '创建失败'
       showToast(createError.value, 'error')
@@ -237,12 +339,92 @@ async function toggleStatus(tpl: any, status: string) {
     const res = await adminCouponApi.update({ template_id: tpl.id, status })
     if (res.code === 0) {
       showToast(status === 'active' ? '已上架' : '已下架', 'success')
-      await loadData()
+      patchTemplateRow(tpl.id, { status })
     } else {
       showToast(res.message || '操作失败', 'error')
     }
   } catch {
     showToast('操作失败，请重试', 'error')
+  }
+}
+
+const showEdit = ref(false)
+const editing = ref(false)
+const editError = ref('')
+const editFormData = reactive({
+  template_id: 0,
+  name: '',
+  coupon_type: 'cash',
+  amount: 0,
+  discount: 0,
+  min_amount: 0,
+  total_count: 0,
+  points_cost: 0,
+  required_level: '',
+  valid_days: 0,
+  valid_start: '',
+  valid_end: '',
+  status: 'active',
+  per_user_limit: 1,
+})
+
+function openEdit(tpl: any) {
+  editFormData.template_id = tpl.id
+  editFormData.name = tpl.name || ''
+  editFormData.coupon_type = tpl.coupon_type || 'cash'
+  editFormData.amount = tpl.amount || 0
+  editFormData.discount = tpl.discount || 0
+  editFormData.min_amount = tpl.min_amount || 0
+  editFormData.total_count = tpl.total_count || 0
+  editFormData.points_cost = tpl.points_cost || 0
+  editFormData.required_level = tpl.required_level || ''
+  editFormData.valid_days = tpl.valid_days || 0
+  editFormData.valid_start = tpl.valid_start || ''
+  editFormData.valid_end = tpl.valid_end || ''
+  editFormData.status = tpl.status || 'active'
+  editFormData.per_user_limit = tpl.per_user_limit || 1
+  editError.value = ''
+  showEdit.value = true
+}
+
+async function handleEdit() {
+  editError.value = ''
+  if (!editFormData.name.trim()) { editError.value = '请输入券名称'; return }
+  editing.value = true
+  try {
+    const res = await adminCouponApi.update(editFormData as any)
+    if (res.code === 0) {
+      showToast('优惠券已更新', 'success')
+      showEdit.value = false
+      patchTemplateRow(editFormData.template_id, { ...editFormData })
+    } else {
+      editError.value = res.message || '更新失败'
+      showToast(editError.value, 'error')
+    }
+  } catch {
+    editError.value = '网络错误'
+    showToast('更新失败，请检查网络后重试', 'error')
+  } finally {
+    editing.value = false
+  }
+}
+
+async function handleDelete(tpl: any) {
+  if (tpl.claimed_count > 0) {
+    showToast('该优惠券已有用户领取，无法删除', 'error')
+    return
+  }
+  if (!await confirmDialog(`确定删除优惠券「${tpl.name}」？`, { type: 'danger' })) return
+  try {
+    const res = await adminCouponApi.delete(tpl.id)
+    if (res.code === 0) {
+      showToast('优惠券已删除', 'success')
+      removeTemplateRow(tpl.id)
+    } else {
+      showToast(res.message || '删除失败', 'error')
+    }
+  } catch {
+    showToast('删除失败，请重试', 'error')
   }
 }
 

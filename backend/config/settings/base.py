@@ -63,6 +63,7 @@ INSTALLED_APPS = [
     "corsheaders",
     "rest_framework",
     "rest_framework_simplejwt",
+    "rest_framework_simplejwt.token_blacklist",
     "django_filters",
     "drf_spectacular",
     "django_celery_beat",
@@ -146,6 +147,20 @@ MEDIA_ROOT = BASE_DIR / "media"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+AUTH_PASSWORD_VALIDATORS = [
+    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
+    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
+    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
+    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
+]
+
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "hotelink-default-cache",
+    }
+}
+
 # REST Framework 全局默认配置：使用 JWT 认证、登录用户才能访问、支持过滤和开放 API 文档
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
@@ -158,6 +173,22 @@ REST_FRAMEWORK = {
         "django_filters.rest_framework.DjangoFilterBackend",
     ),
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    "DEFAULT_THROTTLE_CLASSES": (
+        "rest_framework.throttling.AnonRateThrottle",
+        "rest_framework.throttling.UserRateThrottle",
+        "rest_framework.throttling.ScopedRateThrottle",
+    ),
+    "DEFAULT_THROTTLE_RATES": {
+        "anon": os.getenv("API_THROTTLE_ANON", "120/minute"),
+        "user": os.getenv("API_THROTTLE_USER", "300/minute"),
+        "auth_login": os.getenv("API_THROTTLE_AUTH_LOGIN", "5/minute"),
+        "auth_refresh": os.getenv("API_THROTTLE_AUTH_REFRESH", "20/minute"),
+        "auth_logout": os.getenv("API_THROTTLE_AUTH_LOGOUT", "30/minute"),
+        "system_init": os.getenv("API_THROTTLE_SYSTEM_INIT", "3/hour"),
+        "upload": os.getenv("API_THROTTLE_UPLOAD", "20/hour"),
+        "ai_user": os.getenv("API_THROTTLE_AI_USER", "30/hour"),
+        "ai_admin": os.getenv("API_THROTTLE_AI_ADMIN", "60/hour"),
+    },
 }
 
 # JWT token 生命周期配置：Access Token 2小时，Refresh Token 7天（可通过环境变量调整）
@@ -165,6 +196,9 @@ SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=int(os.getenv("JWT_ACCESS_MINUTES", "120"))),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=int(os.getenv("JWT_REFRESH_DAYS", "7"))),
     "AUTH_HEADER_TYPES": ("Bearer",),
+    "ROTATE_REFRESH_TOKENS": get_bool("JWT_ROTATE_REFRESH_TOKENS", True),
+    "BLACKLIST_AFTER_ROTATION": get_bool("JWT_BLACKLIST_AFTER_ROTATION", True),
+    "UPDATE_LAST_LOGIN": True,
 }
 
 SPECTACULAR_SETTINGS = {
@@ -172,6 +206,8 @@ SPECTACULAR_SETTINGS = {
     "DESCRIPTION": "Hotel management system API",
     "VERSION": "1.0.0",
 }
+
+ENABLE_API_DOCS = get_bool("ENABLE_API_DOCS", DEBUG)
 
 # CORS 跨域请求允许配置：开发模式下允许所有来源，生产应配置具体域名
 CORS_ALLOW_ALL_ORIGINS = get_bool("CORS_ALLOW_ALL_ORIGINS", DEBUG)

@@ -48,11 +48,17 @@
         </div>
       </div>
       <DataTable :columns="taskColumns" :rows="tasks" :loading="tasksLoading" :sort-value="taskFilters.ordering" @sort-change="onTaskTableSortChange">
+        <template #col-report_type="{ value }">
+          <span class="text-sm text-slate-700">{{ reportTypeLabel(String(value)) }}</span>
+        </template>
         <template #col-status="{ value }">
           <StatusBadge :label="value === 'success' ? '已完成' : value === 'running' ? '运行中' : value === 'failed' ? '失败' : String(value)" :type="value === 'success' ? 'success' : value === 'failed' ? 'danger' : 'info'" />
         </template>
         <template #col-result_summary="{ value }">
           <span class="line-clamp-2 text-xs text-slate-500">{{ value || '-' }}</span>
+        </template>
+        <template #actions="{ row }">
+          <button class="text-sm text-red-600 hover:underline" @click="handleDeleteTask(row)">删除</button>
         </template>
       </DataTable>
       <Pagination :page="taskPage" :page-size="taskPageSize" :total="taskTotal" class="px-4 pb-4" @change="p => { taskPage = p; loadTasks() }" />
@@ -64,9 +70,9 @@
         <div>
           <label class="mb-1 block text-sm font-medium">报表类型</label>
           <SelectField v-model="form.report_type" required class="w-full">
-            <option value="revenue">营收报表</option>
-            <option value="occupancy">入住率报表</option>
-            <option value="review">评价报表</option>
+            <option value="revenue_summary">营收报表</option>
+            <option value="order_summary">订单报表</option>
+            <option value="review_summary">评价报表</option>
           </SelectField>
         </div>
         <div>
@@ -102,9 +108,10 @@ import { ref, reactive, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import * as echarts from 'echarts'
 import { dashboardApi, reportApi, hotelApi } from '@hotelink/api'
 import { extractApiError } from '@hotelink/utils'
-import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, SelectField, useToast } from '@hotelink/ui'
+import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, SelectField, useToast, useConfirm } from '@hotelink/ui'
 
 const { showToast } = useToast()
+const { confirm: confirmDialog } = useConfirm()
 
 interface HotelOption {
   id: number
@@ -142,7 +149,27 @@ const taskFilters = reactive({ ordering: '-id' })
 const hotels = ref<HotelOption[]>([])
 const showCreate = ref(false)
 const creating = ref(false)
-const form = reactive({ report_type: 'revenue', hotel_id: '' as string | number, start_date: '', end_date: '' })
+const form = reactive({ report_type: 'revenue_summary', hotel_id: '' as string | number, start_date: '', end_date: '' })
+
+const REPORT_TYPE_LABELS: Record<string, string> = {
+  revenue_summary: '营收报表',
+  order_summary: '订单报表',
+  review_summary: '评价报表',
+}
+
+function reportTypeLabel(value: string) {
+  return REPORT_TYPE_LABELS[value] || value || '未知类型'
+}
+
+function prependTaskRow(task: Record<string, unknown>) {
+  tasks.value = [task, ...tasks.value]
+  taskTotal.value += 1
+}
+
+function removeTaskRow(taskId: number) {
+  tasks.value = tasks.value.filter((item) => Number(item.id) !== taskId)
+  taskTotal.value = Math.max(0, taskTotal.value - 1)
+}
 
 function onTaskSortChange() {
   taskPage.value = 1
@@ -227,7 +254,7 @@ async function loadHotels() {
 
 // 打开 Create 相关界面。
 function openCreate() {
-  form.report_type = 'revenue'
+  form.report_type = 'revenue_summary'
   form.hotel_id = ''
   form.start_date = chartStart.value
   form.end_date = chartEnd.value
@@ -237,6 +264,10 @@ function openCreate() {
 // 处理 Create 交互逻辑。
 async function handleCreate() {
   if (creating.value) return
+  if (!REPORT_TYPE_LABELS[form.report_type]) {
+    showToast('请选择正确的报表类型', 'warning')
+    return
+  }
   if (!form.start_date || !form.end_date) {
     showToast('请先选择报表日期范围', 'warning')
     return
@@ -254,7 +285,12 @@ async function handleCreate() {
     if (res.code === 0) {
       showToast('报表任务创建成功', 'success')
       showCreate.value = false
-      loadTasks()
+      const created = res.data as Record<string, unknown> | undefined
+      if (created && typeof created === 'object' && !Array.isArray(created)) {
+        prependTaskRow(created)
+      } else {
+        loadTasks()
+      }
     } else {
       showToast(extractApiError(res, '创建失败，请检查填写内容', {
         report_type: '报表类型',
@@ -267,6 +303,25 @@ async function handleCreate() {
     showToast('创建报表任务失败，请稍后重试', 'error')
   } finally {
     creating.value = false
+  }
+}
+
+async function handleDeleteTask(row: Record<string, unknown>) {
+  if (row.status === 'running') {
+    showToast('运行中的任务不可删除', 'warning')
+    return
+  }
+  if (!await confirmDialog('确定删除该报表任务？', { type: 'danger' })) return
+  try {
+    const res = await reportApi.deleteTask(row.id as number)
+    if (res.code === 0) {
+      showToast('报表任务已删除', 'success')
+      removeTaskRow(row.id as number)
+    } else {
+      showToast(res.message || '删除失败', 'error')
+    }
+  } catch {
+    showToast('删除失败，请重试', 'error')
   }
 }
 

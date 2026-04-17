@@ -357,6 +357,15 @@ async function loadList() {
   }
 }
 
+function patchRoomTypeRow(roomTypeId: number, patch: Record<string, unknown>) {
+  list.value = list.value.map((item) => (Number(item.id) === roomTypeId ? { ...item, ...patch } : item))
+}
+
+function removeRoomTypeRow(roomTypeId: number) {
+  list.value = list.value.filter((item) => Number(item.id) !== roomTypeId)
+  total.value = Math.max(0, total.value - 1)
+}
+
 async function handleSave() {
   if (!validateForm()) {
     showToast(Object.values(formErrors.value).find(Boolean) || '请先完善房型信息', 'warning')
@@ -375,7 +384,17 @@ async function handleSave() {
     if (res.code === 0) {
       showToast(editingId.value ? '房型更新成功' : '房型创建成功', 'success')
       showModal.value = false
-      loadList()
+      const savedRoomType = res.data as Record<string, unknown> | undefined
+      if (savedRoomType && typeof savedRoomType === 'object' && !Array.isArray(savedRoomType)) {
+        if (editingId.value) {
+          patchRoomTypeRow(editingId.value, savedRoomType)
+        } else {
+          list.value = [savedRoomType, ...list.value]
+          total.value += 1
+        }
+      } else {
+        loadList()
+      }
     } else {
       formErrors.value = {
         ...formErrors.value,
@@ -410,7 +429,7 @@ async function handleDelete(row: Record<string, unknown>) {
     const res = await roomTypeApi.delete(row.id as number)
     if (res.code === 0) {
       showToast('房型删除成功', 'success')
-      loadList()
+      removeRoomTypeRow(row.id as number)
     } else {
       showToast(extractApiError(res, '删除失败'), 'error')
     }

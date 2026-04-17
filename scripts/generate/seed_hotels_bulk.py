@@ -58,16 +58,16 @@ def _run_local(args: argparse.Namespace) -> int:
         overwrite=args.overwrite,
         images_dir=args.images_dir,
         seed=args.seed,
+        inventory_days=args.inventory_days,
     )
     return 0
 
 
 def main() -> int:
+    from seed_hotels_bulk_impl import add_arguments
+
     parser = argparse.ArgumentParser(description="Generate hotel seed data for HoteLink")
-    parser.add_argument("--count", type=int, default=300, help="酒店数量，默认 300")
-    parser.add_argument("--overwrite", action="store_true", help="清空原有酒店数据")
-    parser.add_argument("--images-dir", type=str, default="", help="图片目录，默认 dist/images")
-    parser.add_argument("--seed", type=int, default=20260407, help="随机种子")
+    add_arguments(parser)
     parser.add_argument("--use-docker", action="store_true", help="在 Docker 容器中执行")
     args = parser.parse_args()
 
@@ -87,6 +87,7 @@ def main() -> int:
             docker_cmd.append("--overwrite")
         if args.images_dir:
             docker_cmd.extend(["--images-dir", args.images_dir])
+        docker_cmd.extend(["--inventory-days", str(args.inventory_days)])
         print("[seed-hotels] running in docker:", " ".join(docker_cmd))
         return subprocess.call(docker_cmd)
 

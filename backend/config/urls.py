@@ -24,13 +24,17 @@ urlpatterns = [
     path("superadmin/", admin.site.urls),
     # 全部业务 REST API，由 apps/api/urls.py 细分路由
     path("api/v1/", include("apps.api.urls")),
-    # OpenAPI 配置文档（YAML/JSON 格式）下载
-    path("schema/", SpectacularAPIView.as_view(), name="schema"),
-    # Swagger UI: 浏览器可视化地调试 API
-    path("docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),
-    # ReDoc: 更简洁的静态 API 文档页
-    path("redoc/", SpectacularRedocView.as_view(url_name="schema"), name="redoc"),
 ]
+
+if settings.ENABLE_API_DOCS:
+    urlpatterns += [
+        # OpenAPI 配置文档（YAML/JSON 格式）下载
+        path("schema/", SpectacularAPIView.as_view(), name="schema"),
+        # Swagger UI: 浏览器可视化地调试 API
+        path("docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),
+        # ReDoc: 更简洁的静态 API 文档页
+        path("redoc/", SpectacularRedocView.as_view(url_name="schema"), name="redoc"),
+    ]
 
 # 开发模式下启用媒体文件直接服务
 if settings.DEBUG:

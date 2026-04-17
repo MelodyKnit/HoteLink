@@ -18,7 +18,11 @@
               <p class="text-sm font-medium text-gray-800">{{ t.title }}</p>
               <p class="text-xs text-gray-400">{{ t.tax_no || '个人' }}</p>
             </div>
-            <span class="rounded bg-brand/10 px-2 py-0.5 text-xs text-brand">{{ t.type === 'company' ? '企业' : '个人' }}</span>
+            <div class="flex items-center gap-2">
+              <button @click="openEditTitle(t)" class="text-xs text-brand hover:underline">编辑</button>
+              <button @click="handleDeleteTitle(t)" class="text-xs text-red-500 hover:underline">删除</button>
+              <span class="rounded bg-brand/10 px-2 py-0.5 text-xs text-brand">{{ t.type === 'company' ? '企业' : '个人' }}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -132,19 +136,47 @@
         </div>
       </div>
     </Teleport>
+
+    <Teleport to="body">
+      <div v-if="showEditModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" @click.self="showEditModal = false">
+        <div class="w-full max-w-sm rounded-2xl bg-white p-6">
+          <h3 class="text-lg font-bold text-gray-900">编辑发票抬头</h3>
+          <div class="mt-4 space-y-3">
+            <div class="flex gap-4">
+              <label class="flex items-center gap-1 text-sm"><input type="radio" v-model="editTitleForm.invoice_type" value="personal" class="accent-brand" /> 个人</label>
+              <label class="flex items-center gap-1 text-sm"><input type="radio" v-model="editTitleForm.invoice_type" value="company" class="accent-brand" /> 企业</label>
+            </div>
+            <div>
+              <input v-model="editTitleForm.title" placeholder="抬头名称" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
+            </div>
+            <div v-if="editTitleForm.invoice_type === 'company'">
+              <input v-model="editTitleForm.tax_no" placeholder="税号" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
+            </div>
+            <div>
+              <input v-model="editTitleForm.email" placeholder="接收邮箱" type="email" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
+            </div>
+          </div>
+          <div class="mt-4 flex gap-3">
+            <button @click="showEditModal = false" class="flex-1 rounded-xl border py-2.5 text-sm text-gray-600">取消</button>
+            <button @click="handleEditTitle" :disabled="editingTitle" class="flex-1 rounded-xl bg-brand py-2.5 text-sm text-white disabled:opacity-50">保存</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { userInvoiceApi } from '@hotelink/api'
-import { SelectField, useToast } from '@hotelink/ui'
+import { SelectField, useToast, useConfirm } from '@hotelink/ui'
 import { extractApiError, extractApiFieldErrors, isValidEmailAddress, isValidTaxNumber } from '@hotelink/utils'
 
 type TitleField = 'title' | 'tax_no' | 'email'
 type ApplyField = 'order_id' | 'invoice_title_id'
 
 const { showToast } = useToast()
+const { confirm: confirmDialog } = useConfirm()
 
 const titles = ref<any[]>([])
 const invoices = ref<any[]>([])
@@ -313,6 +345,55 @@ async function handleApply() {
     showToast('申请失败，请稍后重试', 'error')
   } finally {
     applying.value = false
+  }
+}
+
+const showEditModal = ref(false)
+const editingTitle = ref(false)
+const editTitleForm = reactive({ title_id: 0, invoice_type: 'personal', title: '', tax_no: '', email: '' })
+
+function openEditTitle(t: any) {
+  editTitleForm.title_id = t.id
+  editTitleForm.invoice_type = t.type === 'company' ? 'company' : 'personal'
+  editTitleForm.title = t.title || ''
+  editTitleForm.tax_no = t.tax_no || ''
+  editTitleForm.email = t.email || ''
+  showEditModal.value = true
+}
+
+async function handleEditTitle() {
+  editingTitle.value = true
+  try {
+    const res = await userInvoiceApi.updateTitle(editTitleForm)
+    if (res.code === 0) {
+      showToast('发票抬头已更新', 'success')
+      showEditModal.value = false
+      const listRes = await userInvoiceApi.list()
+      if (listRes.code === 0 && listRes.data) {
+        titles.value = (listRes.data as any).titles || []
+      }
+    } else {
+      showToast(res.message || '更新失败', 'error')
+    }
+  } catch {
+    showToast('更新失败，请重试', 'error')
+  } finally {
+    editingTitle.value = false
+  }
+}
+
+async function handleDeleteTitle(t: any) {
+  if (!await confirmDialog(`确定删除抬头「${t.title}」？`, { type: 'danger' })) return
+  try {
+    const res = await userInvoiceApi.deleteTitle(t.id)
+    if (res.code === 0) {
+      showToast('发票抬头已删除', 'success')
+      titles.value = titles.value.filter((item: any) => item.id !== t.id)
+    } else {
+      showToast(res.message || '删除失败', 'error')
+    }
+  } catch {
+    showToast('删除失败，请重试', 'error')
   }
 }
 

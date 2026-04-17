@@ -18,7 +18,7 @@ app.use(router);
 
 const auth = useAuthStore();
 if (auth.isLoggedIn) {
-  auth.fetchMe().finally(() => app.mount("#app"));
-} else {
-  app.mount("#app");
+  auth.fetchMe().catch(() => {});
 }
+
+app.mount("#app");

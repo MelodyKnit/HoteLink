@@ -17,11 +17,11 @@
           <div class="mt-3 grid grid-cols-2 gap-3 md:mt-0 md:flex md:gap-4">
             <div>
               <label class="mb-1 block text-xs font-medium text-gray-500">入住日期</label>
-              <input v-model="checkIn" type="date" :min="today" class="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm text-gray-800 outline-none focus:border-brand" />
+              <input v-model="checkIn" type="date" :min="today" class="home-date-input w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-800 outline-none focus:border-brand" />
             </div>
             <div>
               <label class="mb-1 block text-xs font-medium text-gray-500">离店日期</label>
-              <input v-model="checkOut" type="date" :min="checkIn || today" class="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm text-gray-800 outline-none focus:border-brand" />
+              <input v-model="checkOut" type="date" :min="checkIn || today" class="home-date-input w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-800 outline-none focus:border-brand" />
             </div>
           </div>
           <button type="button" @click="handleSearch" class="mt-4 w-full rounded-xl bg-brand px-8 py-3 text-sm font-semibold text-white transition hover:bg-brand-dark md:mt-0 md:w-auto">搜索</button>
@@ -322,3 +322,18 @@ onMounted(async () => {
   }
 })
 </script>
+
+<style scoped>
+.home-date-input {
+  -webkit-appearance: none;
+  appearance: none;
+  background-color: #fff;
+  color-scheme: light;
+}
+
+.home-date-input::-webkit-date-and-time-value,
+.home-date-input::-webkit-datetime-edit,
+.home-date-input::-webkit-datetime-edit-fields-wrapper {
+  background: transparent;
+}
+</style>

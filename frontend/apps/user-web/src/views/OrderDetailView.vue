@@ -32,7 +32,55 @@
       </div>
 
       <!-- Hotel & Room -->
-      <div class="mt-4 rounded-2xl bg-white p-5 shadow-sm">
+      <div
+        v-if="hotelDetailPath"
+        class="mt-4 rounded-2xl bg-white p-5 shadow-sm transition hover:shadow-md cursor-pointer"
+        role="link"
+        tabindex="0"
+        @click="openHotelDetail"
+        @keydown.enter.prevent="openHotelDetail"
+        @keydown.space.prevent="openHotelDetail"
+      >
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <h3 class="truncate font-semibold text-gray-800">{{ order.hotel_name }}</h3>
+            <p class="mt-1 text-sm text-gray-500">{{ order.room_type_name }}</p>
+          </div>
+          <span class="shrink-0 rounded-full bg-brand/10 px-2.5 py-1 text-xs font-medium text-brand">点击查看酒店</span>
+        </div>
+        <div class="mt-3 grid grid-cols-2 gap-3 text-sm text-gray-600">
+          <div>
+            <p class="text-xs text-gray-400">入住日期</p>
+            <p class="font-medium">{{ order.check_in_date }}</p>
+          </div>
+          <div>
+            <p class="text-xs text-gray-400">离店日期</p>
+            <p class="font-medium">{{ order.check_out_date }}</p>
+          </div>
+        </div>
+        <div v-if="order.room_no" class="mt-2 text-sm text-gray-600">
+          <span class="text-xs text-gray-400">房间号：</span>{{ order.room_no }}
+        </div>
+        <div class="mt-4 flex flex-wrap gap-2">
+          <a
+            :href="`tel:${supportPhone}`"
+            @click.stop
+            class="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition hover:border-brand/30 hover:bg-brand/5"
+          >
+            拨打客服电话
+          </a>
+          <button
+            type="button"
+            @click.stop="askAiCustomerService"
+            class="inline-flex h-10 items-center justify-center rounded-xl border border-brand/30 bg-brand/5 px-3 text-sm font-medium text-brand transition hover:bg-brand/10"
+          >
+            询问 AI 客服
+          </button>
+        </div>
+        <p class="mt-3 text-xs text-gray-400">需要取消订单、修改信息或联系酒店时，可直接使用上方入口。</p>
+      </div>
+
+      <div v-else class="mt-4 rounded-2xl bg-white p-5 shadow-sm">
         <h3 class="font-semibold text-gray-800">{{ order.hotel_name }}</h3>
         <p class="mt-1 text-sm text-gray-500">{{ order.room_type_name }}</p>
         <div class="mt-3 grid grid-cols-2 gap-3 text-sm text-gray-600">
@@ -48,6 +96,23 @@
         <div v-if="order.room_no" class="mt-2 text-sm text-gray-600">
           <span class="text-xs text-gray-400">房间号：</span>{{ order.room_no }}
         </div>
+        <div class="mt-4 flex flex-wrap gap-2">
+          <a
+            :href="`tel:${supportPhone}`"
+            @click.stop
+            class="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition hover:border-brand/30 hover:bg-brand/5"
+          >
+            拨打客服电话
+          </a>
+          <button
+            type="button"
+            @click.stop="askAiCustomerService"
+            class="inline-flex h-10 items-center justify-center rounded-xl border border-brand/30 bg-brand/5 px-3 text-sm font-medium text-brand transition hover:bg-brand/10"
+          >
+            询问 AI 客服
+          </button>
+        </div>
+        <p class="mt-3 text-xs text-gray-400">需要取消订单、修改信息或联系酒店时，可直接使用上方入口。</p>
       </div>
 
       <!-- Guest Info -->
@@ -271,6 +336,7 @@ const reviewPointsPreview = computed(() => {
 
 const paymentMethodMap = PAYMENT_METHOD_MAP
 const paymentStatusMap = PAYMENT_STATUS_MAP
+const supportPhone = '4001234567'
 
 // 根据状态值返回对应展示信息。
 function statusLabel(s: string): string { return ORDER_STATUS_MAP[s]?.label || s || '未知' }
@@ -287,6 +353,25 @@ const showActionBar = computed(() => (
   || (order.value.status === 'completed' && !order.value.has_review)
   || showRebook.value
 ))
+
+function openHotelDetail() {
+  if (!hotelDetailPath.value) return
+  router.push(hotelDetailPath.value)
+}
+
+function askAiCustomerService() {
+  const ask = `我想咨询订单 ${order.value.order_no} 的取消和入住相关问题，请帮我看看。`
+  router.push({
+    path: '/ai-chat',
+    query: {
+      ask,
+      source_scene: 'order_detail',
+      intent: 'cancel_order',
+      order_id: String(orderId),
+      hotel_id: String(hotelDetailId.value || ''),
+    },
+  })
+}
 
 // 处理 goToPay 业务流程。
 function goToPay() { router.push(`/payment/${orderId}`) }

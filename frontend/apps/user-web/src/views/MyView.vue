@@ -80,6 +80,7 @@ const memberLevelMap: Record<string, string> = {
 }
 
 const menuItems = [
+  { path: '/my/security', icon: '🔐', label: '账号与安全' },
   { path: '/ai-booking', icon: '🧭', label: 'AI 订房助手' },
   { path: '/ai-chat', icon: '💬', label: 'AI 智能客服' },
   { path: '/my/favorites', icon: '❤️', label: '我的收藏' },

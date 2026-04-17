@@ -171,6 +171,9 @@
               </div>
               <div>
                 <label class="mb-1 block text-sm font-medium">API Key（留空则不修改）</label>
+                <p v-if="isEditing && selectedProviderHasApiKey" class="mb-2 text-xs text-slate-500">
+                  当前密钥已保存，系统不会回显旧值；如需轮换，请直接输入新的 API Key。
+                </p>
                 <div class="relative">
                   <input
                     v-model="form.api_key"
@@ -227,7 +230,6 @@ interface ProviderInfo {
   label: string
   base_url: string
   api_key_configured: boolean
-  api_key?: string
   chat_model: string
   reasoning_model: string
   timeout: number
@@ -240,6 +242,7 @@ const showForm = ref(false)
 const isEditing = ref(false)
 const showApiKey = ref(false)
 const providerActionLoading = ref(false)
+const selectedProviderHasApiKey = ref(false)
 
 const aiEnabled = ref(false)
 const providers = ref<ProviderInfo[]>([])
@@ -321,6 +324,7 @@ async function deleteProvider(name: string) {
 function openAddForm() {
   isEditing.value = false
   showApiKey.value = false
+  selectedProviderHasApiKey.value = false
   showForm.value = true
   Object.assign(form, { name: '', label: '', base_url: '', api_key: '', chat_model: '', reasoning_model: '' })
 }
@@ -328,18 +332,20 @@ function openAddForm() {
 function closeForm() {
   showForm.value = false
   showApiKey.value = false
+  selectedProviderHasApiKey.value = false
 }
 
 // 打开编辑表单
 function openEditForm(p: ProviderInfo) {
   isEditing.value = true
   showApiKey.value = false
+  selectedProviderHasApiKey.value = p.api_key_configured
   showForm.value = true
   Object.assign(form, {
     name: p.name,
     label: p.label,
     base_url: p.base_url,
-    api_key: p.api_key || '',
+    api_key: '',
     chat_model: p.chat_model,
     reasoning_model: p.reasoning_model,
   })
@@ -349,6 +355,7 @@ function openEditForm(p: ProviderInfo) {
 function quickAdd(bp: string) {
   isEditing.value = false
   showApiKey.value = false
+  selectedProviderHasApiKey.value = false
   showForm.value = true
   Object.assign(form, { name: bp, label: bp.charAt(0).toUpperCase() + bp.slice(1), base_url: '', api_key: '', chat_model: '', reasoning_model: '' })
 }

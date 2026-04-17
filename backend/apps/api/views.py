@@ -50,6 +50,7 @@ from django.db import transaction
 from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model
 from django.core.files.storage import default_storage
+from django.core.cache import cache
 from django.http import HttpResponse
 from django.db.models import Avg, Q, Sum
 from django.utils import timezone
@@ -58,7 +59,9 @@ from django.utils.crypto import get_random_string
 from PIL import Image, UnidentifiedImageError
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
+from rest_framework_simplejwt.settings import api_settings as jwt_api_settings
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.api.permissions import IsAdminRole, IsSystemAdminRole, get_user_role
@@ -126,6 +129,9 @@ from apps.api.serializers import (
     RoomTypeSerializer,
     RoomTypeUpdateSerializer,
     SettingsUpdateSerializer,
+    EmployeeUpdateSerializer,
+    AdminUserUpdateSerializer,
+    CouponTemplateEditSerializer,
     SystemNoticeSerializer,
     SystemResetSerializer,
     UploadSerializer,
@@ -356,8 +362,44 @@ def build_tokens_for_user(user: User) -> dict:
         "access_token": str(refresh.access_token),
         "refresh_token": str(refresh),
         "token_type": "Bearer",
-        "expires_in": 60 * 60 * 2,
+        "expires_in": int(settings.SIMPLE_JWT["ACCESS_TOKEN_LIFETIME"].total_seconds()),
     }
+
+
+def build_refresh_response_payload(refresh: RefreshToken) -> dict:
+    """按当前 JWT 策略返回新的 access/refresh token 组合。"""
+    refresh_token_value = str(refresh)
+    if jwt_api_settings.ROTATE_REFRESH_TOKENS:
+        if jwt_api_settings.BLACKLIST_AFTER_ROTATION:
+            try:
+                refresh.blacklist()
+            except Exception:
+                pass
+        refresh.set_jti()
+        refresh.set_exp()
+        refresh.set_iat()
+        try:
+            refresh.outstand()
+        except Exception:
+            pass
+        refresh_token_value = str(refresh)
+    return {
+        "access_token": str(refresh.access_token),
+        "refresh_token": refresh_token_value,
+        "token_type": "Bearer",
+        "expires_in": int(settings.SIMPLE_JWT["ACCESS_TOKEN_LIFETIME"].total_seconds()),
+    }
+
+
+def revoke_refresh_token(raw_token: str | None) -> bool:
+    """将 refresh token 加入黑名单；失败时返回 False。"""
+    if not raw_token:
+        return False
+    try:
+        RefreshToken(raw_token).blacklist()
+        return True
+    except Exception:
+        return False
 
 
 def make_order_no() -> str:
@@ -533,6 +575,29 @@ def get_dict_payload() -> dict:
     """返回系统内置字典数据，包括酒店星级、支付方式、床型等列举选项。"""
     return {
         "hotel_star": [{"label": f"{i} 星", "value": i} for i in [2, 3, 4, 5]],
+        "hotel_type": [
+            {"label": "酒店", "value": "hotel"},
+            {"label": "民宿", "value": "homestay"},
+            {"label": "短租", "value": "short_rent"},
+        ],
+        "hotel_facility": [
+            {"label": "WiFi", "value": "wifi"},
+            {"label": "停车场", "value": "parking"},
+            {"label": "泳池", "value": "pool"},
+            {"label": "健身房", "value": "gym"},
+            {"label": "餐厅", "value": "restaurant"},
+            {"label": "空调", "value": "air_conditioning"},
+            {"label": "电梯", "value": "elevator"},
+            {"label": "洗衣服务", "value": "laundry"},
+            {"label": "行李寄存", "value": "luggage_storage"},
+            {"label": "24小时前台", "value": "front_desk_24h"},
+            {"label": "接机服务", "value": "airport_shuttle"},
+            {"label": "会议室", "value": "meeting_room"},
+            {"label": "无烟房", "value": "non_smoking"},
+            {"label": "宠物友好", "value": "pet_friendly"},
+            {"label": "厨房", "value": "kitchen"},
+            {"label": "洗衣机", "value": "washing_machine"},
+        ],
         "payment_method": [
             {"label": "模拟支付", "value": "mock"},
             {"label": "微信支付", "value": "wechat"},
@@ -602,6 +667,8 @@ class SystemInitSetupView(APIView):
     """系统首次初始化：创建首个系统管理员并返回登录令牌。"""
     """首次初始化：创建管理员账号（仅当系统中无管理员时可用）"""
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "system_init"
 
     def post(self, request):
         has_admin = UserProfile.objects.filter(role=UserProfile.ROLE_SYSTEM_ADMIN).exists()
@@ -641,6 +708,8 @@ class SystemInitSetupView(APIView):
 class BaseLoginView(APIView):
     """通用登录基类：完成用户名密码校验、角色限制和 JWT 发放。"""
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "auth_login"
     required_roles: set[str] | None = None
 
     def post(self, request):
@@ -690,6 +759,8 @@ class AdminLoginView(BaseLoginView):
 class RefreshTokenApiView(APIView):
     """刷新 Access Token 接口：使用 refresh_token 续期登录态。"""
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "auth_refresh"
 
     def post(self, request):
         refresh_token = request.data.get("refresh_token")
@@ -697,22 +768,21 @@ class RefreshTokenApiView(APIView):
             return api_response(code=4002, message="缺少 refresh_token", data=None, status_code=400)
         try:
             refresh = RefreshToken(refresh_token)
-            return api_response(
-                data={
-                    "access_token": str(refresh.access_token),
-                    "token_type": "Bearer",
-                }
-            )
+            return api_response(data=build_refresh_response_payload(refresh))
         except Exception:
             return api_response(code=4011, message="Token 无效", data=None, status_code=401)
 
 
 class LogoutApiView(APIView):
-    """退出登录接口（无状态 JWT 场景下返回前端确认结果）。"""
+    """退出登录接口：尽量回收 refresh token，缩短被盗令牌可被滥用的窗口。"""
     permission_classes = [IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "auth_logout"
 
     def post(self, request):
-        return api_response(data={"logged_out": True})
+        refresh_token = request.data.get("refresh_token")
+        revoked = revoke_refresh_token(refresh_token)
+        return api_response(data={"logged_out": True, "refresh_revoked": revoked})
 
 
 class UserAuthMeView(APIView):
@@ -753,6 +823,8 @@ class CommonUploadView(APIView):
     """通用文件上传接口：按业务场景保存文件并返回可访问 URL。"""
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "upload"
 
     def post(self, request):
         serializer = UploadSerializer(data=request.data)
@@ -852,6 +924,8 @@ class PublicHotelsView(APIView):
         keyword = request.query_params.get("keyword")
         city = request.query_params.get("city")
         star = request.query_params.get("star")
+        hotel_type = request.query_params.get("type")
+        facilities = request.query_params.get("facilities")
         min_price = request.query_params.get("min_price")
         max_price = request.query_params.get("max_price")
         sort = request.query_params.get("sort", "default")
@@ -862,6 +936,11 @@ class PublicHotelsView(APIView):
             queryset = queryset.filter(city=city)
         if star:
             queryset = queryset.filter(star=star)
+        if hotel_type and hotel_type in {Hotel.TYPE_HOTEL, Hotel.TYPE_HOMESTAY, Hotel.TYPE_SHORT_RENT}:
+            queryset = queryset.filter(type=hotel_type)
+        if facilities:
+            for fac in [f.strip() for f in facilities.split(",") if f.strip()]:
+                queryset = queryset.filter(facilities__contains=fac)
         if min_price:
             queryset = queryset.filter(min_price__gte=min_price)
         if max_price:
@@ -1237,68 +1316,70 @@ class UserOrdersCreateView(APIView):
         member_discounted = (original_amount * member_discount_rate).quantize(Decimal("0.01"))
         member_discount_amount = original_amount - member_discounted
 
-        # 2. 优惠券
+        # 2. 优惠券：在事务内加行锁，防止同一张券被并发订单同时核销
         coupon_discount_amount = Decimal("0.00")
         coupon_obj = None
         coupon_id = data.get("coupon_id")
-        if coupon_id:
-            from django.utils import timezone as tz
-            today = tz.localdate()
-            coupon_obj = UserCoupon.objects.filter(
-                id=coupon_id, user=request.user, status=UserCoupon.STATUS_UNUSED,
-                valid_start__lte=today, valid_end__gte=today,
-            ).first()
-            if not coupon_obj:
-                return api_response(code=4001, message="优惠券不可用", data=None, status_code=400)
-            if coupon_obj.min_amount and member_discounted < coupon_obj.min_amount:
-                return api_response(code=4001, message=f"未满足优惠券最低消费 ¥{coupon_obj.min_amount}", data=None, status_code=400)
-            if coupon_obj.coupon_type == UserCoupon.TYPE_CASH:
-                coupon_discount_amount = min(coupon_obj.amount, member_discounted)
-            elif coupon_obj.coupon_type == UserCoupon.TYPE_DISCOUNT:
-                coupon_discount_amount = (member_discounted * (Decimal("1") - coupon_obj.discount / Decimal("10"))).quantize(Decimal("0.01"))
 
-        total_discount = member_discount_amount + coupon_discount_amount
-        pay_amount = max(original_amount - total_discount, Decimal("0.00"))
+        with transaction.atomic():
+            if coupon_id:
+                from django.utils import timezone as tz
+                today = tz.localdate()
+                coupon_obj = UserCoupon.objects.select_for_update().filter(
+                    id=coupon_id, user=request.user, status=UserCoupon.STATUS_UNUSED,
+                    valid_start__lte=today, valid_end__gte=today,
+                ).first()
+                if not coupon_obj:
+                    return api_response(code=4001, message="优惠券不可用", data=None, status_code=400)
+                if coupon_obj.min_amount and member_discounted < coupon_obj.min_amount:
+                    return api_response(code=4001, message=f"未满足优惠券最低消费 ¥{coupon_obj.min_amount}", data=None, status_code=400)
+                if coupon_obj.coupon_type == UserCoupon.TYPE_CASH:
+                    coupon_discount_amount = min(coupon_obj.amount, member_discounted)
+                elif coupon_obj.coupon_type == UserCoupon.TYPE_DISCOUNT:
+                    coupon_discount_amount = (member_discounted * (Decimal("1") - coupon_obj.discount / Decimal("10"))).quantize(Decimal("0.01"))
 
-        order = BookingOrder.objects.create(
-            user=request.user,
-            hotel=hotel,
-            room_type=room_type,
-            order_no=make_order_no(),
-            check_in_date=data["check_in_date"],
-            check_out_date=data["check_out_date"],
-            guest_name=data["guest_name"],
-            guest_mobile=data["guest_mobile"],
-            guest_count=data["guest_count"],
-            remark=data.get("remark", ""),
-            original_amount=original_amount,
-            member_discount_amount=member_discount_amount,
-            coupon_discount_amount=coupon_discount_amount,
-            discount_amount=total_discount,
-            pay_amount=pay_amount,
-            coupon=coupon_obj,
-        )
+            total_discount = member_discount_amount + coupon_discount_amount
+            pay_amount = max(original_amount - total_discount, Decimal("0.00"))
 
-        # 核销优惠券
-        if coupon_obj:
-            coupon_obj.status = UserCoupon.STATUS_USED
-            coupon_obj.used_order = order
-            coupon_obj.used_at = timezone.now()
-            coupon_obj.save(update_fields=["status", "used_order", "used_at"])
+            order = BookingOrder.objects.create(
+                user=request.user,
+                hotel=hotel,
+                room_type=room_type,
+                order_no=make_order_no(),
+                check_in_date=data["check_in_date"],
+                check_out_date=data["check_out_date"],
+                guest_name=data["guest_name"],
+                guest_mobile=data["guest_mobile"],
+                guest_count=data["guest_count"],
+                remark=data.get("remark", ""),
+                original_amount=original_amount,
+                member_discount_amount=member_discount_amount,
+                coupon_discount_amount=coupon_discount_amount,
+                discount_amount=total_discount,
+                pay_amount=pay_amount,
+                coupon=coupon_obj,
+            )
+
+            # 核销优惠券
+            if coupon_obj:
+                coupon_obj.status = UserCoupon.STATUS_USED
+                coupon_obj.used_order = order
+                coupon_obj.used_at = timezone.now()
+                coupon_obj.save(update_fields=["status", "used_order", "used_at"])
+
+            # 自动取消未支付订单（提交后触发，避免事务未提交时 Celery 已执行）
+            cancel_minutes = PlatformConfig.load().order_auto_cancel_minutes
+            from apps.bookings.tasks import auto_cancel_unpaid_order
+            transaction.on_commit(
+                lambda: auto_cancel_unpaid_order.apply_async(args=[order.id], countdown=cancel_minutes * 60)
+            )
 
         SystemNotice.objects.create(
             user=request.user,
             notice_type=SystemNotice.TYPE_ORDER,
             title="订单创建成功",
-            content=f"订单 {order.order_no} 已创建，请在{PlatformConfig.load().order_auto_cancel_minutes}分钟内完成支付，逾期将自动取消。",
+            content=f"订单 {order.order_no} 已创建，请在{cancel_minutes}分钟内完成支付，逾期将自动取消。",
             related_order=order,
-        )
-
-        # 自动取消未支付订单
-        cancel_minutes = PlatformConfig.load().order_auto_cancel_minutes
-        from apps.bookings.tasks import auto_cancel_unpaid_order
-        transaction.on_commit(
-            lambda: auto_cancel_unpaid_order.apply_async(args=[order.id], countdown=cancel_minutes * 60)
         )
 
         return api_response(
@@ -1344,45 +1425,43 @@ class UserOrdersPayView(APIView):
         if not serializer.is_valid():
             return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         data = serializer.validated_data
-        order = BookingOrder.objects.filter(id=data["order_id"], user=request.user).first()
-        if not order:
-            return api_response(code=4040, message="订单不存在", data=None, status_code=404)
-        if order.payment_status == BookingOrder.PAYMENT_PAID:
-            return api_response(code=4093, message="订单已支付", data=None, status_code=409)
-        if order.status != BookingOrder.STATUS_PENDING_PAYMENT:
-            return api_response(code=4093, message="当前订单状态不允许支付", data=None, status_code=409)
 
+        from apps.bookings.tasks import cancel_timeout_unpaid_order
         cancel_minutes = PlatformConfig.load().order_auto_cancel_minutes
-        timeout_deadline = order.created_at + timedelta(minutes=cancel_minutes)
-        if timezone.now() >= timeout_deadline:
-            from apps.bookings.tasks import cancel_timeout_unpaid_order
 
-            with transaction.atomic():
-                locked_order = BookingOrder.objects.select_for_update().filter(id=order.id, user=request.user).first()
-                if not locked_order:
-                    return api_response(code=4040, message="订单不存在", data=None, status_code=404)
-                cancelled = cancel_timeout_unpaid_order(locked_order, cancel_minutes=cancel_minutes)
-            if cancelled:
-                return api_response(code=4093, message="订单已超时未支付，已自动取消，请重新下单", data=None, status_code=409)
-            # 若并发窗口内已被他人支付/取消，统一返回状态冲突
-            return api_response(code=4093, message="当前订单状态不允许支付", data=None, status_code=409)
+        # 使用行锁确保同一订单的支付操作原子性，防止并发重复支付
+        with transaction.atomic():
+            order = BookingOrder.objects.select_for_update().filter(id=data["order_id"], user=request.user).first()
+            if not order:
+                return api_response(code=4040, message="订单不存在", data=None, status_code=404)
+            if order.payment_status == BookingOrder.PAYMENT_PAID:
+                return api_response(code=4093, message="订单已支付", data=None, status_code=409)
+            if order.status != BookingOrder.STATUS_PENDING_PAYMENT:
+                return api_response(code=4093, message="当前订单状态不允许支付", data=None, status_code=409)
 
-        payment = PaymentRecord.objects.create(
-            order=order,
-            payment_no=make_payment_no(),
-            method=data["payment_method"],
-            status=PaymentRecord.STATUS_PAID,
-            amount=order.pay_amount,
-            paid_at=timezone.now(),
-        )
-        paid_at = payment.paid_at or timezone.now()
-        order.payment_status = BookingOrder.PAYMENT_PAID
-        order.status = BookingOrder.STATUS_PAID
-        if not order.paid_at:
-            order.paid_at = paid_at
-        order.save(update_fields=["payment_status", "status", "paid_at", "updated_at"])
+            timeout_deadline = order.created_at + timedelta(minutes=cancel_minutes)
+            if timezone.now() >= timeout_deadline:
+                cancelled = cancel_timeout_unpaid_order(order, cancel_minutes=cancel_minutes)
+                if cancelled:
+                    return api_response(code=4093, message="订单已超时未支付，已自动取消，请重新下单", data=None, status_code=409)
+                return api_response(code=4093, message="当前订单状态不允许支付", data=None, status_code=409)
 
-        # 支付成功后奖励积分：每消费10元=1积分 × 会员倍率
+            payment = PaymentRecord.objects.create(
+                order=order,
+                payment_no=make_payment_no(),
+                method=data["payment_method"],
+                status=PaymentRecord.STATUS_PAID,
+                amount=order.pay_amount,
+                paid_at=timezone.now(),
+            )
+            paid_at = payment.paid_at or timezone.now()
+            order.payment_status = BookingOrder.PAYMENT_PAID
+            order.status = BookingOrder.STATUS_PAID
+            if not order.paid_at:
+                order.paid_at = paid_at
+            order.save(update_fields=["payment_status", "status", "paid_at", "updated_at"])
+
+        # 支付成功后奖励积分：每消费10元=1积分 × 会员倍率（事务外，不影响支付原子性）
         profile = ensure_profile(request.user)
         base_points = int(order.pay_amount / Decimal("10"))
         earned_points = max(1, int(base_points * Decimal(str(profile.points_multiplier))))
@@ -1738,13 +1817,54 @@ class UserInvoiceApplyView(APIView):
         title = InvoiceTitle.objects.filter(id=data["invoice_title_id"], user=request.user).first()
         if not order or not title:
             return api_response(code=4040, message="订单或发票抬头不存在", data=None, status_code=404)
+        if InvoiceRequest.objects.filter(order=order).exists():
+            return api_response(code=4090, message="该订单已存在发票申请，请勿重复提交", data=None, status_code=409)
         invoice_request = InvoiceRequest.objects.create(order=order, invoice_title=title)
         return api_response(data=InvoiceRequestSerializer(invoice_request).data)
+
+
+class UserInvoiceTitleUpdateView(APIView):
+    """用户编辑发票抬头接口。"""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        title_id = request.data.get("title_id")
+        if not title_id:
+            return api_response(code=4001, message="缺少 title_id 参数", data=None, status_code=400)
+        title = InvoiceTitle.objects.filter(id=title_id, user=request.user).first()
+        if not title:
+            return api_response(code=4040, message="发票抬头不存在", data=None, status_code=404)
+        serializer = InvoiceTitleCreateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
+        for field, value in serializer.validated_data.items():
+            setattr(title, field, value)
+        title.save()
+        return api_response(data=InvoiceTitleSerializer(title).data)
+
+
+class UserInvoiceTitleDeleteView(APIView):
+    """用户删除发票抬头接口。"""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        title_id = request.data.get("title_id")
+        if not title_id:
+            return api_response(code=4001, message="缺少 title_id 参数", data=None, status_code=400)
+        title = InvoiceTitle.objects.filter(id=title_id, user=request.user).first()
+        if not title:
+            return api_response(code=4040, message="发票抬头不存在", data=None, status_code=404)
+        if InvoiceRequest.objects.filter(invoice_title=title).exists():
+            return api_response(code=4091, message="该抬头已有关联开票记录，无法删除", data=None, status_code=409)
+        title.delete()
+        return api_response(data={"title_id": title_id, "deleted": True})
 
 
 class UserAIChatView(APIView):
     """用户 AI 客服接口：优先调用模型服务，失败时返回兜底文案。"""
     permission_classes = [IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "ai_user"
 
     def post(self, request):
         serializer = AIChatSerializer(data=request.data)
@@ -1761,6 +1881,7 @@ class UserAIChatView(APIView):
                 hotel_id=data.get("hotel_id"),
                 order_id=data.get("order_id"),
                 booking_context=data.get("booking_context"),
+                conversation_summary=data.get("conversation_summary") or "",
             )
         except PromptSceneError as exc:
             return api_response(code=4002, message=str(exc), data=None, status_code=400)
@@ -1795,6 +1916,8 @@ class UserAIChatView(APIView):
 class UserAIChatStreamView(APIView):
     """用户 AI 客服流式接口：以 SSE 格式逐 token 推送回复内容。"""
     permission_classes = [IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "ai_user"
 
     def post(self, request):
         import json
@@ -1814,6 +1937,7 @@ class UserAIChatStreamView(APIView):
                 hotel_id=data.get("hotel_id"),
                 order_id=data.get("order_id"),
                 booking_context=data.get("booking_context"),
+                conversation_summary=data.get("conversation_summary") or "",
             )
         except PromptSceneError as exc:
             return api_response(code=4002, message=str(exc), data=None, status_code=400)
@@ -1915,19 +2039,21 @@ class AdminHotelsView(APIView):
     """酒店管理接口：列表查询、创建、更新（hotel_admin 可操作），删除（仅 system_admin）。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
 
-    _HOTEL_ORDERING_WHITELIST = {"id", "-id", "name", "-name", "city", "-city", "star", "-star", "min_price", "-min_price"}
+    _HOTEL_ORDERING_WHITELIST = {"id", "-id", "name", "-name", "city", "-city", "star", "-star", "min_price", "-min_price", "type", "-type"}
 
     def get(self, request):
         queryset = Hotel.objects.all()
-        keyword = request.query_params.get("keyword")
-        status = request.query_params.get("status")
-        thumb_mode = request.query_params.get("thumb_mode")
-        thumb_width, thumb_height = get_thumb_size_by_mode(thumb_mode)
-        ordering = request.query_params.get("ordering", "-id")
+        keyword = (request.query_params.get("keyword") or "").strip()
+        status = (request.query_params.get("status") or "").strip()
+        hotel_type = (request.query_params.get("type") or "").strip()
+        ordering = (request.query_params.get("ordering") or "-id").strip() or "-id"
+        thumb_width, thumb_height = parse_thumb_params(request)
         if keyword:
             queryset = queryset.filter(Q(name__icontains=keyword) | Q(address__icontains=keyword))
         if status:
             queryset = queryset.filter(status=status)
+        if hotel_type and hotel_type in {Hotel.TYPE_HOTEL, Hotel.TYPE_HOMESTAY, Hotel.TYPE_SHORT_RENT}:
+            queryset = queryset.filter(type=hotel_type)
         if ordering not in self._HOTEL_ORDERING_WHITELIST:
             ordering = "-id"
         queryset = queryset.order_by(ordering)
@@ -2001,10 +2127,37 @@ class AdminHotelsView(APIView):
         if get_user_role(request.user) != "system_admin":
             return api_response(code=4030, message="仅系统管理员可以删除酒店", data=None, status_code=403)
         hotel_id = request.data.get("hotel_id")
-        deleted, _ = Hotel.objects.filter(pk=hotel_id).delete()
-        if not deleted:
+        if not Hotel.objects.filter(pk=hotel_id).exists():
             return api_response(code=4040, message="酒店不存在", data=None, status_code=404)
+        active_orders = BookingOrder.objects.filter(
+            hotel_id=hotel_id
+        ).exclude(
+            status__in=[BookingOrder.STATUS_CANCELLED, BookingOrder.STATUS_COMPLETED, BookingOrder.STATUS_REFUNDED]
+        ).exists()
+        if active_orders:
+            return api_response(code=4091, message="该酒店存在未完结订单，无法删除", data=None, status_code=409)
+        Hotel.objects.filter(pk=hotel_id).delete()
         return api_response(data={"hotel_id": hotel_id, "deleted": True})
+
+
+class AdminHotelsBatchUpdateView(APIView):
+    """酒店批量更新接口：批量修改酒店类型等属性。"""
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def post(self, request):
+        hotel_ids = request.data.get("hotel_ids", [])
+        if not isinstance(hotel_ids, list) or not hotel_ids:
+            return api_response(code=4001, message="hotel_ids 不能为空", data=None, status_code=400)
+        updates = {}
+        hotel_type = request.data.get("type")
+        if hotel_type:
+            if hotel_type not in {Hotel.TYPE_HOTEL, Hotel.TYPE_HOMESTAY, Hotel.TYPE_SHORT_RENT}:
+                return api_response(code=4001, message="无效的酒店类型", data=None, status_code=400)
+            updates["type"] = hotel_type
+        if not updates:
+            return api_response(code=4001, message="未指定任何更新字段", data=None, status_code=400)
+        count = Hotel.objects.filter(pk__in=hotel_ids).update(**updates)
+        return api_response(data={"updated_count": count})
 
 
 class AdminRoomTypesView(APIView):
@@ -2098,9 +2251,16 @@ class AdminRoomTypesView(APIView):
             room_type.save()
             return api_response(data=RoomTypeSerializer(room_type).data)
         room_type_id = request.data.get("room_type_id")
-        deleted, _ = RoomType.objects.filter(pk=room_type_id).delete()
-        if not deleted:
+        if not RoomType.objects.filter(pk=room_type_id).exists():
             return api_response(code=4040, message="房型不存在", data=None, status_code=404)
+        active_orders = BookingOrder.objects.filter(
+            room_type_id=room_type_id
+        ).exclude(
+            status__in=[BookingOrder.STATUS_CANCELLED, BookingOrder.STATUS_COMPLETED, BookingOrder.STATUS_REFUNDED]
+        ).exists()
+        if active_orders:
+            return api_response(code=4091, message="该房型存在未完结订单，无法删除", data=None, status_code=409)
+        RoomType.objects.filter(pk=room_type_id).delete()
         return api_response(data={"room_type_id": room_type_id, "deleted": True})
 
 
@@ -2235,6 +2395,7 @@ class AdminOrdersChangeStatusView(APIView):
         if not order:
             return api_response(code=4040, message="订单不存在", data=None, status_code=404)
         target_status = serializer.validated_data["target_status"]
+        operator_remark = (serializer.validated_data.get("operator_remark", "") or "").strip()
         today = timezone.localdate()
 
         closed_statuses = {
@@ -2246,6 +2407,8 @@ class AdminOrdersChangeStatusView(APIView):
             return api_response(code=4093, message="当前订单已关闭，无法再变更状态", data=None, status_code=409)
         if target_status == BookingOrder.STATUS_PENDING_PAYMENT:
             return api_response(code=4093, message="不支持手动回退为待支付状态", data=None, status_code=409)
+        if target_status == BookingOrder.STATUS_CANCELLED and order.status in {BookingOrder.STATUS_CHECKED_IN, BookingOrder.STATUS_COMPLETED, BookingOrder.STATUS_CANCELLED, BookingOrder.STATUS_REFUNDED}:
+            return api_response(code=4093, message="当前订单状态不允许取消", data=None, status_code=409)
 
         if target_status == BookingOrder.STATUS_CONFIRMED and order.status != BookingOrder.STATUS_PAID:
             return api_response(code=4093, message="仅已支付订单可确认", data=None, status_code=409)
@@ -2286,6 +2449,10 @@ class AdminOrdersChangeStatusView(APIView):
         if target_status == BookingOrder.STATUS_CANCELLED and not order.cancelled_at:
             order.cancelled_at = now
             update_fields.append("cancelled_at")
+        if target_status == BookingOrder.STATUS_CANCELLED and operator_remark:
+            note = f"人工取消订单：{operator_remark}"
+            if append_order_operator_remark(order, note):
+                update_fields.append("operator_remark")
         if should_mark_direct_complete:
             note = f"系统提示：离店日 {order.check_out_date} 已过，人工直接完结（未登记入住）"
             if append_order_operator_remark(order, note):
@@ -2548,20 +2715,121 @@ class AdminEmployeesView(APIView):
         return api_response(data=UserProfileSerializer(profile).data)
 
 
+class AdminEmployeeUpdateView(APIView):
+    """管理员编辑员工接口（仅 system_admin）。"""
+    permission_classes = [IsAuthenticated, IsSystemAdminRole]
+
+    def post(self, request):
+        serializer = EmployeeUpdateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
+        data = serializer.validated_data
+        profile = UserProfile.objects.filter(user_id=data["user_id"]).first()
+        if not profile:
+            return api_response(code=4040, message="员工不存在", data=None, status_code=404)
+        if profile.role == UserProfile.ROLE_SYSTEM_ADMIN and "role" in data and data["role"] != UserProfile.ROLE_SYSTEM_ADMIN:
+            return api_response(code=4030, message="不能修改系统管理员的角色", data=None, status_code=403)
+        for field in ("nickname", "mobile", "role"):
+            if field in data:
+                setattr(profile, field, data[field])
+        profile.save(update_fields=["nickname", "mobile", "role", "updated_at"])
+        return api_response(data=UserProfileSerializer(profile).data)
+
+
+class AdminEmployeeChangeStatusView(APIView):
+    """管理员启用/禁用员工接口（仅 system_admin）。"""
+    permission_classes = [IsAuthenticated, IsSystemAdminRole]
+
+    def post(self, request):
+        serializer = ChangeUserStatusSerializer(data=request.data)
+        if not serializer.is_valid():
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
+        profile = UserProfile.objects.filter(user_id=serializer.validated_data["user_id"]).first()
+        if not profile:
+            return api_response(code=4040, message="员工不存在", data=None, status_code=404)
+        if profile.role == UserProfile.ROLE_SYSTEM_ADMIN:
+            return api_response(code=4030, message="不能禁用系统管理员", data=None, status_code=403)
+        profile.status = serializer.validated_data["status"]
+        profile.save(update_fields=["status", "updated_at"])
+        return api_response(data={"user_id": profile.user_id, "status": profile.status})
+
+
+class AdminEmployeeResetPasswordView(APIView):
+    """管理员重置员工密码接口（仅 system_admin）。"""
+    permission_classes = [IsAuthenticated, IsSystemAdminRole]
+
+    DEFAULT_PASSWORD = "Abc123456"
+
+    def post(self, request):
+        user_id = request.data.get("user_id")
+        if not user_id:
+            return api_response(code=4001, message="缺少 user_id 参数", data=None, status_code=400)
+        profile = UserProfile.objects.select_related("user").filter(user_id=user_id).first()
+        if not profile:
+            return api_response(code=4040, message="员工不存在", data=None, status_code=404)
+        if profile.role == UserProfile.ROLE_SYSTEM_ADMIN:
+            return api_response(code=4030, message="不能重置系统管理员密码", data=None, status_code=403)
+        profile.user.set_password(self.DEFAULT_PASSWORD)
+        profile.user.save(update_fields=["password"])
+        return api_response(data={"user_id": user_id, "message": "密码已重置为默认密码"})
+
+
+class AdminUserUpdateView(APIView):
+    """管理端编辑用户信息接口（仅 system_admin）。"""
+    permission_classes = [IsAuthenticated, IsSystemAdminRole]
+
+    def post(self, request):
+        serializer = AdminUserUpdateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
+        data = serializer.validated_data
+        profile = UserProfile.objects.filter(user_id=data["user_id"]).first()
+        if not profile:
+            return api_response(code=4040, message="用户不存在", data=None, status_code=404)
+        for field in ("nickname", "mobile", "member_level"):
+            if field in data:
+                setattr(profile, field, data[field])
+        profile.save(update_fields=["nickname", "mobile", "member_level", "updated_at"])
+        return api_response(data=UserProfileSerializer(profile).data)
+
+
+class AdminUserResetPasswordView(APIView):
+    """管理端重置用户密码接口（仅 system_admin）。"""
+    permission_classes = [IsAuthenticated, IsSystemAdminRole]
+
+    DEFAULT_PASSWORD = "Abc123456"
+
+    def post(self, request):
+        user_id = request.data.get("user_id")
+        if not user_id:
+            return api_response(code=4001, message="缺少 user_id 参数", data=None, status_code=400)
+        user = User.objects.filter(pk=user_id).first()
+        if not user:
+            return api_response(code=4040, message="用户不存在", data=None, status_code=404)
+        user.set_password(self.DEFAULT_PASSWORD)
+        user.save(update_fields=["password"])
+        return api_response(data={"user_id": user_id, "message": "密码已重置为默认密码"})
+
+
 class AdminSettingsView(APIView):
     """平台设置接口：读取（hotel_admin 可操作），更新（仅 system_admin）。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
 
+    @staticmethod
+    def _serialize_config(cfg: PlatformConfig) -> dict:
+        return {
+            "platform_name": cfg.platform_name,
+            "admin_name": cfg.admin_name,
+            "support_phone": cfg.support_phone,
+            "support_email": cfg.support_email,
+            "business_hours": cfg.business_hours,
+            "platform_notice": cfg.platform_notice,
+            "order_auto_cancel_minutes": cfg.order_auto_cancel_minutes,
+        }
+
     def get(self, request):
         cfg = PlatformConfig.load()
-        return api_response(
-            data={
-                "platform_name": cfg.platform_name,
-                "admin_name": cfg.admin_name,
-                "support_phone": cfg.support_phone,
-                "order_auto_cancel_minutes": cfg.order_auto_cancel_minutes,
-            }
-        )
+        return api_response(data=self._serialize_config(cfg))
 
     def post(self, request):
         if get_user_role(request.user) != "system_admin":
@@ -2571,23 +2839,21 @@ class AdminSettingsView(APIView):
             return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         cfg = PlatformConfig.load()
         data = serializer.validated_data
-        for field in ("platform_name", "admin_name", "support_phone", "order_auto_cancel_minutes"):
+        for field in ("platform_name", "admin_name", "support_phone", "support_email", "business_hours", "platform_notice", "order_auto_cancel_minutes"):
             if field in data:
                 setattr(cfg, field, data[field])
         cfg.save()
-        return api_response(data={
-            "platform_name": cfg.platform_name,
-            "admin_name": cfg.admin_name,
-            "support_phone": cfg.support_phone,
-            "order_auto_cancel_minutes": cfg.order_auto_cancel_minutes,
-        })
+        return api_response(data=self._serialize_config(cfg))
 
 
 class AdminSystemStatusView(APIView):
     """系统运行状态接口：CPU/内存/磁盘/数据库统计/服务连通性/进程运行时间。"""
-    permission_classes = [IsAuthenticated, IsAdminRole]
+    permission_classes = [IsAuthenticated, IsSystemAdminRole]
 
-    def get(self, request):
+    cache_key = "admin.system.status.v1"
+
+    @staticmethod
+    def _build_payload() -> dict:
         import os
         import platform
         import shutil
@@ -2599,13 +2865,12 @@ class AdminSystemStatusView(APIView):
 
         process_start = time.time()
 
-        # 基本系统信息
         uname = platform.uname()
         uptime_seconds = None
         if os.path.exists('/proc/uptime'):
-            uptime_seconds = int(float(open('/proc/uptime').read().split()[0]))
+            with open('/proc/uptime') as uptime_file:
+                uptime_seconds = int(float(uptime_file.read().split()[0]))
 
-        # 磁盘
         disk = shutil.disk_usage('/')
         disk_info = {
             "total_gb": round(disk.total / (1024 ** 3), 2),
@@ -2614,7 +2879,6 @@ class AdminSystemStatusView(APIView):
             "usage_percent": round(disk.used / disk.total * 100, 1),
         }
 
-        # 内存
         mem_info = None
         if os.path.exists('/proc/meminfo'):
             meminfo = {}
@@ -2633,7 +2897,6 @@ class AdminSystemStatusView(APIView):
                 "usage_percent": round(used / total * 100, 1) if total else 0,
             }
 
-        # CPU 负载
         load_avg = None
         cpu_count = os.cpu_count() or 1
         if hasattr(os, 'getloadavg'):
@@ -2645,7 +2908,6 @@ class AdminSystemStatusView(APIView):
                 "cores": cpu_count,
             }
 
-        # 数据库统计
         db_engine = connection.vendor
         db_name = connection.settings_dict.get('NAME', '')
         with connection.cursor() as cursor:
@@ -2665,7 +2927,6 @@ class AdminSystemStatusView(APIView):
                 row = cursor.fetchone()
                 if row and row[0]:
                     db_stats["size_mb"] = float(row[0])
-                # 表数量
                 cursor.execute(
                     "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = %s",
                     [db_name],
@@ -2674,14 +2935,13 @@ class AdminSystemStatusView(APIView):
             db_stats["host"] = connection.settings_dict.get('HOST', 'localhost') or 'localhost'
             db_stats["port"] = connection.settings_dict.get('PORT', '') or ''
 
-        # Redis / Celery 连通性
         services = {}
         try:
             from django.conf import settings as django_settings
             broker_url = getattr(django_settings, 'CELERY_BROKER_URL', '')
             if broker_url:
                 import redis
-                r = redis.from_url(broker_url, socket_connect_timeout=2)
+                r = redis.from_url(broker_url, socket_connect_timeout=0.8, socket_timeout=0.8)
                 r.ping()
                 redis_info = r.info('server')
                 services["redis"] = {
@@ -2694,7 +2954,7 @@ class AdminSystemStatusView(APIView):
 
         try:
             from config.celery import app as celery_app
-            insp = celery_app.control.inspect(timeout=2)
+            insp = celery_app.control.inspect(timeout=1)
             active = insp.active()
             services["celery"] = {
                 "status": "connected" if active is not None else "disconnected",
@@ -2703,7 +2963,6 @@ class AdminSystemStatusView(APIView):
         except Exception:
             services["celery"] = {"status": "disconnected", "workers": 0}
 
-        # 业务数据统计
         User = get_user_model()
         biz_stats = {
             "users": User.objects.count(),
@@ -2716,8 +2975,7 @@ class AdminSystemStatusView(APIView):
         }
 
         elapsed_ms = round((time.time() - process_start) * 1000)
-
-        return api_response(data={
+        return {
             "system": {
                 "os": f"{uname.system} {uname.release}",
                 "machine": uname.machine,
@@ -2732,12 +2990,24 @@ class AdminSystemStatusView(APIView):
             "services": services,
             "business": biz_stats,
             "query_ms": elapsed_ms,
-        })
+            "generated_at": timezone.now().isoformat(),
+        }
+
+    def get(self, request):
+        force_refresh = str(request.query_params.get("refresh", "")).lower() in {"1", "true", "yes"}
+        if not force_refresh:
+            cached = cache.get(self.cache_key)
+            if cached:
+                return api_response(data={**cached, "cached": True})
+
+        payload = self._build_payload()
+        cache.set(self.cache_key, payload, 20)
+        return api_response(data={**payload, "cached": False})
 
 
 class AdminAISettingsView(APIView):
-    """AI 设置接口：查询配置（hotel_admin 可操作），修改配置（仅 system_admin）。"""
-    permission_classes = [IsAuthenticated, IsAdminRole]
+    """AI 设置接口：仅 system_admin 可查看或修改，避免供应商密钥外泄。"""
+    permission_classes = [IsAuthenticated, IsSystemAdminRole]
 
     def get(self, request):
         ai_settings = load_ai_settings()
@@ -2746,7 +3016,7 @@ class AdminAISettingsView(APIView):
             data={
                 "ai_enabled": ai_settings.enabled,
                 "active_provider": ai_settings.active_provider,
-                "providers": ai_settings.list_providers(include_api_key=True),
+                "providers": ai_settings.list_providers(),
                 "builtin_providers": list(BUILTIN_PROVIDERS.keys()),
                 "current_provider": active.to_dict() if active else None,
             }
@@ -2830,6 +3100,8 @@ class AdminAIProviderDeleteView(APIView):
 class AdminAITestView(APIView):
     """管理员 AI 连通性测试接口：用于验证当前（或指定）供应商是否可用。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "ai_admin"
 
     def post(self, request):
         serializer = AITestSerializer(data=request.data)
@@ -2896,6 +3168,8 @@ class AdminAITestView(APIView):
 class AdminAIReportSummaryView(APIView):
     """AI 报表摘要接口：根据订单数据调用 LLM 生成运营总结文案。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "ai_admin"
 
     def post(self, request):
         serializer = AIReportSummarySerializer(data=request.data)
@@ -2954,6 +3228,8 @@ class AdminAIReportSummaryView(APIView):
 class AdminAIReviewSummaryView(APIView):
     """AI 评价摘要接口：聚合评价区间数据并调用 LLM 输出洞察总结。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "ai_admin"
 
     def post(self, request):
         serializer = AIReviewSummarySerializer(data=request.data)
@@ -3009,6 +3285,8 @@ class AdminAIReviewSummaryView(APIView):
 class AdminAIReplySuggestionView(APIView):
     """AI 回复建议接口：基于评价内容调用 LLM 生成多风格客服回复建议。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "ai_admin"
 
     def post(self, request):
         serializer = AIReplySuggestionSerializer(data=request.data)
@@ -3125,6 +3403,23 @@ class AdminReportTasksView(APIView):
         )
 
 
+class AdminReportTaskDeleteView(APIView):
+    """管理端删除报表任务接口（仅 system_admin）。"""
+    permission_classes = [IsAuthenticated, IsSystemAdminRole]
+
+    def post(self, request):
+        task_id = request.data.get("task_id")
+        if not task_id:
+            return api_response(code=4001, message="缺少 task_id 参数", data=None, status_code=400)
+        task = ReportTask.objects.filter(id=task_id).first()
+        if not task:
+            return api_response(code=4040, message="报表任务不存在", data=None, status_code=404)
+        if task.status == ReportTask.STATUS_RUNNING:
+            return api_response(code=4091, message="运行中的任务不可删除", data=None, status_code=409)
+        task.delete()
+        return api_response(data={"task_id": task_id, "deleted": True})
+
+
 class AdminCouponTemplatesView(APIView):
     """管理端优惠券模板列表（hotel_admin 可操作），创建（仅 system_admin）。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
@@ -3149,20 +3444,43 @@ class AdminCouponTemplatesView(APIView):
 
 
 class AdminCouponTemplateUpdateView(APIView):
-    """管理端优惠券模板上/下架接口（仅 system_admin）。"""
+    """管理端优惠券模板编辑接口（仅 system_admin）：支持全字段编辑及上/下架。"""
+    permission_classes = [IsAuthenticated, IsSystemAdminRole]
+
+    def post(self, request):
+        serializer = CouponTemplateEditSerializer(data=request.data)
+        if not serializer.is_valid():
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
+        data = serializer.validated_data
+        tpl = CouponTemplate.objects.filter(id=data["template_id"]).first()
+        if not tpl:
+            return api_response(code=4040, message="模板不存在", data=None, status_code=404)
+        update_fields = ["updated_at"]
+        for field in ("name", "coupon_type", "amount", "discount", "min_amount", "total_count",
+                       "per_user_limit", "required_level", "points_cost", "valid_days",
+                       "valid_start", "valid_end", "status"):
+            if field in data:
+                setattr(tpl, field, data[field])
+                update_fields.append(field)
+        tpl.save(update_fields=update_fields)
+        return api_response(data=CouponTemplateSerializer(tpl).data)
+
+
+class AdminCouponTemplateDeleteView(APIView):
+    """管理端优惠券模板删除接口（仅 system_admin）。"""
     permission_classes = [IsAuthenticated, IsSystemAdminRole]
 
     def post(self, request):
         tpl_id = request.data.get("template_id")
-        new_status = request.data.get("status")
-        if not tpl_id or new_status not in ("active", "inactive"):
-            return api_response(code=4001, message="参数错误", data=None, status_code=400)
+        if not tpl_id:
+            return api_response(code=4001, message="缺少 template_id 参数", data=None, status_code=400)
         tpl = CouponTemplate.objects.filter(id=tpl_id).first()
         if not tpl:
             return api_response(code=4040, message="模板不存在", data=None, status_code=404)
-        tpl.status = new_status
-        tpl.save(update_fields=["status", "updated_at"])
-        return api_response(data=CouponTemplateSerializer(tpl).data)
+        if tpl.claimed_count > 0:
+            return api_response(code=4091, message="该模板已有用户领取，无法删除，请改为下架", data=None, status_code=409)
+        tpl.delete()
+        return api_response(data={"template_id": tpl_id, "deleted": True})
 
 
 class AdminMemberOverviewView(APIView):
@@ -3253,6 +3571,8 @@ class AdminSystemResetView(APIView):
 class AdminAIPricingSuggestionView(APIView):
     """AI 智能定价建议接口：基于房型与历史数据生成价格优化建议。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "ai_admin"
 
     def post(self, request):
         serializer = AIPricingSuggestionSerializer(data=request.data)
@@ -3303,6 +3623,8 @@ class AdminAIPricingSuggestionView(APIView):
 class AdminAIBusinessReportView(APIView):
     """AI 深度经营报告接口：生成多维度经营分析 Markdown 报告。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "ai_admin"
 
     def post(self, request):
         serializer = AIBusinessReportSerializer(data=request.data)
@@ -3352,6 +3674,8 @@ class AdminAIBusinessReportView(APIView):
 class AdminAIBusinessReportStreamView(APIView):
     """AI 深度经营报告流式接口：SSE 格式逐 token 推送 Markdown 报告内容。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "ai_admin"
 
     def post(self, request):
         import json
@@ -3435,6 +3759,8 @@ class AdminAIBusinessReportStreamView(APIView):
 class AdminAIReviewSentimentView(APIView):
     """AI 评价情感分析接口：分析单条评价的情感倾向并保存分析结果。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "ai_admin"
 
     def post(self, request):
         from django.utils import timezone as tz
@@ -3497,6 +3823,8 @@ class AdminAIReviewSentimentView(APIView):
 class AdminAIMarketingCopyView(APIView):
     """AI 营销文案生成接口：根据酒店信息与活动类型生成多风格营销文案。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "ai_admin"
 
     def post(self, request):
         serializer = AIMarketingCopySerializer(data=request.data)
@@ -3547,6 +3875,8 @@ class AdminAIMarketingCopyView(APIView):
 class AdminAIContentGenerateView(APIView):
     """AI 内容生成接口：生成酒店介绍、房型描述或 SEO 关键词候选内容。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "ai_admin"
 
     def post(self, request):
         serializer = AIContentGenerateSerializer(data=request.data)
@@ -3602,6 +3932,8 @@ class AdminAIContentGenerateView(APIView):
 class AdminAIAnomalyReportView(APIView):
     """AI 异常检测报告接口：检测酒店经营数据中的异常信号。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "ai_admin"
 
     def post(self, request):
         serializer = AIAnomalyReportSerializer(data=request.data)
@@ -3661,6 +3993,8 @@ class AdminAIAnomalyReportView(APIView):
 class AdminAIOrderAnomalySummaryView(APIView):
     """AI 订单异常摘要接口：检测逾期未付、异常取消等订单风险。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "ai_admin"
 
     def post(self, request):
         serializer = AIOrderAnomalySummarySerializer(data=request.data)
@@ -3770,6 +4104,8 @@ class AdminAIUsageStatsView(APIView):
 class UserAIRecommendationsView(APIView):
     """用户 AI 推荐接口：基于用户偏好和当前场景返回个性化推荐酒店列表。"""
     permission_classes = [IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "ai_user"
 
     def post(self, request):
         serializer = AIRecommendationsSerializer(data=request.data)
@@ -3845,6 +4181,8 @@ class UserAIRecommendationsView(APIView):
 class UserAIHotelCompareView(APIView):
     """用户 AI 对比接口：对 2-3 家酒店进行多维度智能对比分析。"""
     permission_classes = [IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "ai_user"
 
     def _serialize_hotels(self, hotels):
         serialized = []

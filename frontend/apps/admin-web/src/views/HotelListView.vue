@@ -15,6 +15,12 @@
         <option value="offline">已下架</option>
         <option value="draft">草稿</option>
       </SelectField>
+      <SelectField v-model="filters.type" size="sm" @change="loadList">
+        <option value="">全部类型</option>
+        <option value="hotel">酒店</option>
+        <option value="homestay">民宿</option>
+        <option value="short_rent">短租</option>
+      </SelectField>
       <SelectField v-model="filters.ordering" size="sm" @change="onSortChange">
         <option value="-id">ID 最新优先</option>
         <option value="id">ID 最旧优先</option>
@@ -59,6 +65,11 @@
         <template #col-status="{ value }">
           <StatusBadge :label="HOTEL_STATUS_MAP[value as string] || String(value)" :type="value === 'online' ? 'success' : value === 'offline' ? 'danger' : 'default'" />
         </template>
+        <template #col-type="{ value }">
+          <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium" :class="value === 'hotel' ? 'bg-blue-100 text-blue-700' : value === 'homestay' ? 'bg-amber-100 text-amber-700' : 'bg-purple-100 text-purple-700'">
+            {{ HOTEL_TYPE_MAP[value as string] || String(value) }}
+          </span>
+        </template>
         <template #col-star="{ value }">{{ value }}星</template>
         <template #col-min_price="{ value }">¥{{ formatMoney(value as number) }}</template>
         <template #actions="{ row }">
@@ -84,7 +95,15 @@
           />
           <p v-if="formErrors.name" class="mt-1 text-xs text-red-500">{{ formErrors.name }}</p>
         </div>
-        <div class="grid grid-cols-2 gap-4">
+        <div class="grid grid-cols-3 gap-4">
+          <div>
+            <label class="mb-1 block text-sm font-medium text-slate-700">类型</label>
+            <SelectField v-model="form.type" class="w-full">
+              <option value="hotel">酒店</option>
+              <option value="homestay">民宿</option>
+              <option value="short_rent">短租</option>
+            </SelectField>
+          </div>
           <div>
             <label class="mb-1 block text-sm font-medium text-slate-700">城市</label>
             <input
@@ -155,6 +174,27 @@
             </label>
           </div>
         </div>
+        <!-- 设施标签 -->
+        <div>
+          <label class="mb-1 block text-sm font-medium text-slate-700">设施标签</label>
+          <div class="flex flex-wrap gap-2">
+            <label v-for="fac in facilityOptions" :key="fac.value" class="flex cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1 text-xs transition-colors" :class="form.facilities.includes(fac.value) ? 'border-teal-500 bg-teal-50 text-teal-700' : 'border-slate-200 text-slate-600 hover:border-slate-300'">
+              <input type="checkbox" :value="fac.value" v-model="form.facilities" class="hidden" />
+              {{ fac.label }}
+            </label>
+          </div>
+        </div>
+        <!-- 自定义标签 -->
+        <div>
+          <label class="mb-1 block text-sm font-medium text-slate-700">自定义标签</label>
+          <div class="flex flex-wrap items-center gap-2">
+            <span v-for="(tag, idx) in form.tags" :key="idx" class="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-700">
+              {{ tag }}
+              <button type="button" class="text-slate-400 hover:text-red-500" @click="form.tags.splice(idx, 1)">×</button>
+            </span>
+            <input v-model="newTag" placeholder="输入标签后回车" class="rounded-lg border border-slate-300 px-2 py-1 text-xs outline-none focus:border-teal-500" @keydown.enter.prevent="addTag" />
+          </div>
+        </div>
         <div>
           <label class="mb-1 block text-sm font-medium text-slate-700">状态</label>
           <SelectField v-model="form.status" class="w-full">
@@ -178,7 +218,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { hotelApi, commonApi } from '@hotelink/api'
-import { buildImageThumbUrl, formatMoney, HOTEL_STATUS_MAP, extractApiError, extractApiFieldErrors } from '@hotelink/utils'
+import { buildImageThumbUrl, formatMoney, HOTEL_STATUS_MAP, HOTEL_TYPE_MAP, extractApiError, extractApiFieldErrors } from '@hotelink/utils'
 import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, useToast, useConfirm, SelectField } from '@hotelink/ui'
 
 const { showToast } = useToast()
@@ -188,6 +228,7 @@ const columns = [
   { key: 'id', label: 'ID', sortField: 'id' },
   { key: 'cover_image', label: '封面' },
   { key: 'name', label: '酒店名称', sortField: 'name' },
+  { key: 'type', label: '类型', sortField: 'type' },
   { key: 'city', label: '城市', sortField: 'city' },
   { key: 'star', label: '星级', sortField: 'star' },
   { key: 'min_price', label: '起价', sortField: 'min_price' },
@@ -200,7 +241,7 @@ const page = ref(1)
 const pageSize = ref(10)
 const total = ref(0)
 const thumbnailMode = ref<'compact' | 'standard' | 'hidden'>('compact')
-const filters = reactive({ keyword: '', status: '', ordering: '-id' })
+const filters = reactive({ keyword: '', status: '', type: '', ordering: '-id' })
 const uploading = ref(false)
 
 const thumbnailClass = computed(() => (thumbnailMode.value === 'compact' ? 'h-8 w-12' : 'h-10 w-14'))
@@ -213,16 +254,37 @@ const saving = ref(false)
 type HotelField = 'name' | 'city' | 'address' | 'phone'
 const formErrors = ref<Partial<Record<HotelField, string>>>({})
 const form = reactive({
-  name: '', city: '', address: '', star: 4, phone: '', description: '',
-  cover_image: '', images: [] as string[], status: 'draft',
+  name: '', type: 'hotel' as string, city: '', address: '', star: 4, phone: '', description: '',
+  cover_image: '', images: [] as string[], facilities: [] as string[], tags: [] as string[], status: 'draft',
 })
+const newTag = ref('')
+
+const facilityOptions = [
+  { label: 'WiFi', value: 'wifi' },
+  { label: '停车场', value: 'parking' },
+  { label: '泳池', value: 'pool' },
+  { label: '健身房', value: 'gym' },
+  { label: '餐厅', value: 'restaurant' },
+  { label: '空调', value: 'air_conditioning' },
+  { label: '电梯', value: 'elevator' },
+  { label: '洗衣服务', value: 'laundry' },
+  { label: '行李寄存', value: 'luggage_storage' },
+  { label: '24小时前台', value: 'front_desk_24h' },
+  { label: '接机服务', value: 'airport_shuttle' },
+  { label: '会议室', value: 'meeting_room' },
+  { label: '无烟房', value: 'non_smoking' },
+  { label: '宠物友好', value: 'pet_friendly' },
+  { label: '厨房', value: 'kitchen' },
+  { label: '洗衣机', value: 'washing_machine' },
+]
 
 function resetForm() {
-  form.name = ''; form.city = ''; form.address = ''; form.star = 4
+  form.name = ''; form.type = 'hotel'; form.city = ''; form.address = ''; form.star = 4
   form.phone = ''; form.description = ''; form.status = 'draft'
-  form.cover_image = ''; form.images = []
+  form.cover_image = ''; form.images = []; form.facilities = []; form.tags = []
   formErrors.value = {}
   editingId.value = null
+  newTag.value = ''
 }
 
 function isValidPhone(value: string): boolean {
@@ -308,6 +370,7 @@ function openCreate() {
 function openEdit(row: Record<string, unknown>) {
   editingId.value = row.id as number
   form.name = (row.name as string) || ''
+  form.type = (row.type as string) || 'hotel'
   form.city = (row.city as string) || ''
   form.address = (row.address as string) || ''
   form.star = (row.star as number) || 4
@@ -316,6 +379,9 @@ function openEdit(row: Record<string, unknown>) {
   form.status = (row.status as string) || 'draft'
   form.cover_image = (row.cover_image as string) || ''
   form.images = Array.isArray(row.images) ? [...(row.images as string[])] : []
+  form.facilities = Array.isArray(row.facilities) ? [...(row.facilities as string[])] : []
+  form.tags = Array.isArray(row.tags) ? [...(row.tags as string[])] : []
+  newTag.value = ''
   showModal.value = true
 }
 
@@ -356,12 +422,21 @@ function removeImage(idx: number) {
   form.images.splice(idx, 1)
 }
 
+function addTag() {
+  const tag = newTag.value.trim()
+  if (tag && !form.tags.includes(tag)) {
+    form.tags.push(tag)
+  }
+  newTag.value = ''
+}
+
 async function loadList() {
   loading.value = true
   try {
     const params: Record<string, unknown> = { page: page.value, page_size: pageSize.value, ordering: filters.ordering, thumb_mode: thumbnailMode.value }
     if (filters.keyword) params.keyword = filters.keyword
     if (filters.status) params.status = filters.status
+    if (filters.type) params.type = filters.type
     const res = await hotelApi.list(params)
     if (res.code === 0 && res.data) {
       list.value = (res.data as unknown as { items: Record<string, unknown>[]; total: number }).items || []
@@ -374,6 +449,15 @@ async function loadList() {
   } finally {
     loading.value = false
   }
+}
+
+function patchHotelRow(hotelId: number, patch: Record<string, unknown>) {
+  list.value = list.value.map((item) => (Number(item.id) === hotelId ? { ...item, ...patch } : item))
+}
+
+function removeHotelRow(hotelId: number) {
+  list.value = list.value.filter((item) => Number(item.id) !== hotelId)
+  total.value = Math.max(0, total.value - 1)
 }
 
 async function handleSave() {
@@ -394,7 +478,17 @@ async function handleSave() {
     if (res.code === 0) {
       showToast(editingId.value ? '酒店更新成功' : '酒店创建成功', 'success')
       showModal.value = false
-      loadList()
+      const savedHotel = res.data as Record<string, unknown> | undefined
+      if (savedHotel && typeof savedHotel === 'object' && !Array.isArray(savedHotel)) {
+        if (editingId.value) {
+          patchHotelRow(editingId.value, savedHotel)
+        } else {
+          list.value = [savedHotel, ...list.value]
+          total.value += 1
+        }
+      } else {
+        loadList()
+      }
     } else {
       formErrors.value = {
         ...formErrors.value,
@@ -425,7 +519,7 @@ async function handleDelete(row: Record<string, unknown>) {
     const res = await hotelApi.delete(row.id as number)
     if (res.code === 0) {
       showToast('酒店删除成功', 'success')
-      loadList()
+      removeHotelRow(row.id as number)
     } else {
       showToast(extractApiError(res, '删除失败'), 'error')
     }

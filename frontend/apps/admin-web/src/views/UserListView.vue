@@ -47,19 +47,50 @@
           <StatusBadge :label="value === 'active' ? '正常' : '禁用'" :type="value === 'active' ? 'success' : 'danger'" />
         </template>
         <template #actions="{ row }">
-          <button v-if="row.status === 'active'" class="text-sm text-red-600 hover:underline" @click="changeStatus(row, 'disabled')">禁用</button>
-          <button v-else class="text-sm text-green-600 hover:underline" @click="changeStatus(row, 'active')">启用</button>
+          <div class="flex gap-2">
+            <button class="text-sm text-teal-600 hover:underline" @click="openEdit(row)">编辑</button>
+            <button v-if="row.status === 'active'" class="text-sm text-red-600 hover:underline" @click="changeStatus(row, 'disabled')">禁用</button>
+            <button v-else class="text-sm text-green-600 hover:underline" @click="changeStatus(row, 'active')">启用</button>
+            <button class="text-sm text-amber-600 hover:underline" @click="resetPassword(row)">重置密码</button>
+          </div>
         </template>
       </DataTable>
       <Pagination :page="page" :page-size="pageSize" :total="total" class="px-4 pb-4" @change="p => { page = p; loadList() }" />
     </div>
+
+    <ModalDialog :visible="showEdit" title="编辑用户" size="md" @close="showEdit = false">
+      <div class="space-y-4">
+        <div>
+          <label class="mb-1 block text-sm font-medium">昵称</label>
+          <input v-model="editForm.nickname" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-teal-500" placeholder="请输入昵称" />
+        </div>
+        <div>
+          <label class="mb-1 block text-sm font-medium">手机号</label>
+          <input v-model="editForm.mobile" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-teal-500" placeholder="选填，填写 11 位手机号" />
+        </div>
+        <div>
+          <label class="mb-1 block text-sm font-medium">会员等级</label>
+          <SelectField v-model="editForm.member_level" class="w-full">
+            <option value="normal">普通会员</option>
+            <option value="silver">银卡会员</option>
+            <option value="gold">金卡会员</option>
+            <option value="platinum">铂金会员</option>
+            <option value="diamond">钻石会员</option>
+          </SelectField>
+        </div>
+      </div>
+      <template #footer>
+        <button class="rounded-lg border border-slate-200 px-4 py-2 text-sm hover:bg-slate-50" @click="showEdit = false">取消</button>
+        <button class="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700" @click="handleEdit">保存</button>
+      </template>
+    </ModalDialog>
   </section>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { userApi } from '@hotelink/api'
-import { PageHeader, DataTable, StatusBadge, Pagination, SelectField, useToast, useConfirm } from '@hotelink/ui'
+import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, SelectField, useToast, useConfirm } from '@hotelink/ui'
 
 const { showToast } = useToast()
 const { confirm: confirmDialog } = useConfirm()
@@ -86,6 +117,10 @@ const ordering = ref('-id')
 
 const memberLevelMap: Record<string, string> = {
   normal: '普通会员', silver: '银卡会员', gold: '金卡会员', platinum: '铂金会员', diamond: '钻石会员',
+}
+
+function patchUserRow(userId: number, patch: Record<string, unknown>) {
+  list.value = list.value.map((item) => (Number(item.id) === userId ? { ...item, ...patch } : item))
 }
 
 function onSortChange() {
@@ -121,12 +156,56 @@ async function changeStatus(row: Record<string, unknown>, status: string) {
     const res = await userApi.changeStatus({ user_id: row.id as number, status })
     if (res.code === 0) {
       showToast(`用户已${label}`, 'success')
-      loadList()
+      patchUserRow(row.id as number, { status })
     } else {
       showToast(res.message || `${label}失败`, 'error')
     }
   } catch {
     showToast(`${label}失败，请重试`, 'error')
+  }
+}
+
+const showEdit = ref(false)
+const editForm = reactive({ user_id: 0, nickname: '', mobile: '', member_level: 'normal' })
+
+function openEdit(row: Record<string, unknown>) {
+  editForm.user_id = row.id as number
+  editForm.nickname = String(row.nickname || '')
+  editForm.mobile = String(row.mobile || '')
+  editForm.member_level = String(row.member_level || 'normal')
+  showEdit.value = true
+}
+
+async function handleEdit() {
+  try {
+    const res = await userApi.update(editForm)
+    if (res.code === 0) {
+      showToast('用户信息已更新', 'success')
+      showEdit.value = false
+      patchUserRow(editForm.user_id, {
+        member_level: editForm.member_level,
+        mobile: editForm.mobile,
+        nickname: editForm.nickname,
+      })
+    } else {
+      showToast(res.message || '更新失败', 'error')
+    }
+  } catch {
+    showToast('更新失败，请重试', 'error')
+  }
+}
+
+async function resetPassword(row: Record<string, unknown>) {
+  if (!await confirmDialog(`确认将「${row.nickname || row.username}」的密码重置为 Abc123456？`, { type: 'warning' })) return
+  try {
+    const res = await userApi.resetPassword(row.id as number)
+    if (res.code === 0) {
+      showToast('密码已重置为 Abc123456', 'success')
+    } else {
+      showToast(res.message || '重置失败', 'error')
+    }
+  } catch {
+    showToast('重置失败，请重试', 'error')
   }
 }
 

@@ -217,6 +217,9 @@
 import { ref, computed, onMounted, inject } from 'vue'
 import { useRouter } from 'vue-router'
 import { userNoticeApi } from '@hotelink/api'
+import { useConfirm } from '@hotelink/ui'
+
+const { confirm: confirmDialog } = useConfirm()
 
 interface Notice {
   id: number
@@ -460,6 +463,7 @@ async function batchMarkUnread() {
 async function batchDelete() {
   const ids = [...selected.value]
   if (!ids.length) return
+  if (!await confirmDialog(`确定删除选中的 ${ids.length} 条通知？`, { type: 'danger' })) return
   notices.value = notices.value.filter(n => !ids.includes(n.id))
   total.value = Math.max(0, total.value - ids.length)
   const res = await userNoticeApi.deleteNotices(ids)
@@ -468,6 +472,7 @@ async function batchDelete() {
 }
 
 async function deleteAll() {
+  if (!await confirmDialog('确定删除所有通知？该操作不可恢复。', { type: 'danger' })) return
   notices.value = []
   total.value = 0
   selected.value = new Set()

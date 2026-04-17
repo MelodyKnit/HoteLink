@@ -137,6 +137,15 @@ const loadingAI = ref(false)
 const replying = ref(false)
 const deleting = ref(false)
 
+function patchReviewRow(reviewId: number, patch: Record<string, unknown>) {
+  list.value = list.value.map((item) => (Number(item.id) === reviewId ? { ...item, ...patch } : item))
+}
+
+function removeReviewRow(reviewId: number) {
+  list.value = list.value.filter((item) => Number(item.id) !== reviewId)
+  total.value = Math.max(0, total.value - 1)
+}
+
 // 加载 List 相关数据。
 async function loadList() {
   loading.value = true
@@ -217,7 +226,10 @@ async function submitReply() {
     if (res.code === 0) {
       showToast('回复提交成功', 'success')
       showReply.value = false
-      loadList()
+      patchReviewRow(replyTarget.id as number, {
+        reply_content: replyContent.value,
+        replied: true,
+      })
     } else {
       showToast(extractApiError(res, '回复提交失败'), 'error')
     }
@@ -238,7 +250,7 @@ async function deleteReview(id: number) {
     if (res.code === 0) {
       showToast('评价已删除', 'success')
       showReply.value = false
-      loadList()
+      removeReviewRow(id)
     } else {
       showToast(extractApiError(res, '删除失败'), 'error')
     }

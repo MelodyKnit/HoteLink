@@ -8,7 +8,7 @@
     <div class="flex h-full min-h-0">
       <!-- Sidebar -->
       <aside
-        class="fixed inset-y-0 left-0 z-50 flex h-[100dvh] w-64 flex-col overflow-y-auto overscroll-contain bg-slate-900 text-white transition-transform duration-200 lg:static lg:translate-x-0"
+        class="admin-sidebar fixed inset-y-0 left-0 z-50 flex h-[100dvh] w-64 flex-col overflow-y-auto overscroll-contain bg-slate-900 text-white transition-transform duration-200 lg:static lg:translate-x-0"
         :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'"
       >
         <div class="flex h-16 shrink-0 items-center gap-3 px-6">
@@ -23,8 +23,8 @@
               v-for="item in group.items"
               :key="item.path"
               :to="item.path"
-              class="mb-0.5 flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors"
-              :class="isActive(item.path) ? 'bg-teal-600/20 text-teal-400' : 'text-slate-300 hover:bg-slate-800 hover:text-white'"
+              class="mb-0.5 flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors duration-200"
+              :class="isActive(item.path) ? 'bg-teal-500/20 text-teal-100 shadow-[inset_0_0_0_1px_rgba(45,212,191,0.25)]' : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'"
               @click="sidebarOpen = false"
             >
               <span class="w-5 text-center text-base">{{ item.icon }}</span>
@@ -88,9 +88,11 @@ const todayStr = computed(() => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 })
 
-// 判断Active条件是否成立。
+// 判断菜单项是否处于 active 状态。
 function isActive(path: string): boolean {
-  return route.path === path || route.path.startsWith(path + '/')
+  if (route.path === path) return true
+  if (path === '/admin/orders' && route.path.startsWith('/admin/orders/')) return true
+  return false
 }
 
 // 处理 Logout 交互逻辑。
@@ -140,6 +142,7 @@ const ALL_MENU_GROUPS = [
     items: [
       { path: '/admin/employees', icon: '🧑‍💼', label: '员工管理' },
       { path: '/admin/settings', icon: '⚙️', label: '系统配置', systemOnly: true },
+      { path: '/admin/system-status', icon: '📡', label: '系统状态', systemOnly: true },
     ],
   },
   {
@@ -166,4 +169,28 @@ const menuGroups = computed(() => {
 <style scoped>
 .fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
+
+.admin-sidebar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(100, 116, 139, 0.7) rgba(15, 23, 42, 0.65);
+  scrollbar-gutter: stable;
+}
+
+.admin-sidebar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.admin-sidebar::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.65);
+}
+
+.admin-sidebar::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.7);
+  border-radius: 999px;
+  border: 2px solid rgba(15, 23, 42, 0.65);
+}
+
+.admin-sidebar::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.85);
+}
 </style>

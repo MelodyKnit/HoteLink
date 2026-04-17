@@ -8,6 +8,7 @@ import shutil
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.test import override_settings
 from django.utils import timezone
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -15,7 +16,7 @@ from rest_framework.test import APITestCase
 
 from apps.bookings.models import BookingOrder
 from apps.bookings.tasks import sweep_order_lifecycle_anomalies
-from apps.crm.models import ChatMessage, ChatSession, InvoiceTitle, UserCoupon
+from apps.crm.models import ChatMessage, ChatSession, InvoiceTitle, Review, UserCoupon
 from apps.hotels.models import Hotel, RoomInventory, RoomType
 from apps.operations.models import AICallLog, SystemNotice
 from apps.payments.models import PaymentRecord
@@ -47,6 +48,14 @@ class ApiBaseTestCase(APITestCase):
             role=UserProfile.ROLE_USER,
             status=UserProfile.STATUS_ACTIVE,
             member_level=UserProfile.MEMBER_GOLD,
+        )
+        cls.hotel_admin_user = User.objects.create_user(username="hoteladmin", password="Password123")
+        UserProfile.objects.create(
+            user=cls.hotel_admin_user,
+            nickname="店长",
+            mobile="13800138002",
+            role=UserProfile.ROLE_HOTEL_ADMIN,
+            status=UserProfile.STATUS_ACTIVE,
         )
 
         cls.hotel = Hotel.objects.create(
@@ -113,6 +122,7 @@ class ApiBaseTestCase(APITestCase):
 
     def setUp(self):
         """清理 AI 运行时配置，避免测试间互相污染。"""
+        cache.clear()
         path = _get_runtime_config_path()
         if path.exists():
             path.unlink()
@@ -138,6 +148,16 @@ class ApiBaseTestCase(APITestCase):
         response = self.client.post(
             "/api/v1/public/auth/admin-login",
             {"username": "admin", "password": "Password123"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {response.json()['data']['access_token']}")
+
+    def login_hotel_admin(self):
+        """登录酒店管理员并注入 Authorization 头。"""
+        response = self.client.post(
+            "/api/v1/public/auth/admin-login",
+            {"username": "hoteladmin", "password": "Password123"},
             format="json",
         )
         self.assertEqual(response.status_code, 200)
@@ -251,8 +271,8 @@ class UserApiTests(ApiBaseTestCase):
             "/api/v1/user/profile/change-password",
             {
                 "old_password": "Password123",
-                "new_password": "Password456",
-                "confirm_password": "Password456",
+                "new_password": "HoteLink#Password456",
+                "confirm_password": "HoteLink#Password456",
             },
             format="json",
         )
@@ -587,6 +607,48 @@ class UserApiTests(ApiBaseTestCase):
         self.assertEqual(switch_option["query"]["from"], "ai-chat")
         self.assertEqual(switch_option["query"]["ask"], question)
 
+    def test_user_ai_chat_customer_service_should_offer_review_action(self):
+        """验证客服识别评价问题并提供“我的评价”快捷入口。"""
+        self.login_user()
+        completed_order = BookingOrder.objects.create(
+            user=self.user,
+            hotel=self.hotel,
+            room_type=self.room_type,
+            order_no="HTTEST0002",
+            status=BookingOrder.STATUS_COMPLETED,
+            payment_status=BookingOrder.PAYMENT_PAID,
+            check_in_date=timezone.localdate() - timedelta(days=3),
+            check_out_date=timezone.localdate() - timedelta(days=1),
+            guest_name="张三",
+            guest_mobile="13800138000",
+            guest_count=2,
+            original_amount=Decimal("798.00"),
+            discount_amount=Decimal("0.00"),
+            pay_amount=Decimal("798.00"),
+        )
+        Review.objects.create(
+            user=self.user,
+            order=completed_order,
+            hotel=self.hotel,
+            score=5,
+            content="服务很好，房间整洁。",
+        )
+
+        response = self.client.post(
+            "/api/v1/user/ai/chat",
+            {
+                "scene": "customer_service",
+                "question": "我有哪些评价？",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        options = data["booking_assistant"]["options"]
+        review_option = next((option for option in options if option["type"] == "navigate_reviews"), None)
+        self.assertIsNotNone(review_option)
+        self.assertEqual(review_option["route"], "/my/reviews")
+
     def test_user_ai_chat_booking_assistant_scene_should_return_booking_scene(self):
         """验证 booking_assistant 场景会返回 booking_assistant scene。"""
         self.login_user()
@@ -878,6 +940,25 @@ class UserApiTests(ApiBaseTestCase):
 
 class AdminApiTests(ApiBaseTestCase):
     """管理端接口测试集合。"""
+    def test_admin_hotels_list_should_support_query_filters(self):
+        """验证管理端酒店列表可正常返回并支持筛选参数。"""
+        self.login_admin()
+        response = self.client.get(
+            "/api/v1/admin/hotels",
+            {
+                "keyword": "国贸",
+                "status": Hotel.STATUS_ONLINE,
+                "type": Hotel.TYPE_HOTEL,
+                "ordering": "-id",
+                "w": 80,
+                "h": 60,
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()["data"]
+        self.assertGreaterEqual(payload["total"], 1)
+        self.assertTrue(any(item["id"] == self.hotel.id for item in payload["items"]))
+
     def test_admin_order_detail_should_include_payments_and_status_timestamps(self):
         """验证管理端订单详情返回支付记录与关键状态时间字段。"""
         self.login_admin()
@@ -1000,6 +1081,7 @@ class AdminApiTests(ApiBaseTestCase):
         settings_response = self.client.get("/api/v1/admin/settings")
         self.assertEqual(settings_response.status_code, 200)
         self.assertEqual(settings_response.json()["data"]["platform_name"], "HoteLink 酒店管理系统")
+        self.assertIn("support_email", settings_response.json()["data"])
 
         ai_settings = self.client.get("/api/v1/admin/ai/settings")
         self.assertEqual(ai_settings.status_code, 200)
@@ -1055,7 +1137,7 @@ class AdminApiTests(ApiBaseTestCase):
             "/api/v1/admin/employees/create",
             {
                 "username": "frontdesk01",
-                "password": "Password123",
+                "password": "HoteLink#Employee123",
                 "name": "前台小王",
                 "mobile": "13800138001",
                 "role": "hotel_admin",
@@ -1064,6 +1146,29 @@ class AdminApiTests(ApiBaseTestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["data"]["role"], "hotel_admin")
+
+    def test_hotel_admin_cannot_access_system_status_or_ai_settings(self):
+        """验证酒店管理员无法读取系统状态和 AI 配置。"""
+        self.login_hotel_admin()
+
+        system_status = self.client.get("/api/v1/admin/system/status")
+        self.assertEqual(system_status.status_code, 403)
+
+        ai_settings = self.client.get("/api/v1/admin/ai/settings")
+        self.assertEqual(ai_settings.status_code, 403)
+
+    def test_admin_system_status_should_return_cache_flag(self):
+        """验证系统状态接口可返回缓存标记。"""
+        self.login_admin()
+        cache.clear()
+
+        first_response = self.client.get("/api/v1/admin/system/status")
+        self.assertEqual(first_response.status_code, 200)
+        self.assertFalse(first_response.json()["data"].get("cached", False))
+
+        cached_response = self.client.get("/api/v1/admin/system/status")
+        self.assertEqual(cached_response.status_code, 200)
+        self.assertTrue(cached_response.json()["data"].get("cached", False))
 
     def test_admin_ai_provider_crud_and_switch(self):
         """验证 AI 供应商新增、切换、读取流程。"""
@@ -1096,6 +1201,51 @@ class AdminApiTests(ApiBaseTestCase):
         self.assertEqual(settings_response.status_code, 200)
         providers = settings_response.json()["data"]["providers"]
         self.assertTrue(any(item["name"] == "testprovider" for item in providers))
+        self.assertTrue(all("api_key" not in item for item in providers))
+
+    def test_refresh_rotation_and_logout_should_revoke_refresh_token(self):
+        """验证 refresh token 轮换后旧 token 失效，登出后当前 token 被吊销。"""
+        login_response = self.client.post(
+            "/api/v1/public/auth/login",
+            {"username": "zhangsan", "password": "Password123"},
+            format="json",
+        )
+        self.assertEqual(login_response.status_code, 200)
+        access_token = login_response.json()["data"]["access_token"]
+        refresh_token = login_response.json()["data"]["refresh_token"]
+
+        refresh_response = self.client.post(
+            "/api/v1/public/auth/refresh",
+            {"refresh_token": refresh_token},
+            format="json",
+        )
+        self.assertEqual(refresh_response.status_code, 200)
+        new_refresh_token = refresh_response.json()["data"]["refresh_token"]
+        self.assertTrue(new_refresh_token)
+        self.assertNotEqual(new_refresh_token, refresh_token)
+
+        old_refresh_retry = self.client.post(
+            "/api/v1/public/auth/refresh",
+            {"refresh_token": refresh_token},
+            format="json",
+        )
+        self.assertEqual(old_refresh_retry.status_code, 401)
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {access_token}")
+        logout_response = self.client.post(
+            "/api/v1/user/auth/logout",
+            {"refresh_token": new_refresh_token},
+            format="json",
+        )
+        self.assertEqual(logout_response.status_code, 200)
+        self.assertTrue(logout_response.json()["data"]["refresh_revoked"])
+
+        revoked_refresh_retry = self.client.post(
+            "/api/v1/public/auth/refresh",
+            {"refresh_token": new_refresh_token},
+            format="json",
+        )
+        self.assertEqual(revoked_refresh_retry.status_code, 401)
 
     def test_admin_system_reset_requires_confirmation(self):
         """验证系统重置接口必须输入 RESET 确认。"""

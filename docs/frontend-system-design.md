@@ -135,6 +135,7 @@ flowchart TD
 
     HOME --> MY["我的"]
     MY --> PROFILE["个人资料"]
+    MY --> SECURITY["账号与安全"]
     MY --> ORDERS["我的订单"]
     MY --> MEMBERSHIP["会员中心"]
     MY --> COUPONS["优惠券 / 权益"]
@@ -164,7 +165,7 @@ flowchart TD
 
 ## 7. 用户端界面设计清单
 
-> **用户端页面实现总览（25 路由 / 24 视图）**
+> **用户端页面实现总览（26 路由 / 25 视图）**
 >
 > | # | 设计页面 | 路由 | 视图文件 | 状态 |
 > |---|---------|------|---------|------|
@@ -180,17 +181,18 @@ flowchart TD
 > | 10 | 我的订单页 | `/my/orders` | `OrderListView.vue` | ✅ 已实现 |
 > | 11 | 订单详情页 | `/my/orders/:id` | `OrderDetailView.vue` | ✅ 已实现 |
 > | 12 | 个人资料页 | `/my/profile` | `ProfileView.vue` | ✅ 已实现 |
-> | 13 | 会员中心页 | `/my/membership` | `MembershipView.vue` | ✅ 已实现 |
-> | 14 | 优惠券与权益页 | `/my/coupons` | `CouponListView.vue` | ✅ 已实现 |
-> | 15 | 发票管理页 | `/my/invoices` | `InvoiceView.vue` | ✅ 已实现 |
-> | 16 | 收藏与浏览记录页 | `/my/favorites` | `FavoriteListView.vue` | ✅ 已实现 |
-> | 17 | 评价与反馈页 | `/my/reviews` | `ReviewListView.vue` | ✅ 已实现 |
-> | 18 | 帮助中心 | `/help` | `HelpView.vue` | ✅ 已实现 |
-> | 19 | AI 智能客服页 | `/ai-chat` `/ai-booking` | `AIChatView.vue` | ✅ 已实现 |
-> | 20 | 品牌故事页 | `/about` | `AboutView.vue` | ✅ 已实现 |
-> | 21 | 活动专题页 | — | — | 📐 设计中 |
-> | 22 | 联系我们页 | `/contact` | `ContactView.vue` | ✅ 已实现 |
-> | 23 | AI 酒店对比页 | `/hotel-compare` | `HotelCompareView.vue` | ✅ 已实现 |
+> | 13 | 账号与安全页 | `/my/security` | `AccountSecurityView.vue` | ✅ 已实现 |
+> | 14 | 会员中心页 | `/my/membership` | `MembershipView.vue` | ✅ 已实现 |
+> | 15 | 优惠券与权益页 | `/my/coupons` | `CouponListView.vue` | ✅ 已实现 |
+> | 16 | 发票管理页 | `/my/invoices` | `InvoiceView.vue` | ✅ 已实现 |
+> | 17 | 收藏与浏览记录页 | `/my/favorites` | `FavoriteListView.vue` | ✅ 已实现 |
+> | 18 | 评价与反馈页 | `/my/reviews` | `ReviewListView.vue` | ✅ 已实现 |
+> | 19 | 帮助中心 | `/help` | `HelpView.vue` | ✅ 已实现 |
+> | 20 | AI 智能客服页 | `/ai-chat` `/ai-booking` | `AIChatView.vue` | ✅ 已实现 |
+> | 21 | 品牌故事页 | `/about` | `AboutView.vue` | ✅ 已实现 |
+> | 22 | 活动专题页 | — | — | 📐 设计中 |
+> | 23 | 联系我们页 | `/contact` | `ContactView.vue` | ✅ 已实现 |
+> | 24 | AI 酒店对比页 | `/hotel-compare` | `HotelCompareView.vue` | ✅ 已实现 |
 > | — | 通知中心 | `/my/notifications` | `NotificationView.vue` | ✅ 已实现 |
 > | — | 404 页 | `/404` | `NotFoundView.vue` | ✅ 已实现 |
 
@@ -455,6 +457,8 @@ flowchart TD
 
 - 客服场景会根据当前订单与通知上下文返回快捷操作按钮，可一键跳转到我的订单、订单详情、支付页、发票中心、通知中心等页面。
 - 订房场景继续使用结构化推荐选项，用于城市、酒店、房型等多步选择。
+- 快捷问题区与助手动作区支持“展开/收起”，默认收起以减少无关信息噪声。
+- 对话超过阈值会自动压缩历史消息，并将摘要用于后续问答上下文。
 
 #### 通知中心补充（用户端）
 
@@ -856,7 +860,7 @@ flowchart TD
 
 核心模块：
 
-- 酒店基础配置（平台名称、管理员姓名、客服电话、订单自动取消时间）
+- 酒店基础配置（平台名称、管理员名称、客服电话、客服邮箱、服务时间、平台公告、订单自动取消时间）
 - 支付配置
 - 发票配置
 - 消息配置
@@ -933,6 +937,7 @@ flowchart TD
 - AI 调用记录列表（时间、场景、供应商、模型、令牌数、耗时、状态）
 - 按场景 / 供应商 / 状态筛选
 - 分页浏览
+- 日志详情弹窗：点击行或"查看详情"按钮弹出，展示时间、调用用户、场景、状态、供应商/模型、各维度 token 数、延迟、完整错误信息（含一键复制）
 
 设计要求：
 
@@ -1040,10 +1045,12 @@ flowchart LR
 - 展示能力：AI 回复支持 Markdown 渲染（加粗、列表、代码块、引用等）
 - 订房交互：支持在聊天消息中直接渲染城市、酒店、房型动作卡片，点击后继续对话或直接跳转 `/booking`
 - 客服交互：客服场景支持结构化快捷动作（订单详情、去支付、取消引导、发票、通知、帮助中心、切换订房助手）
+- 评价交互：客服场景识别“评价/点评”问题时，会返回“查看我的评价”动作（`/my/reviews`）
 - 双向引导：订房助手检测到客服诉求时会返回“切换到 AI 智能客服”按钮；客服检测到订房诉求时会返回“切换到 AI 订房助手”按钮
 - 动作协议：前端按 `type/action_type/route/query/requires_confirmation/priority/tracking_id` 渲染与执行，支持优先级排序与确认提示
 - 问题续聊：跨助手跳转时通过 `query.ask` 透传原问题，目标页面自动发送该问题并移除一次性参数
 - 页面联动：当 AI 动作跳转到订单详情并携带 `source=ai&action=cancel` 时，会自动打开取消弹窗并清理一次性参数
+- 长对话压缩：前端自动压缩早期消息，生成 `conversation_summary` 并随聊天请求传给后端
 
 交互原则：
 

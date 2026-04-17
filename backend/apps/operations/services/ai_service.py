@@ -14,6 +14,7 @@ from urllib.request import Request, urlopen
 from django.utils import timezone
 
 from apps.bookings.models import BookingOrder
+from apps.crm.models import Review
 from apps.hotels.models import Hotel, RoomType
 from apps.operations.models import SystemNotice
 from apps.operations.services.prompt_service import PromptSceneError, PromptTemplateService, SUPPORTED_CUSTOMER_SERVICE_TOPICS
@@ -134,6 +135,7 @@ class AIChatService:
         hotel_id: int | None = None,
         order_id: int | None = None,
         booking_context: dict[str, Any] | None = None,
+        conversation_summary: str = "",
     ) -> dict[str, Any]:
         requested_scene = self._normalize_requested_scene(scene)
         chat_mode = self._resolve_chat_mode(
@@ -174,6 +176,7 @@ class AIChatService:
                 question=question,
                 hotel_id=hotel_id,
                 booking_context=booking_context,
+                conversation_summary=conversation_summary,
             )
         else:
             _, messages = self.build_customer_service_messages(
@@ -182,6 +185,7 @@ class AIChatService:
                 question=question,
                 hotel_id=hotel_id,
                 order_id=order_id,
+                conversation_summary=conversation_summary,
             )
 
         try:
@@ -216,6 +220,7 @@ class AIChatService:
         question: str,
         hotel_id: int | None = None,
         order_id: int | None = None,
+        conversation_summary: str = "",
     ) -> tuple[str, list[dict[str, str]]]:
         if scene != "customer_service":
             raise PromptSceneError(f"unsupported AI scene: {scene}")
@@ -224,6 +229,7 @@ class AIChatService:
             user=user,
             hotel_id=hotel_id,
             order_id=order_id,
+            conversation_summary=conversation_summary,
         )
         messages = [
             {
@@ -245,6 +251,7 @@ class AIChatService:
         question: str,
         hotel_id: int | None = None,
         booking_context: dict[str, Any] | None = None,
+        conversation_summary: str = "",
     ) -> tuple[str, list[dict[str, str]]]:
         if scene != "booking_assistant":
             raise PromptSceneError(f"unsupported AI scene: {scene}")
@@ -254,6 +261,7 @@ class AIChatService:
             question=question,
             hotel_id=hotel_id,
             booking_context=booking_context,
+            conversation_summary=conversation_summary,
         )
         messages = [
             {
@@ -320,6 +328,7 @@ class AIChatService:
         user: Any,
         hotel_id: int | None,
         order_id: int | None,
+        conversation_summary: str,
     ) -> dict[str, Any]:
         user_orders = BookingOrder.objects.filter(user=user).select_related("hotel", "room_type")
         requested_order = user_orders.filter(id=order_id).first() if order_id else None
@@ -346,6 +355,10 @@ class AIChatService:
         recent_notices = [
             self._serialize_notice(item)
             for item in SystemNotice.objects.filter(user=user).order_by("-created_at", "-id")[:5]
+        ]
+        recent_reviews = [
+            self._serialize_review(item)
+            for item in Review.objects.filter(user=user).select_related("hotel", "order").order_by("-created_at", "-id")[:5]
         ]
         agent_hints = self._build_customer_service_agent_hints(
             requested_order=requested_order,
@@ -375,7 +388,9 @@ class AIChatService:
             "recent_orders_json": self.prompt_service.dumps(recent_orders),
             "recommended_hotels_json": self.prompt_service.dumps(recommended_hotels),
             "recent_notices_json": self.prompt_service.dumps(recent_notices),
+            "recent_reviews_json": self.prompt_service.dumps(recent_reviews),
             "agent_hints_json": self.prompt_service.dumps(agent_hints),
+            "conversation_summary": (conversation_summary or "").strip(),
         }
 
     def _build_customer_service_agent_hints(
@@ -564,6 +579,18 @@ class AIChatService:
                 )
             )
 
+        if intent == "review":
+            options.append(
+                build_option(
+                    option_type="navigate_reviews",
+                    label="查看我的评价",
+                    value="my-reviews",
+                    route="/my/reviews",
+                    description="查看你的评价记录与商家回复",
+                    query=build_action_query(),
+                )
+            )
+
         if preferred_order is not None:
             options.append(
                 build_option(
@@ -694,6 +721,8 @@ class AIChatService:
             return "invoice"
         if any(keyword in content for keyword in ("通知", "消息", "提醒")):
             return "notification"
+        if any(keyword in content for keyword in ("评价", "点评", "评论", "打分", "评分")):
+            return "review"
         if any(keyword in content for keyword in ("订酒店", "预订", "找酒店", "比价", "推荐酒店", "房型")):
             return "booking_request"
         if any(keyword in content for keyword in ("订单", "状态", "进度", "详情")):
@@ -705,6 +734,7 @@ class AIChatService:
             "navigate_cancel_order": 25,
             "navigate_payment": 30,
             "navigate_order_detail": 35,
+            "navigate_reviews": 40,
             "navigate_order_list": 45,
             "navigate_invoice": 50,
             "navigate_notification": 55,
@@ -717,6 +747,7 @@ class AIChatService:
             "pay_order": {"navigate_payment": -20, "navigate_order_detail": -10},
             "invoice": {"navigate_invoice": -20},
             "notification": {"navigate_notification": -20},
+            "review": {"navigate_reviews": -20},
             "booking_request": {"navigate_ai_booking": -25},
             "order_status": {"navigate_order_detail": -15, "navigate_order_list": -10},
         }
@@ -730,6 +761,7 @@ class AIChatService:
         question: str,
         hotel_id: int | None,
         booking_context: dict[str, Any] | None,
+        conversation_summary: str,
     ) -> dict[str, Any]:
         context = self._normalize_booking_context(booking_context)
         cities = self._list_available_cities()
@@ -753,6 +785,7 @@ class AIChatService:
             "booking_context_json": self.prompt_service.dumps(context),
             "available_cities_json": self.prompt_service.dumps(cities),
             "selected_hotel_json": self.prompt_service.dumps(self._serialize_hotel(selected_hotel) if selected_hotel else None),
+            "conversation_summary": (conversation_summary or "").strip(),
         }
 
     def _build_dictionary_payload(self) -> dict[str, list[dict[str, Any]]]:
@@ -830,6 +863,18 @@ class AIChatService:
             "content": notice.content,
             "is_read": notice.is_read,
             "created_at": timezone.localtime(notice.created_at).isoformat(timespec="seconds"),
+        }
+
+    def _serialize_review(self, review: Review) -> dict[str, Any]:
+        return {
+            "id": review.id,
+            "order_id": review.order_id,
+            "hotel_id": review.hotel_id,
+            "hotel_name": review.hotel.name if review.hotel_id else "",
+            "score": review.score,
+            "content": review.content,
+            "reply_content": review.reply_content,
+            "created_at": timezone.localtime(review.created_at).isoformat(timespec="seconds"),
         }
 
     def _build_booking_assistant_response(

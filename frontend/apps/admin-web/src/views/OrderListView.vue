@@ -61,7 +61,7 @@
         <template #col-lifecycle_warning="{ row }">
           <router-link
             v-if="row.is_lifecycle_anomaly"
-            :to="`/admin/orders/${row.id}`"
+            :to="{ path: `/admin/orders/${row.id}`, query: route.query }"
             class="inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-600 transition hover:border-rose-300 hover:bg-rose-100"
             title="存在异常，请进入详情查看"
           >
@@ -76,7 +76,7 @@
         <template #col-pay_amount="{ value }">¥{{ formatMoney(value as number) }}</template>
         <template #actions="{ row }">
           <div class="flex min-w-[152px] flex-wrap gap-2">
-            <router-link :to="`/admin/orders/${row.id}`" class="inline-flex whitespace-nowrap text-sm text-teal-600 hover:underline">详情</router-link>
+            <router-link :to="{ path: `/admin/orders/${row.id}`, query: route.query }" class="inline-flex whitespace-nowrap text-sm text-teal-600 hover:underline">详情</router-link>
             <button v-if="row.status === 'paid'" class="inline-flex whitespace-nowrap text-sm text-indigo-600 hover:underline disabled:cursor-not-allowed disabled:opacity-60" :disabled="actionLoading" @click="confirmOrder(row)">确认</button>
             <button v-if="row.status === 'confirmed' || row.status === 'paid'" class="inline-flex whitespace-nowrap text-sm text-green-600 hover:underline disabled:cursor-not-allowed disabled:opacity-60" :disabled="actionLoading" @click="openCheckIn(row)">入住</button>
             <button v-if="row.status === 'checked_in'" class="inline-flex whitespace-nowrap text-sm text-orange-600 hover:underline disabled:cursor-not-allowed disabled:opacity-60" :disabled="actionLoading" @click="openCheckOut(row)">退房</button>
@@ -135,12 +135,14 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { orderApi } from '@hotelink/api'
 import { formatMoney, ORDER_STATUS_MAP, PAYMENT_STATUS_MAP, extractApiError } from '@hotelink/utils'
 import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, useToast, useConfirm, SelectField } from '@hotelink/ui'
 
 const { showToast } = useToast()
 const { confirm: confirmDialog } = useConfirm()
+const route = useRoute()
 
 const columns = [
   { key: 'order_no', label: '订单号', sortField: 'order_no' },
@@ -168,6 +170,16 @@ const checkInForm = reactive({ order_id: 0, order_no: '', room_no: '', operator_
 const showCheckOut = ref(false)
 const checkOutForm = reactive({ order_id: 0, order_no: '', consume_amount: 0, operator_remark: '' })
 const actionLoading = ref(false)
+
+function patchOrderRow(orderId: number, patch: Record<string, unknown>) {
+  const nextStatus = String(patch.status || '')
+  if (filters.status && nextStatus && filters.status !== nextStatus) {
+    list.value = list.value.filter((item) => Number(item.id) !== orderId)
+    total.value = Math.max(0, total.value - 1)
+    return
+  }
+  list.value = list.value.map((item) => (Number(item.id) === orderId ? { ...item, ...patch } : item))
+}
 
 // 根据状态值返回对应展示信息。
 function statusType(status: string) {
@@ -218,7 +230,7 @@ async function confirmOrder(row: Record<string, unknown>) {
     const res = await orderApi.changeStatus({ order_id: row.id as number, target_status: 'confirmed' })
     if (res.code === 0) {
       showToast('订单已确认', 'success')
-      loadList()
+      patchOrderRow(row.id as number, { status: 'confirmed' })
     } else {
       showToast(extractApiError(res, '确认订单失败'), 'error')
     }
@@ -255,7 +267,7 @@ async function handleCheckIn() {
     if (res.code === 0) {
       showToast('入住办理成功', 'success')
       showCheckIn.value = false
-      loadList()
+      patchOrderRow(checkInForm.order_id, { room_no: checkInForm.room_no, status: 'checked_in' })
     } else {
       showToast(extractApiError(res, '入住办理失败'), 'error')
     }
@@ -288,7 +300,7 @@ async function handleCheckOut() {
     if (res.code === 0) {
       showToast('退房办理成功', 'success')
       showCheckOut.value = false
-      loadList()
+      patchOrderRow(checkOutForm.order_id, { status: 'completed' })
     } else {
       showToast(extractApiError(res, '退房办理失败'), 'error')
     }

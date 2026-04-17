@@ -1,6 +1,7 @@
 // 处理 formatDate 业务流程。
 export function formatDate(date: Date | string): string {
   const d = typeof date === 'string' ? new Date(date) : date
+  if (Number.isNaN(d.getTime())) return ''
   const y = d.getFullYear()
   const m = String(d.getMonth() + 1).padStart(2, '0')
   const day = String(d.getDate()).padStart(2, '0')
@@ -10,13 +11,14 @@ export function formatDate(date: Date | string): string {
 // 处理 formatDateTime 业务流程。
 export function formatDateTime(date: Date | string): string {
   const d = typeof date === 'string' ? new Date(date) : date
+  if (Number.isNaN(d.getTime())) return ''
   return `${formatDate(d)} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`
 }
 
 // 处理 formatMoney 业务流程。
 export function formatMoney(amount: number | string): string {
   const n = typeof amount === 'string' ? parseFloat(amount) : amount
-  if (isNaN(n)) return '0.00'
+  if (!Number.isFinite(n)) return '0.00'
   return n.toFixed(2)
 }
 
@@ -76,6 +78,31 @@ export const HOTEL_STATUS_MAP: Record<string, string> = {
   draft: '草稿',
   online: '已上架',
   offline: '已下架',
+}
+
+export const HOTEL_TYPE_MAP: Record<string, string> = {
+  hotel: '酒店',
+  homestay: '民宿',
+  short_rent: '短租',
+}
+
+export const FACILITY_MAP: Record<string, string> = {
+  wifi: 'WiFi',
+  parking: '停车场',
+  pool: '泳池',
+  gym: '健身房',
+  restaurant: '餐厅',
+  air_conditioning: '空调',
+  elevator: '电梯',
+  laundry: '洗衣服务',
+  luggage_storage: '行李寄存',
+  front_desk_24h: '24小时前台',
+  airport_shuttle: '接机服务',
+  meeting_room: '会议室',
+  non_smoking: '无烟房',
+  pet_friendly: '宠物友好',
+  kitchen: '厨房',
+  washing_machine: '洗衣机',
 }
 
 export const BED_TYPE_MAP: Record<string, string> = {

@@ -1,10 +1,11 @@
 <template>
   <section>
-    <div class="mb-4">
-      <router-link to="/admin/orders" class="text-sm text-teal-600 hover:underline">&larr; 返回订单列表</router-link>
+    <div class="mb-4 flex items-center justify-between gap-3">
+      <router-link :to="{ path: '/admin/orders', query: route.query }" class="text-sm text-teal-600 hover:underline">&larr; 返回订单列表</router-link>
+      <span v-if="refreshing && order" class="text-xs text-slate-400">正在更新订单信息…</span>
     </div>
 
-    <div v-if="loading" class="text-center py-20 text-slate-400">加载中…</div>
+    <div v-if="loading && !order" class="text-center py-20 text-slate-400">加载中…</div>
 
     <template v-else-if="order">
       <PageHeader :title="`订单 ${order.order_no}`">
@@ -90,6 +91,14 @@
       <!-- 操作按钮 -->
       <div class="mt-6 flex flex-wrap gap-3">
         <button
+          v-if="canCancelOrder"
+          class="rounded-lg bg-rose-600 px-5 py-2 text-sm font-medium text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+          :disabled="actionLoading"
+          @click="openCancel"
+        >
+          {{ actionLoading ? '处理中…' : '取消订单' }}
+        </button>
+        <button
           v-if="order.status === 'paid'"
           class="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
           :disabled="actionLoading"
@@ -118,6 +127,27 @@
 
     <div v-else class="text-center py-20 text-slate-400">订单未找到</div>
   </section>
+
+  <!-- Cancel Modal -->
+  <ModalDialog :visible="showCancelModal" title="取消订单" size="sm" @close="showCancelModal = false">
+    <div class="space-y-4">
+      <p class="text-sm text-slate-500">请输入取消原因，便于后续追踪。</p>
+      <div>
+        <label class="mb-1 block text-sm font-medium">取消原因</label>
+        <textarea v-model="cancelReason" rows="3" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-rose-500" placeholder="例如：客户临时改期 / 重复下单 / 联系不上客户" />
+      </div>
+    </div>
+    <template #footer>
+      <button class="rounded-lg border border-slate-200 px-4 py-2 text-sm hover:bg-slate-50" @click="showCancelModal = false">取消</button>
+      <button
+        class="rounded-lg bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+        :disabled="actionLoading"
+        @click="submitCancel"
+      >
+        {{ actionLoading ? '取消中…' : '确认取消' }}
+      </button>
+    </template>
+  </ModalDialog>
 
   <!-- Check-in Modal -->
   <ModalDialog :visible="showCheckInModal" title="办理入住" size="sm" @close="showCheckInModal = false">
@@ -164,9 +194,12 @@ const route = useRoute()
 
 const showCheckInModal = ref(false)
 const checkInRoomNo = ref('')
+const showCancelModal = ref(false)
+const cancelReason = ref('')
 const actionLoading = ref(false)
 
 const loading = ref(true)
+const refreshing = ref(false)
 const order = ref<Record<string, unknown> | null>(null)
 const payments = ref<PaymentItem[]>([])
 
@@ -195,22 +228,33 @@ function statusType(status: string) {
   return 'info' as const
 }
 
+const canCancelOrder = computed(() => !!order.value && !['checked_in', 'completed', 'cancelled', 'refunded'].includes(String(order.value.status)))
+
 // 加载 Detail 相关数据。
-async function loadDetail() {
-  loading.value = true
-  const id = Number(route.params.id)
-  const res = await orderApi.detail(id)
-  if (res.code === 0 && res.data) {
-    const detail = res.data as Record<string, unknown>
-    order.value = detail
-    payments.value = Array.isArray((detail as { payments?: unknown[] }).payments)
-      ? ((detail as { payments?: PaymentItem[] }).payments || [])
-      : []
+async function loadDetail(silent = false) {
+  const shouldShowSkeleton = !silent || !order.value
+  if (shouldShowSkeleton) {
+    loading.value = true
   } else {
-    order.value = null
-    payments.value = []
+    refreshing.value = true
   }
-  loading.value = false
+  const id = Number(route.params.id)
+  try {
+    const res = await orderApi.detail(id)
+    if (res.code === 0 && res.data) {
+      const detail = res.data as Record<string, unknown>
+      order.value = detail
+      payments.value = Array.isArray((detail as { payments?: unknown[] }).payments)
+        ? ((detail as { payments?: PaymentItem[] }).payments || [])
+        : []
+    } else if (!silent || !order.value) {
+      order.value = null
+      payments.value = []
+    }
+  } finally {
+    loading.value = false
+    refreshing.value = false
+  }
 }
 
 // 处理 confirmOrder 业务流程。
@@ -222,12 +266,40 @@ async function confirmOrder() {
     const res = await orderApi.changeStatus({ order_id: order.value!.id as number, target_status: 'confirmed' })
     if (res.code === 0) {
       showToast('订单已确认', 'success')
-      loadDetail()
+      loadDetail(true)
     } else {
       showToast(res.message || '确认失败', 'error')
     }
   } catch {
     showToast('操作失败，请重试', 'error')
+  } finally {
+    actionLoading.value = false
+  }
+}
+
+function openCancel() {
+  cancelReason.value = ''
+  showCancelModal.value = true
+}
+
+async function submitCancel() {
+  if (actionLoading.value) return
+  actionLoading.value = true
+  try {
+    const res = await orderApi.changeStatus({
+      order_id: order.value!.id as number,
+      target_status: 'cancelled',
+      operator_remark: cancelReason.value.trim(),
+    })
+    if (res.code === 0) {
+      showToast('订单已取消', 'success')
+      showCancelModal.value = false
+      loadDetail(true)
+    } else {
+      showToast(res.message || '取消失败', 'error')
+    }
+  } catch {
+    showToast('取消失败，请重试', 'error')
   } finally {
     actionLoading.value = false
   }
@@ -252,7 +324,7 @@ async function submitCheckIn() {
     if (res.code === 0) {
       showToast('入住办理成功', 'success')
       showCheckInModal.value = false
-      loadDetail()
+      loadDetail(true)
     } else {
       showToast(res.message || '办理入住失败', 'error')
     }
@@ -272,7 +344,7 @@ async function doCheckOut() {
     const res = await orderApi.checkOut({ order_id: order.value!.id as number })
     if (res.code === 0) {
       showToast('退房办理成功', 'success')
-      loadDetail()
+      loadDetail(true)
     } else {
       showToast(res.message || '办理退房失败', 'error')
     }

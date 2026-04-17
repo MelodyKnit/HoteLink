@@ -74,7 +74,7 @@
 
 ### 4.2 hotels
 
-- `Hotel`
+- `Hotel`（含 `type` 字段区分酒店/民宿/短租，`facilities` JSON 设施列表，`tags` JSON 标签列表）
 - `RoomType`
 - `RoomInventory`
 
@@ -108,7 +108,7 @@
 - `PlatformConfig`
 - `AuditLog`
 - `SystemNotice`（支持 `related_order` 关联字段，用于订单/支付通知精确跳转）
-- `AICallLog`
+- `AICallLog`（`error_message` 为 `TextField`，可存储完整错误堆栈，截断上限 5000 字符）
 - `RuntimeConfig`
 
 ---

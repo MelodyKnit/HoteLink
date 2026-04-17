@@ -112,6 +112,10 @@ type InventoryField = 'price' | 'stock'
 const formErrors = ref<Partial<Record<InventoryField, string>>>({})
 const editForm = reactive({ date: '', price: 0, stock: 0, status: 'available' })
 
+function patchCalendarRow(date: string, patch: Record<string, unknown>) {
+  calendarData.value = calendarData.value.map((item) => (String(item.date) === date ? { ...item, ...patch } : item))
+}
+
 function getFieldError(field: InventoryField): string {
   switch (field) {
     case 'price':
@@ -218,7 +222,11 @@ async function handleSave() {
     if (res.code === 0) {
       showToast('库存更新成功', 'success')
       showModal.value = false
-      loadCalendar()
+      patchCalendarRow(editForm.date, {
+        price: editForm.price,
+        stock: editForm.stock,
+        status: editForm.status,
+      })
     } else {
       showToast(extractApiError(res, '库存更新失败'), 'error')
     }

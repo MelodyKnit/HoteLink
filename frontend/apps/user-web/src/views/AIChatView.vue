@@ -99,46 +99,54 @@
             <div class="ai-markdown space-y-2" v-html="renderMd(msg.content)" />
             <!-- Smart Options -->
             <div v-if="msg.bookingAssistant?.options?.length" class="mt-4 space-y-2 border-t border-gray-100 pt-3">
-              <p class="text-xs font-medium text-gray-500">⚡ 快捷操作：</p>
-              <div
-                v-for="(option, optionIndex) in resolveAssistantOptions(msg.bookingAssistant?.options)"
-                :key="`${option.type}-${option.value}-${optionIndex}`"
-                @click="handleAssistantOption(option)"
-                @keydown.enter="handleAssistantOption(option)"
-                tabindex="0"
-                role="button"
-                class="group w-full rounded-2xl border-2 border-brand/20 bg-gradient-to-r from-brand/5 to-transparent px-3 py-3 text-left transition-all hover:border-brand/50 hover:bg-brand/10"
+              <button
+                @click="toggleAssistantOptions(msg.id)"
+                class="flex w-full items-center justify-between rounded-xl bg-gray-50 px-3 py-2 text-xs font-medium text-gray-600 hover:bg-gray-100"
               >
-                <div class="flex items-start justify-between gap-3">
-                  <div class="flex-1">
-                    <p class="font-semibold text-gray-800 group-hover:text-brand">{{ option.label }}</p>
-                    <p v-if="option.description" class="mt-1 text-xs leading-5 text-gray-500">{{ option.description }}</p>
-                    <div class="mt-1.5 flex flex-wrap items-center gap-1.5 text-[10px]">
-                      <span
-                        v-if="isRecommendedOption(option)"
-                        class="rounded-full bg-brand/10 px-2 py-0.5 font-medium text-brand"
+                <span>⚡ 快捷操作（{{ resolveAssistantOptions(msg.bookingAssistant?.options).length }}）</span>
+                <span>{{ isAssistantOptionsExpanded(msg.id) ? '收起' : '展开' }}</span>
+              </button>
+              <div v-if="isAssistantOptionsExpanded(msg.id)" class="space-y-2">
+                <div
+                  v-for="(option, optionIndex) in resolveAssistantOptions(msg.bookingAssistant?.options)"
+                  :key="`${option.type}-${option.value}-${optionIndex}`"
+                  @click="handleAssistantOption(option)"
+                  @keydown.enter="handleAssistantOption(option)"
+                  tabindex="0"
+                  role="button"
+                  class="group w-full rounded-2xl border-2 border-brand/20 bg-gradient-to-r from-brand/5 to-transparent px-3 py-3 text-left transition-all hover:border-brand/50 hover:bg-brand/10"
+                >
+                  <div class="flex items-start justify-between gap-3">
+                    <div class="flex-1">
+                      <p class="font-semibold text-gray-800 group-hover:text-brand">{{ option.label }}</p>
+                      <p v-if="option.description" class="mt-1 text-xs leading-5 text-gray-500">{{ option.description }}</p>
+                      <div class="mt-1.5 flex flex-wrap items-center gap-1.5 text-[10px]">
+                        <span
+                          v-if="isRecommendedOption(option)"
+                          class="rounded-full bg-brand/10 px-2 py-0.5 font-medium text-brand"
+                        >
+                          推荐
+                        </span>
+                        <span
+                          v-if="option.requires_confirmation"
+                          class="rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-700"
+                        >
+                          需确认
+                        </span>
+                      </div>
+                    </div>
+                    <div class="shrink-0 flex items-center gap-2">
+                      <button
+                        v-if="isHotelOption(option)"
+                        @click.stop="openHotelDetail(option)"
+                        class="rounded-md border border-brand/30 px-2 py-1 text-[11px] font-medium leading-none text-brand hover:bg-brand/10"
                       >
-                        推荐
-                      </span>
-                      <span
-                        v-if="option.requires_confirmation"
-                        class="rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-700"
-                      >
-                        需确认
+                        详情
+                      </button>
+                      <span class="text-xl group-hover:scale-110 transition-transform">
+                        {{ getOptionEmoji(option.type) }}
                       </span>
                     </div>
-                  </div>
-                  <div class="shrink-0 flex items-center gap-2">
-                    <button
-                      v-if="isHotelOption(option)"
-                      @click.stop="openHotelDetail(option)"
-                      class="rounded-md border border-brand/30 px-2 py-1 text-[11px] font-medium leading-none text-brand hover:bg-brand/10"
-                    >
-                      详情
-                    </button>
-                    <span class="text-xl group-hover:scale-110 transition-transform">
-                      {{ getOptionEmoji(option.type) }}
-                    </span>
                   </div>
                 </div>
               </div>
@@ -194,11 +202,20 @@
     </button>
 
     <!-- Quick Actions -->
-    <div v-if="shouldShowQuickActions" class="shrink-0 flex flex-wrap gap-2 px-4 pb-2">
-      <button v-for="q in dynamicQuickQuestions" :key="q" @click="sendMessage(q)"
-        class="rounded-full border-2 border-brand/30 px-3 py-1.5 text-xs font-medium text-brand hover:border-brand/60 hover:bg-brand/5 transition-colors">
-        {{ q }}
+    <div v-if="shouldShowQuickActions" class="shrink-0 px-4 pb-2">
+      <button
+        @click="quickActionsExpanded = !quickActionsExpanded"
+        class="mb-2 flex w-full items-center justify-between rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-600"
+      >
+        <span>快捷问题</span>
+        <span>{{ quickActionsExpanded ? '收起' : '展开' }}</span>
       </button>
+      <div v-if="quickActionsExpanded" class="flex flex-wrap gap-2">
+        <button v-for="q in dynamicQuickQuestions" :key="q" @click="sendMessage(q)"
+          class="rounded-full border-2 border-brand/30 px-3 py-1.5 text-xs font-medium text-brand hover:border-brand/60 hover:bg-brand/5 transition-colors">
+          {{ q }}
+        </button>
+      </div>
     </div>
 
     <!-- Input -->
@@ -236,6 +253,9 @@ const showClearConfirm = ref(false)
 const chatHistories = ref<ChatHistory[]>([])
 const backendSessionId = ref<number | null>(null)
 const showScrollToBottom = ref(false)
+const quickActionsExpanded = ref(false)
+const assistantOptionsExpanded = ref<Record<string, boolean>>({})
+const conversationSummary = ref('')
 
 interface ChatHistory {
   timestamp: number
@@ -336,6 +356,9 @@ const BOOKING_SESSION_KEY = 'hotelink_ai_booking_chat_state'
 const CUSTOMER_SESSION_KEY = 'hotelink_ai_customer_chat_state'
 const BOOKING_HISTORY_STORAGE_KEY = 'hotelink_ai_booking_history'
 const CUSTOMER_HISTORY_STORAGE_KEY = 'hotelink_ai_customer_history'
+const COMPRESS_MESSAGE_THRESHOLD = 24
+const COMPRESS_KEEP_RECENT = 10
+const SUMMARY_PREFIX = '[对话摘要]'
 
 function isBookingPath(path: string): boolean {
   return path === BOOKING_PATH
@@ -392,6 +415,53 @@ const dynamicQuickQuestions = computed(() => {
 const shouldShowQuickActions = computed(() => {
   return messages.value.length <= 1 && !sending.value
 })
+
+watch(shouldShowQuickActions, (visible) => {
+  if (visible) {
+    quickActionsExpanded.value = false
+  }
+})
+
+function isAssistantOptionsExpanded(messageId: string): boolean {
+  return assistantOptionsExpanded.value[messageId] === true
+}
+
+function toggleAssistantOptions(messageId: string) {
+  assistantOptionsExpanded.value = {
+    ...assistantOptionsExpanded.value,
+    [messageId]: !isAssistantOptionsExpanded(messageId),
+  }
+}
+
+function buildConversationSummarySnippet(items: Msg[]): string {
+  const lines = items
+    .filter((item) => !item.loading && !item.content.startsWith(SUMMARY_PREFIX))
+    .map((item) => {
+      const roleLabel = item.role === 'user' ? '用户' : '助手'
+      const compact = item.content.replace(/\s+/g, ' ').trim().slice(0, 70)
+      return `${roleLabel}: ${compact}`
+    })
+    .filter((line) => line.length > 0)
+  return lines.join('\n')
+}
+
+function compressConversationIfNeeded() {
+  const validMessages = messages.value.filter((item) => !item.loading)
+  if (validMessages.length <= COMPRESS_MESSAGE_THRESHOLD) return
+
+  const splitIndex = Math.max(validMessages.length - COMPRESS_KEEP_RECENT, 1)
+  const olderMessages = validMessages.slice(0, splitIndex)
+  const recentMessages = validMessages.slice(splitIndex)
+  const summaryChunk = buildConversationSummarySnippet(olderMessages)
+  const previousSummary = conversationSummary.value.trim()
+  conversationSummary.value = [previousSummary, summaryChunk].filter(Boolean).join('\n')
+
+  const summaryMessage = createMessage(
+    'assistant',
+    `${SUMMARY_PREFIX}\n已自动压缩 ${olderMessages.length} 条较早消息，后续会基于摘要继续为你服务。`
+  )
+  messages.value = [summaryMessage, ...recentMessages]
+}
 
 // 获取选项对应的emoji
 function getOptionEmoji(type: string): string {
@@ -573,6 +643,9 @@ function clearChat() {
   ]
   bookingContext.value = {}
   backendSessionId.value = null
+  conversationSummary.value = ''
+  assistantOptionsExpanded.value = {}
+  quickActionsExpanded.value = false
   input.value = ''
   showClearConfirm.value = false
   scrollBottom()
@@ -583,6 +656,7 @@ function saveSessionStateForPath(path: string) {
     messages: messages.value,
     bookingContext: bookingContext.value,
     backendSessionId: backendSessionId.value,
+    conversationSummary: conversationSummary.value,
   }
   sessionStorage.setItem(resolveSessionKey(path), JSON.stringify(payload))
 }
@@ -595,7 +669,12 @@ function restoreSessionStateForPath(path: string) {
   const raw = sessionStorage.getItem(resolveSessionKey(path))
   if (!raw) return false
   try {
-    const parsed = JSON.parse(raw) as { messages?: Msg[]; bookingContext?: BookingContext; backendSessionId?: number | null }
+    const parsed = JSON.parse(raw) as {
+      messages?: Msg[]
+      bookingContext?: BookingContext
+      backendSessionId?: number | null
+      conversationSummary?: string
+    }
     const restoredMessages = normalizeMessages(parsed.messages)
     if (restoredMessages.length) {
       messages.value = restoredMessages.filter((m) => !m.loading)
@@ -604,6 +683,7 @@ function restoreSessionStateForPath(path: string) {
       bookingContext.value = parsed.bookingContext
     }
     backendSessionId.value = Number.isFinite(Number(parsed.backendSessionId)) ? Number(parsed.backendSessionId) : null
+    conversationSummary.value = typeof parsed.conversationSummary === 'string' ? parsed.conversationSummary : ''
     return true
   } catch {
     return false
@@ -750,6 +830,7 @@ async function sendMessage(text?: string, contextPatch?: Record<string, unknown>
     if (!retryMessage) return
     updateUserSendState(retryMessageId, 'sending')
   } else {
+    compressConversationIfNeeded()
     const userMessage = createMessage('user', msg, { sendState: 'sending' })
     messages.value.push(userMessage)
     userMessageId = userMessage.id
@@ -774,6 +855,7 @@ async function sendMessage(text?: string, contextPatch?: Record<string, unknown>
       hotel_id: nextBookingContext?.selected_hotel_id || undefined,
       session_id: backendSessionId.value || undefined,
       booking_context: isBookingMode.value ? nextBookingContext : undefined,
+      conversation_summary: conversationSummary.value || undefined,
     })) {
       if (event.type === 'meta') {
         pendingBookingAssistant = (event.booking_assistant as BookingAssistant) || null
@@ -829,9 +911,10 @@ async function sendMessage(text?: string, contextPatch?: Record<string, unknown>
     if (!isBookingMode.value || !carryBookingContext) {
       bookingContext.value = {}
     }
+  } finally {
+    sending.value = false
+    scrollBottom()
   }
-  sending.value = false
-  scrollBottom()
 }
 
 function initializeCurrentModeState() {
@@ -840,10 +923,13 @@ function initializeCurrentModeState() {
     messages.value = [createMessage('assistant', resolveDefaultWelcome(route.path))]
     bookingContext.value = {}
     backendSessionId.value = null
+    conversationSummary.value = ''
   }
   if (!isBookingMode.value) {
     bookingContext.value = {}
   }
+  assistantOptionsExpanded.value = {}
+  quickActionsExpanded.value = false
   chatHistories.value = loadHistories()
   showScrollToBottom.value = false
 }

@@ -86,11 +86,11 @@ async function refreshAccessToken(): Promise<string | null> {
 
   if (!refreshInFlight) {
     refreshInFlight = authHttp
-      .post<ApiResult<{ access_token: string; token_type: string }>>(AUTH_REFRESH_ENDPOINT, { refresh_token: refreshToken })
+      .post<ApiResult<{ access_token: string; refresh_token?: string; token_type: string }>>(AUTH_REFRESH_ENDPOINT, { refresh_token: refreshToken })
       .then((resp) => {
         const body = resp.data
         if (body.code === 0 && body.data?.access_token) {
-          setTokens(body.data.access_token, refreshToken)
+          setTokens(body.data.access_token, body.data.refresh_token || refreshToken)
           return body.data.access_token
         }
         return null
@@ -216,7 +216,7 @@ export const authApi = {
   adminLogin: (data: { username: string; password: string }) =>
     post<{ access_token: string; refresh_token: string; token_type: string; expires_in: number; user: { id: number; username: string; role: string } }>('/public/auth/admin-login', data),
   refresh: (refresh_token: string) =>
-    post<{ access_token: string; token_type: string }>('/public/auth/refresh', { refresh_token }),
+    post<{ access_token: string; refresh_token?: string; token_type: string; expires_in?: number }>('/public/auth/refresh', { refresh_token }),
   logout: (refresh_token: string) =>
     post('/user/auth/logout', { refresh_token }),
   me: () =>
@@ -240,6 +240,7 @@ export const hotelApi = {
   create: (data: Record<string, unknown>) => post('/admin/hotels/create', data),
   update: (data: Record<string, unknown>) => post('/admin/hotels/update', data),
   delete: (hotel_id: number) => post('/admin/hotels/delete', { hotel_id }),
+  batchUpdate: (data: { hotel_ids: number[]; type?: string }) => post('/admin/hotels/batch-update', data),
 }
 
 // ========== Room Types ==========
@@ -260,7 +261,7 @@ export const inventoryApi = {
 export const orderApi = {
   list: (params?: Record<string, unknown>) => get<PaginatedData>('/admin/orders', params),
   detail: (order_id: number) => get('/admin/orders/detail', { order_id }),
-  changeStatus: (data: { order_id: number; target_status: string }) => post('/admin/orders/change-status', data),
+  changeStatus: (data: { order_id: number; target_status: string; operator_remark?: string }) => post('/admin/orders/change-status', data),
   checkIn: (data: { order_id: number; room_no: string; operator_remark?: string }) => post('/admin/orders/check-in', data),
   checkOut: (data: { order_id: number; consume_amount?: number; operator_remark?: string }) => post('/admin/orders/check-out', data),
 }
@@ -276,18 +277,24 @@ export const reviewApi = {
 export const userApi = {
   list: (params?: Record<string, unknown>) => get<PaginatedData>('/admin/users', params),
   changeStatus: (data: { user_id: number; status: string }) => post('/admin/users/change-status', data),
+  update: (data: { user_id: number; nickname?: string; mobile?: string; member_level?: string }) => post('/admin/users/update', data),
+  resetPassword: (user_id: number) => post('/admin/users/reset-password', { user_id }),
 }
 
 // ========== Employees ==========
 export const employeeApi = {
   list: (params?: Record<string, unknown>) => get<PaginatedData>('/admin/employees', params),
   create: (data: Record<string, unknown>) => post('/admin/employees/create', data),
+  update: (data: { user_id: number; nickname?: string; mobile?: string; role?: string }) => post('/admin/employees/update', data),
+  changeStatus: (data: { user_id: number; status: string }) => post('/admin/employees/change-status', data),
+  resetPassword: (user_id: number) => post('/admin/employees/reset-password', { user_id }),
 }
 
 // ========== Reports ==========
 export const reportApi = {
   tasks: (params?: Record<string, unknown>) => get<PaginatedData>('/admin/reports/tasks', params),
   createTask: (data: Record<string, unknown>) => post('/admin/reports/tasks/create', data),
+  deleteTask: (task_id: number) => post('/admin/reports/tasks/delete', { task_id }),
 }
 
 // ========== Settings ==========
@@ -299,14 +306,15 @@ export const settingsApi = {
 // ========== System ==========
 export const adminSystemApi = {
   reset: (confirm: string) => post<{ reset: boolean; deleted_counts: Record<string, number>; message: string }>('/admin/system/reset', { confirm }),
-  status: () => get('/admin/system/status'),
+  status: (params?: Record<string, unknown>) => get('/admin/system/status', params),
 }
 
 // ========== Admin Coupons ==========
 export const adminCouponApi = {
   list: (params?: Record<string, unknown>) => get<PaginatedData>('/admin/coupons', params),
   create: (data: Record<string, unknown>) => post('/admin/coupons/create', data),
-  update: (data: { template_id: number; status: string }) => post('/admin/coupons/update', data),
+  update: (data: Record<string, unknown>) => post('/admin/coupons/update', data),
+  delete: (template_id: number) => post('/admin/coupons/delete', { template_id }),
 }
 
 // ========== Admin Members ==========
@@ -373,7 +381,7 @@ export const aiApi = {
   settings: () => get<{
     ai_enabled: boolean
     active_provider: string
-    providers: { name: string; label: string; base_url: string; api_key_configured: boolean; api_key?: string; chat_model: string; reasoning_model: string; timeout: number; is_active: boolean }[]
+    providers: { name: string; label: string; base_url: string; api_key_configured: boolean; chat_model: string; reasoning_model: string; timeout: number; is_active: boolean }[]
     builtin_providers: string[]
     current_provider: Record<string, unknown> | null
   }>('/admin/ai/settings'),
@@ -477,6 +485,9 @@ export const userInvoiceApi = {
   createTitle: (data: { invoice_type: string; title: string; tax_no?: string; email: string }) =>
     post('/user/invoices/create', data),
   apply: (data: { order_id: number; invoice_title_id: number }) => post('/user/invoices/apply', data),
+  updateTitle: (data: { title_id: number; invoice_type?: string; title?: string; tax_no?: string; email?: string }) =>
+    post('/user/invoices/title/update', data),
+  deleteTitle: (title_id: number) => post('/user/invoices/title/delete', { title_id }),
 }
 
 // ========== User Points ==========
@@ -495,7 +506,7 @@ export const userNoticeApi = {
 
 // ========== User AI Chat ==========
 export const userAiApi = {
-  chat: (data: { scene: string; question: string; hotel_id?: number; order_id?: number; session_id?: number; booking_context?: Record<string, unknown> }) =>
+  chat: (data: { scene: string; question: string; hotel_id?: number; order_id?: number; session_id?: number; booking_context?: Record<string, unknown>; conversation_summary?: string }) =>
     post<{ answer: string; scene: string; session_id?: number; booking_assistant?: Record<string, unknown> | null }>('/user/ai/chat', data),
   recommendations: (data: { scene?: string; hotel_id?: number; keyword?: string; limit?: number }) =>
     post<{ scene: string; recommendations: { id: number; name: string; city: string; star: number; cover_image: string; min_price: number; rating: number; reason: string }[] }>('/user/ai/recommendations', data as Record<string, unknown>),
@@ -506,7 +517,7 @@ export const userAiApi = {
   sessionMessages: (session_id: number) => get<{ items: { id: number; role: string; content: string; tokens_used: number; created_at: string }[] }>(`/user/ai/sessions/${session_id}/messages`),
 
   async *chatStream(
-    data: { scene: string; question: string; hotel_id?: number; order_id?: number; session_id?: number; booking_context?: Record<string, unknown> }
+    data: { scene: string; question: string; hotel_id?: number; order_id?: number; session_id?: number; booking_context?: Record<string, unknown>; conversation_summary?: string }
   ): AsyncGenerator<Record<string, unknown>> {
     const token = getToken()
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }

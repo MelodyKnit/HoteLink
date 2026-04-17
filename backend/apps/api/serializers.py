@@ -1,7 +1,9 @@
 """apps/api/serializers.py —— API 请求与响应序列化定义。"""
 
 from django.contrib.auth.models import User
+from django.contrib.auth.password_validation import validate_password
 from django.conf import settings
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils import timezone
 from rest_framework import serializers
 from urllib.parse import quote, urlparse
@@ -13,6 +15,14 @@ from apps.operations.models import AICallLog, SystemNotice
 from apps.payments.models import PaymentRecord
 from apps.reports.models import ReportTask
 from apps.users.models import UserProfile
+
+
+def ensure_password_strength(password: str, *, field_name: str = "password") -> None:
+    """复用 Django 密码校验器，将错误转换为 DRF 可识别结构。"""
+    try:
+        validate_password(password)
+    except DjangoValidationError as exc:
+        raise serializers.ValidationError({field_name: list(exc.messages)}) from exc
 
 
 def build_thumb_proxy_url(url: str | None, width: int = 56, height: int = 40) -> str:
@@ -64,6 +74,7 @@ class HotelSimpleSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "name",
+            "type",
             "city",
             "address",
             "star",
@@ -73,6 +84,8 @@ class HotelSimpleSerializer(serializers.ModelSerializer):
             "images",
             "rating",
             "min_price",
+            "facilities",
+            "tags",
             "latitude",
             "longitude",
             "status",
@@ -119,6 +132,7 @@ class HotelDetailSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "name",
+            "type",
             "city",
             "address",
             "star",
@@ -128,6 +142,8 @@ class HotelDetailSerializer(serializers.ModelSerializer):
             "images",
             "rating",
             "min_price",
+            "facilities",
+            "tags",
             "latitude",
             "longitude",
             "status",
@@ -303,6 +319,7 @@ class RegisterSerializer(serializers.Serializer):
             raise serializers.ValidationError({"confirm_password": ["两次输入的密码不一致"]})
         if User.objects.filter(username=attrs["username"]).exists():
             raise serializers.ValidationError({"username": ["用户名已存在"]})
+        ensure_password_strength(attrs["password"])
         return attrs
 
 
@@ -315,6 +332,7 @@ class InitSetupSerializer(serializers.Serializer):
     def validate(self, attrs):
         if attrs["password"] != attrs["confirm_password"]:
             raise serializers.ValidationError({"confirm_password": "两次输入的密码不一致"})
+        ensure_password_strength(attrs["password"])
         return attrs
 
 
@@ -390,6 +408,7 @@ class HotelCreateSerializer(serializers.ModelSerializer):
         model = Hotel
         fields = [
             "name",
+            "type",
             "city",
             "address",
             "star",
@@ -399,6 +418,8 @@ class HotelCreateSerializer(serializers.ModelSerializer):
             "images",
             "rating",
             "min_price",
+            "facilities",
+            "tags",
             "is_recommended",
             "status",
         ]
@@ -453,6 +474,7 @@ class OrderStatusSerializer(serializers.Serializer):
     """OrderStatus 序列化器：用于接口参数校验或响应数据转换。"""
     order_id = serializers.IntegerField(min_value=1)
     target_status = serializers.ChoiceField(choices=BookingOrder.STATUS_CHOICES)
+    operator_remark = serializers.CharField(max_length=255, required=False, allow_blank=True)
 
 
 class CheckInSerializer(serializers.Serializer):
@@ -497,6 +519,7 @@ class AIChatSerializer(serializers.Serializer):
     order_id = serializers.IntegerField(required=False, allow_null=True)
     session_id = serializers.IntegerField(required=False, allow_null=True, min_value=1)
     booking_context = serializers.JSONField(required=False)
+    conversation_summary = serializers.CharField(required=False, allow_blank=True, max_length=4000)
 
 
 class AITestSerializer(serializers.Serializer):
@@ -541,6 +564,7 @@ class PasswordChangeSerializer(serializers.Serializer):
     def validate(self, attrs):
         if attrs["new_password"] != attrs["confirm_password"]:
             raise serializers.ValidationError({"confirm_password": ["两次输入的新密码不一致"]})
+        ensure_password_strength(attrs["new_password"], field_name="new_password")
         return attrs
 
 
@@ -650,13 +674,57 @@ class EmployeeCreateSerializer(serializers.Serializer):
     mobile = serializers.CharField(max_length=20, required=False, allow_blank=True, default="")
     role = serializers.ChoiceField(choices=[("hotel_admin", "酒店管理员"), ("system_admin", "系统管理员")])
 
+    def validate(self, attrs):
+        ensure_password_strength(attrs["password"])
+        return attrs
+
 
 class SettingsUpdateSerializer(serializers.Serializer):
     """SettingsUpdate 序列化器：用于接口参数校验或响应数据转换。"""
     platform_name = serializers.CharField(max_length=100, required=False)
     admin_name = serializers.CharField(max_length=100, required=False)
     support_phone = serializers.CharField(max_length=30, required=False)
+    support_email = serializers.EmailField(required=False)
+    business_hours = serializers.CharField(max_length=100, required=False)
+    platform_notice = serializers.CharField(max_length=255, required=False)
     order_auto_cancel_minutes = serializers.IntegerField(min_value=1, required=False)
+
+
+class EmployeeUpdateSerializer(serializers.Serializer):
+    """员工编辑序列化器。"""
+    user_id = serializers.IntegerField(min_value=1)
+    nickname = serializers.CharField(max_length=100, required=False)
+    mobile = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    role = serializers.ChoiceField(
+        choices=[("hotel_admin", "酒店管理员"), ("receptionist", "前台")],
+        required=False,
+    )
+
+
+class AdminUserUpdateSerializer(serializers.Serializer):
+    """管理端用户编辑序列化器。"""
+    user_id = serializers.IntegerField(min_value=1)
+    nickname = serializers.CharField(max_length=100, required=False)
+    mobile = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    member_level = serializers.ChoiceField(choices=UserProfile.MEMBER_LEVEL_CHOICES, required=False)
+
+
+class CouponTemplateEditSerializer(serializers.Serializer):
+    """优惠券模板全量编辑序列化器。"""
+    template_id = serializers.IntegerField(min_value=1)
+    name = serializers.CharField(max_length=100, required=False)
+    coupon_type = serializers.ChoiceField(choices=CouponTemplate.TYPE_CHOICES, required=False)
+    amount = serializers.DecimalField(max_digits=10, decimal_places=2, required=False)
+    discount = serializers.DecimalField(max_digits=3, decimal_places=1, required=False)
+    min_amount = serializers.DecimalField(max_digits=10, decimal_places=2, required=False)
+    total_count = serializers.IntegerField(min_value=1, required=False)
+    per_user_limit = serializers.IntegerField(min_value=1, required=False)
+    required_level = serializers.CharField(max_length=32, required=False, allow_blank=True)
+    points_cost = serializers.IntegerField(min_value=0, required=False)
+    valid_days = serializers.IntegerField(min_value=1, required=False)
+    valid_start = serializers.DateField(required=False)
+    valid_end = serializers.DateField(required=False)
+    status = serializers.ChoiceField(choices=[("active", "有效"), ("inactive", "已下架")], required=False)
 
 
 class AISettingsUpdateSerializer(serializers.Serializer):

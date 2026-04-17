@@ -32,6 +32,14 @@
         <template #col-status="{ value }">
           <StatusBadge :label="value === 'active' ? '正常' : '禁用'" :type="value === 'active' ? 'success' : 'danger'" />
         </template>
+        <template #actions="{ row }">
+          <div class="flex gap-2">
+            <button v-if="row.role !== 'system_admin'" class="text-sm text-teal-600 hover:underline" @click="openEdit(row)">编辑</button>
+            <button v-if="row.role !== 'system_admin' && row.status === 'active'" class="text-sm text-red-600 hover:underline" @click="changeStatus(row, 'disabled')">禁用</button>
+            <button v-if="row.role !== 'system_admin' && row.status !== 'active'" class="text-sm text-green-600 hover:underline" @click="changeStatus(row, 'active')">启用</button>
+            <button v-if="row.role !== 'system_admin'" class="text-sm text-amber-600 hover:underline" @click="resetPassword(row)">重置密码</button>
+          </div>
+        </template>
       </DataTable>
       <Pagination :page="page" :page-size="pageSize" :total="total" class="px-4 pb-4" @change="p => { page = p; loadList() }" />
     </div>
@@ -110,18 +118,43 @@
         <button class="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700" @click="handleCreate">创建</button>
       </template>
     </ModalDialog>
+
+    <ModalDialog :visible="showEdit" title="编辑员工" size="md" @close="showEdit = false">
+      <div class="space-y-4">
+        <div>
+          <label class="mb-1 block text-sm font-medium">姓名</label>
+          <input v-model="editForm.nickname" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-teal-500" placeholder="请输入员工姓名" />
+        </div>
+        <div>
+          <label class="mb-1 block text-sm font-medium">手机号</label>
+          <input v-model="editForm.mobile" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-teal-500" placeholder="选填，填写 11 位手机号" />
+        </div>
+        <div>
+          <label class="mb-1 block text-sm font-medium">角色</label>
+          <SelectField v-model="editForm.role" required class="w-full">
+            <option value="hotel_admin">酒店管理员</option>
+            <option value="receptionist">前台接待</option>
+          </SelectField>
+        </div>
+      </div>
+      <template #footer>
+        <button class="rounded-lg border border-slate-200 px-4 py-2 text-sm hover:bg-slate-50" @click="showEdit = false">取消</button>
+        <button class="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700" @click="handleEdit">保存</button>
+      </template>
+    </ModalDialog>
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, reactive, onMounted } from 'vue'
 import { employeeApi } from '@hotelink/api'
-import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, SelectField, useToast } from '@hotelink/ui'
+import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, SelectField, useToast, useConfirm } from '@hotelink/ui'
 import { extractApiError, extractApiFieldErrors, getPasswordStrength, isValidChineseMobile, validatePassword, validateUsername } from '@hotelink/utils'
 
 type EmployeeField = 'username' | 'password' | 'name' | 'mobile'
 
 const { showToast } = useToast()
+const { confirm: confirmDialog } = useConfirm()
 
 const columns = [
   { key: 'id', label: 'ID', sortField: 'id' },
@@ -171,6 +204,10 @@ const passwordStrengthTextClass = computed(() => {
       return 'text-slate-400'
   }
 })
+
+function patchEmployeeRow(userId: number, patch: Record<string, unknown>) {
+  list.value = list.value.map((item) => (Number(item.id) === userId ? { ...item, ...patch } : item))
+}
 
 function onSortChange() {
   page.value = 1
@@ -276,7 +313,13 @@ async function handleCreate() {
     if (res.code === 0) {
       showToast('员工创建成功', 'success')
       showCreate.value = false
-      loadList()
+      const created = res.data as Record<string, unknown> | undefined
+      if (created && typeof created === 'object' && !Array.isArray(created)) {
+        list.value = [created, ...list.value].slice(0, pageSize.value)
+        total.value += 1
+      } else {
+        loadList()
+      }
     } else {
       formErrors.value = {
         ...formErrors.value,
@@ -291,6 +334,66 @@ async function handleCreate() {
     }
   } catch {
     showToast('创建失败，请重试', 'error')
+  }
+}
+
+const showEdit = ref(false)
+const editForm = reactive({ user_id: 0, nickname: '', mobile: '', role: 'hotel_admin' })
+
+function openEdit(row: Record<string, unknown>) {
+  editForm.user_id = row.id as number
+  editForm.nickname = String(row.nickname || '')
+  editForm.mobile = String(row.mobile || '')
+  editForm.role = String(row.role || 'hotel_admin')
+  showEdit.value = true
+}
+
+async function handleEdit() {
+  try {
+    const res = await employeeApi.update(editForm)
+    if (res.code === 0) {
+      showToast('员工信息已更新', 'success')
+      showEdit.value = false
+      patchEmployeeRow(editForm.user_id, {
+        mobile: editForm.mobile,
+        nickname: editForm.nickname,
+        role: editForm.role,
+      })
+    } else {
+      showToast(res.message || '更新失败', 'error')
+    }
+  } catch {
+    showToast('更新失败，请重试', 'error')
+  }
+}
+
+async function changeStatus(row: Record<string, unknown>, status: string) {
+  const label = status === 'active' ? '启用' : '禁用'
+  if (!await confirmDialog(`确认${label}该员工？`, { type: status === 'active' ? 'warning' : 'danger' })) return
+  try {
+    const res = await employeeApi.changeStatus({ user_id: row.id as number, status })
+    if (res.code === 0) {
+      showToast(`员工已${label}`, 'success')
+      patchEmployeeRow(row.id as number, { status })
+    } else {
+      showToast(res.message || `${label}失败`, 'error')
+    }
+  } catch {
+    showToast(`${label}失败，请重试`, 'error')
+  }
+}
+
+async function resetPassword(row: Record<string, unknown>) {
+  if (!await confirmDialog(`确认将「${row.nickname || row.username}」的密码重置为 Abc123456？`, { type: 'warning' })) return
+  try {
+    const res = await employeeApi.resetPassword(row.id as number)
+    if (res.code === 0) {
+      showToast('密码已重置为 Abc123456', 'success')
+    } else {
+      showToast(res.message || '重置失败', 'error')
+    }
+  } catch {
+    showToast('重置失败，请重试', 'error')
   }
 }
 

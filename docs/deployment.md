@@ -1,6 +1,6 @@
 # HoteLink 部署说明（源码对齐版）
 
-> 更新时间：2026-04-13  
+> 更新时间：2026-04-16  
 > 仅记录仓库中已存在且可执行的部署能力
 
 ## 1. 相关文件
@@ -96,7 +96,7 @@ sh ./scripts/docker.sh prod migrate
   - `/` -> 用户端静态站点
   - `/admin/` -> 管理端静态站点
   - `/api/` -> Django API
-  - `/docs/` `/redoc/` `/schema/` -> 后端 API 文档
+  - `/docs/` `/redoc/` `/schema/` -> 后端 API 文档（仅在 `ENABLE_API_DOCS=1` 时启用）
 
 ---
 
@@ -112,6 +112,7 @@ sh ./scripts/docker.sh prod migrate
 - DB：`DB_*` 与 `MYSQL_*`
 - Redis/Celery：`REDIS_URL` `CELERY_BROKER_URL` `CELERY_RESULT_BACKEND`
 - AI：`AI_*`
+- 安全增强：`ENABLE_API_DOCS`、`JWT_*`、`API_THROTTLE_*`
 
 ---
 
@@ -163,3 +164,24 @@ python scripts/generate/import_hotels_from_dist_images.py --count 200
 2. 生产容器默认会在 `web` 角色下自动执行迁移与 `collectstatic`（可通过环境变量关闭）。
 3. AI、数据库、Redis 密钥不要写入仓库，只保留在 `.env` 或部署平台密钥管理中。
 
+---
+
+## 9. 当前安全基线
+
+### 9.1 后端
+
+- 生产环境默认启用 `SECURE_SSL_REDIRECT`
+- 默认启用 HSTS、`Referrer-Policy`、`X-Frame-Options`、`nosniff`
+- JWT 刷新默认开启轮换与黑名单，部署后需执行迁移以创建 `token_blacklist` 表
+- DRF 已启用全局限流，并对登录、刷新、上传、AI 接口配置更严格速率
+
+### 9.2 网关
+
+- `frontend/docker/nginx.conf` 已补充 CSP、`Permissions-Policy`、`Referrer-Policy`、`X-Frame-Options` 等基础响应头
+- 若 TLS 在外层负载均衡终止，HSTS 应由最外层 HTTPS 入口统一下发，避免仅在纯 HTTP 容器内配置失效
+
+### 9.3 运维建议
+
+1. 生产环境保持 `ENABLE_API_DOCS=0`，仅在内网排障或受控环境下临时开启。
+2. 上线本次改动后执行 `python manage.py migrate`，确保 JWT 黑名单表落库。
+3. 若部署为多实例，建议将 Django cache/throttle 后端切换到共享缓存（如 Redis），以获得跨实例一致的限流效果。
