@@ -97,6 +97,9 @@
           <!-- Assistant Response -->
           <template v-else-if="msg.role === 'assistant'">
             <div class="ai-markdown space-y-2" v-html="renderMd(msg.content)" />
+            <div v-if="msg.stopped" class="mt-2 inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
+              已停止回复
+            </div>
             <!-- Smart Options -->
             <div v-if="msg.bookingAssistant?.options?.length" class="mt-4 space-y-2 border-t border-gray-100 pt-3">
               <button
@@ -223,9 +226,20 @@
       <div class="flex gap-2">
         <input v-model="input" @keydown.enter="sendMessage()" @focus="onInputFocus" :placeholder="inputPlaceholder"
           class="flex-1 rounded-2xl border-2 border-gray-200 px-4 py-2.5 text-sm outline-none focus:border-brand transition-colors" />
-        <button @click="sendMessage()" :disabled="!input.trim() || sending"
-          class="flex-shrink-0 rounded-2xl bg-gradient-to-r from-brand to-brand/90 px-6 py-2.5 text-sm font-medium text-white hover:shadow-lg disabled:opacity-50 transition-all">
-          {{ sending ? '...' : '发送' }}
+        <button
+          v-if="sending"
+          @click="stopGenerating"
+          class="flex-shrink-0 rounded-2xl bg-amber-500 px-6 py-2.5 text-sm font-medium text-white hover:bg-amber-600 hover:shadow-lg transition-all"
+        >
+          停止
+        </button>
+        <button
+          v-else
+          @click="sendMessage()"
+          :disabled="!input.trim()"
+          class="flex-shrink-0 rounded-2xl bg-gradient-to-r from-brand to-brand/90 px-6 py-2.5 text-sm font-medium text-white hover:shadow-lg disabled:opacity-50 transition-all"
+        >
+          发送
         </button>
       </div>
     </div>
@@ -256,6 +270,10 @@ const showScrollToBottom = ref(false)
 const quickActionsExpanded = ref(false)
 const assistantOptionsExpanded = ref<Record<string, boolean>>({})
 const conversationSummary = ref('')
+const activeStreamController = ref<AbortController | null>(null)
+const activeUserMessageId = ref<string | null>(null)
+const activeAssistantMessageId = ref<string | null>(null)
+const activeStreamToken = ref(0)
 
 interface ChatHistory {
   timestamp: number
@@ -304,6 +322,7 @@ interface Msg {
   loading?: boolean
   sendState?: 'sending' | 'failed' | 'sent'
   bookingAssistant?: BookingAssistant | null
+  stopped?: boolean
 }
 
 let msgSeed = 0
@@ -316,7 +335,7 @@ function createMsgId(role: 'user' | 'assistant'): string {
 function createMessage(
   role: 'user' | 'assistant',
   content: string,
-  extras?: { loading?: boolean; bookingAssistant?: BookingAssistant | null; sendState?: 'sending' | 'failed' | 'sent' }
+  extras?: { loading?: boolean; bookingAssistant?: BookingAssistant | null; sendState?: 'sending' | 'failed' | 'sent'; stopped?: boolean }
 ): Msg {
   return {
     id: createMsgId(role),
@@ -325,6 +344,7 @@ function createMessage(
     loading: extras?.loading,
     sendState: extras?.sendState,
     bookingAssistant: extras?.bookingAssistant,
+    stopped: extras?.stopped,
   }
 }
 
@@ -346,6 +366,7 @@ function normalizeMessages(raw: unknown): Msg[] {
         ? record.sendState
         : undefined,
       bookingAssistant: record.bookingAssistant || null,
+      stopped: record.stopped === true ? true : undefined,
     })
   }
   return normalized
@@ -638,6 +659,7 @@ function confirmClear() {
 
 // 清空当前聊天
 function clearChat() {
+  resetActiveStream({ invalidate: true })
   messages.value = [
     createMessage('assistant', resolveDefaultWelcome(route.path)),
   ]
@@ -742,6 +764,55 @@ function updateUserSendState(messageId: string, state: 'sending' | 'failed' | 's
   }
 }
 
+function getActiveAssistantMessage(): Msg | null {
+  const messageId = activeAssistantMessageId.value
+  if (!messageId) return null
+  return messages.value.find((item) => item.id === messageId && item.role === 'assistant') || null
+}
+
+function finalizeInterruptedMessage() {
+  const assistantMessage = getActiveAssistantMessage()
+  if (!assistantMessage) return
+  assistantMessage.loading = false
+  assistantMessage.stopped = true
+  if (!assistantMessage.content.trim()) {
+    assistantMessage.content = '已停止回复'
+  }
+}
+
+function invalidateActiveStream() {
+  activeStreamToken.value += 1
+}
+
+function resetActiveStream(options?: { invalidate?: boolean }) {
+  if (options?.invalidate) {
+    invalidateActiveStream()
+  }
+  if (activeUserMessageId.value) {
+    updateUserSendState(activeUserMessageId.value, 'sent')
+  }
+  finalizeInterruptedMessage()
+  activeStreamController.value?.abort()
+  activeStreamController.value = null
+  activeUserMessageId.value = null
+  activeAssistantMessageId.value = null
+  sending.value = false
+}
+
+function stopGenerating() {
+  if (!sending.value) return
+  updateUserSendState(activeUserMessageId.value || '', 'sent')
+  finalizeInterruptedMessage()
+  invalidateActiveStream()
+  activeStreamController.value?.abort()
+  activeStreamController.value = null
+  activeUserMessageId.value = null
+  activeAssistantMessageId.value = null
+  sending.value = false
+  showToast('已停止 AI 回复', 'info')
+  scrollBottom()
+}
+
 function getDistanceToBottom(): number {
   const el = chatBox.value
   if (!el) return 0
@@ -836,15 +907,22 @@ async function sendMessage(text?: string, contextPatch?: Record<string, unknown>
     userMessageId = userMessage.id
     scrollBottom()
   }
+  activeUserMessageId.value = userMessageId
   
   const carryBookingContext = isBookingMode.value && shouldCarryBookingContext(msg, contextPatch)
   const nextBookingContext = carryBookingContext ? mergeBookingContext(contextPatch) : undefined
   input.value = ''
 
   // Loading placeholder until first token arrives
-  messages.value.push(createMessage('assistant', '', { loading: true }))
+  const placeholderMessage = createMessage('assistant', '', { loading: true })
+  messages.value.push(placeholderMessage)
+  activeAssistantMessageId.value = placeholderMessage.id
   scrollBottom()
   sending.value = true
+  const requestToken = activeStreamToken.value + 1
+  activeStreamToken.value = requestToken
+  const controller = new AbortController()
+  activeStreamController.value = controller
 
   let receivedAny = false
   let pendingBookingAssistant: BookingAssistant | null = null
@@ -856,7 +934,8 @@ async function sendMessage(text?: string, contextPatch?: Record<string, unknown>
       session_id: backendSessionId.value || undefined,
       booking_context: isBookingMode.value ? nextBookingContext : undefined,
       conversation_summary: conversationSummary.value || undefined,
-    })) {
+    }, { signal: controller.signal })) {
+      if (requestToken !== activeStreamToken.value) return
       if (event.type === 'meta') {
         pendingBookingAssistant = (event.booking_assistant as BookingAssistant) || null
         const incomingSessionId = Number(event.session_id)
@@ -878,7 +957,9 @@ async function sendMessage(text?: string, contextPatch?: Record<string, unknown>
       if (!receivedAny) {
         const stickToBottom = isNearBottom()
         messages.value.pop()
-        messages.value.push(createMessage('assistant', '', { bookingAssistant: pendingBookingAssistant }))
+        const assistantMessage = createMessage('assistant', '', { bookingAssistant: pendingBookingAssistant })
+        messages.value.push(assistantMessage)
+        activeAssistantMessageId.value = assistantMessage.id
         receivedAny = true
         if (stickToBottom) {
           scrollBottom()
@@ -903,6 +984,13 @@ async function sendMessage(text?: string, contextPatch?: Record<string, unknown>
       bookingContext.value = {}
     }
   } catch (err) {
+    if (requestToken !== activeStreamToken.value) return
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      finalizeInterruptedMessage()
+      updateUserSendState(userMessageId, 'sent')
+      showToast('已停止 AI 回复', 'info')
+      return
+    }
     if (!receivedAny) {
       messages.value.pop()
     }
@@ -912,12 +1000,20 @@ async function sendMessage(text?: string, contextPatch?: Record<string, unknown>
       bookingContext.value = {}
     }
   } finally {
-    sending.value = false
+    if (requestToken === activeStreamToken.value) {
+      sending.value = false
+    }
+    if (activeStreamToken.value === requestToken) {
+      activeStreamController.value = null
+      activeUserMessageId.value = null
+      activeAssistantMessageId.value = null
+    }
     scrollBottom()
   }
 }
 
 function initializeCurrentModeState() {
+  resetActiveStream({ invalidate: true })
   const restored = restoreSessionState()
   if (!restored) {
     messages.value = [createMessage('assistant', resolveDefaultWelcome(route.path))]
@@ -952,6 +1048,7 @@ onMounted(async () => {
 
 watch(() => route.path, async (nextPath, prevPath) => {
   if (nextPath === prevPath) return
+  resetActiveStream({ invalidate: true })
   saveCurrentChatToHistoryForPath(prevPath)
   saveSessionStateForPath(prevPath)
   showMenu.value = false
@@ -978,6 +1075,7 @@ function handleBeforeUnload() {
 }
 
 onBeforeUnmount(() => {
+  resetActiveStream({ invalidate: true })
   handleBeforeUnload()
   window.removeEventListener('beforeunload', handleBeforeUnload)
 })

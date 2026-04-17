@@ -61,6 +61,16 @@ body {
   box-shadow: 0 10px 24px rgba(239, 68, 68, 0.15);
 }
 
+input[type='date'] {
+  background: transparent;
+}
+
+input[type='date']::-webkit-date-and-time-value,
+input[type='date']::-webkit-datetime-edit,
+input[type='date']::-webkit-datetime-edit-fields-wrapper {
+  background: transparent;
+}
+
 /* Mobile-first safe area */
 @supports (padding-bottom: env(safe-area-inset-bottom)) {
   .pb-safe {

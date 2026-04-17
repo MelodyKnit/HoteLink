@@ -2,6 +2,28 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { authApi, userAuthApi, getToken, setTokens, clearTokens, getRefreshToken } from '@hotelink/api'
 
+const USER_LOCAL_STORAGE_KEYS = [
+  'hotelink_guest_history',
+  'hotelink_user_security_prefs',
+  'hotelink_ai_booking_history',
+  'hotelink_ai_customer_history',
+]
+
+const USER_SESSION_STORAGE_KEYS = [
+  'hotelink_ai_booking_chat_state',
+  'hotelink_ai_customer_chat_state',
+]
+
+function clearUserClientCache() {
+  if (typeof window === 'undefined') return
+  for (const key of USER_LOCAL_STORAGE_KEYS) {
+    window.localStorage.removeItem(key)
+  }
+  for (const key of USER_SESSION_STORAGE_KEYS) {
+    window.sessionStorage.removeItem(key)
+  }
+}
+
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<{ id: number; username: string; role: string; nickname?: string; avatar?: string } | null>(null)
   const token = ref<string | null>(getToken())
@@ -61,6 +83,8 @@ export const useUserAuthStore = defineStore('userAuth', () => {
     const normalizedUsername = username.trim()
     const res = await userAuthApi.login({ username: normalizedUsername, password })
     if (res.code === 0 && res.data) {
+      // 登录成功后先清理用户侧历史缓存，阻断跨账号串用。
+      clearUserClientCache()
       token.value = res.data.access_token
       setTokens(res.data.access_token, res.data.refresh_token)
       const u = res.data.user
@@ -100,6 +124,7 @@ export const useUserAuthStore = defineStore('userAuth', () => {
   function logout() {
     const refresh = getRefreshToken()
     if (refresh) userAuthApi.logout(refresh).catch(() => {})
+    clearUserClientCache()
     token.value = null
     user.value = null
     clearTokens()

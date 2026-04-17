@@ -13,12 +13,18 @@
         <div class="mt-3 flex items-center gap-4 text-sm text-gray-600">
           <div>
             <p class="text-xs text-gray-400">入住</p>
-            <p class="font-medium">{{ checkInDate }}</p>
+            <p class="booking-summary-date font-medium">
+              <span class="booking-summary-date-full">{{ checkInDate }}</span>
+              <span class="booking-summary-date-split">{{ checkInSummaryDate }}</span>
+            </p>
           </div>
           <span class="text-gray-300">→</span>
           <div>
             <p class="text-xs text-gray-400">离店</p>
-            <p class="font-medium">{{ checkOutDate }}</p>
+            <p class="booking-summary-date font-medium">
+              <span class="booking-summary-date-full">{{ checkOutDate }}</span>
+              <span class="booking-summary-date-split">{{ checkOutSummaryDate }}</span>
+            </p>
           </div>
           <div class="ml-auto text-right">
             <p class="text-xs text-gray-400">共{{ nights }}晚</p>
@@ -284,6 +290,24 @@ const nights = computed(() => {
 })
 
 const totalPrice = computed(() => (unitPrice * nights.value).toFixed(2))
+
+function splitDateForTinyScreen(value: string): string {
+  const raw = (value || '').trim()
+  if (!raw) {
+    return ''
+  }
+  const normalized = raw.replace(/\//g, '-')
+  const matched = normalized.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/)
+  if (!matched) {
+    return raw
+  }
+  const [, , month, day] = matched
+  return `${month.padStart(2, '0')}-${day.padStart(2, '0')}`
+}
+
+const checkInSummaryDate = computed(() => splitDateForTinyScreen(checkInDate.value))
+const checkOutSummaryDate = computed(() => splitDateForTinyScreen(checkOutDate.value))
+
 const filteredGuestHistory = computed(() => {
   const keyword = form.value.guest_name.trim().toLowerCase()
   if (!keyword) return guestHistory.value
@@ -326,15 +350,24 @@ function loadLocalGuestHistory() {
   try {
     const raw = localStorage.getItem(GUEST_HISTORY_KEY)
     if (!raw) return []
-    const parsed = JSON.parse(raw) as Array<{ guest_name: string; guest_mobile: string; masked_mobile?: string }>
-    return normalizeGuestHistory(Array.isArray(parsed) ? parsed : [])
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) {
+      localStorage.removeItem(GUEST_HISTORY_KEY)
+      return []
+    }
+    return normalizeGuestHistory(parsed as Array<{ guest_name: string; guest_mobile: string; masked_mobile?: string }>)
   } catch {
+    localStorage.removeItem(GUEST_HISTORY_KEY)
     return []
   }
 }
 
 function saveLocalGuestHistory() {
-  localStorage.setItem(GUEST_HISTORY_KEY, JSON.stringify(guestHistory.value))
+  try {
+    localStorage.setItem(GUEST_HISTORY_KEY, JSON.stringify(guestHistory.value))
+  } catch {
+    // ignore persistence failure to avoid blocking booking flow
+  }
 }
 
 function rememberGuestHistory(name: string, mobile: string) {
@@ -586,5 +619,22 @@ watch(totalPrice, async (val) => {
 <style scoped>
 .booking-page {
   background: radial-gradient(120% 40% at 50% -5%, rgba(20, 184, 166, 0.12), rgba(255, 255, 255, 0));
+}
+
+.booking-summary-date-split {
+  display: none;
+}
+
+@media (max-width: 380px) {
+  .booking-summary-date-full {
+    display: none;
+  }
+
+  .booking-summary-date-split {
+    display: inline-block;
+    font-size: 1.125rem;
+    line-height: 1.15;
+    letter-spacing: 0.01em;
+  }
 }
 </style>

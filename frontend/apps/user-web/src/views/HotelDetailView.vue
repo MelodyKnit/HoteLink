@@ -142,7 +142,7 @@
         <div v-if="hotel.facilities?.length" class="mt-4 rounded-2xl bg-white p-5 shadow-sm">
           <h3 class="mb-3 font-semibold text-gray-800">设施与服务</h3>
           <div class="flex flex-wrap gap-2">
-            <span v-for="f in hotel.facilities" :key="f" class="rounded-full bg-gray-100 px-3 py-1 text-xs text-gray-600">{{ f }}</span>
+            <span v-for="f in hotel.facilities" :key="f" class="rounded-full bg-gray-100 px-3 py-1 text-xs text-gray-600">{{ formatFacilityLabel(f) }}</span>
           </div>
         </div>
 
@@ -257,7 +257,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { publicApi, userFavoriteApi, getToken } from '@hotelink/api'
-import { BED_TYPE_MAP, buildImageThumbUrl } from '@hotelink/utils'
+import { BED_TYPE_MAP, FACILITY_MAP, buildImageThumbUrl } from '@hotelink/utils'
 import { useToast } from '@hotelink/ui'
 
 const { showToast } = useToast()
@@ -425,6 +425,12 @@ function restartGalleryAutoPlay() {
 function formatRating(value: unknown): string {
   const n = Number(value)
   return Number.isFinite(n) ? n.toFixed(1) : '暂无'
+}
+
+function formatFacilityLabel(value: unknown): string {
+  const key = String(value || '').trim()
+  if (!key) return ''
+  return FACILITY_MAP[key] || key.replace(/_/g, ' ')
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs = 12000): Promise<T> {

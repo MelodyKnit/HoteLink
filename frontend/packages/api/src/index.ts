@@ -519,7 +519,8 @@ export const userAiApi = {
   sessionMessages: (session_id: number) => get<{ items: { id: number; role: string; content: string; tokens_used: number; created_at: string }[] }>(`/user/ai/sessions/${session_id}/messages`),
 
   async *chatStream(
-    data: { scene: string; question: string; hotel_id?: number; order_id?: number; session_id?: number; booking_context?: Record<string, unknown>; conversation_summary?: string }
+    data: { scene: string; question: string; hotel_id?: number; order_id?: number; session_id?: number; booking_context?: Record<string, unknown>; conversation_summary?: string },
+    options?: { signal?: AbortSignal },
   ): AsyncGenerator<Record<string, unknown>> {
     const token = getToken()
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
@@ -533,8 +534,12 @@ export const userAiApi = {
         method: 'POST',
         headers,
         body: JSON.stringify(data),
+        signal: options?.signal,
       })
-    } catch {
+    } catch (error) {
+      if (options?.signal?.aborted) {
+        throw error
+      }
       yield { content: '', done: true }
       return
     }
@@ -547,47 +552,60 @@ export const userAiApi = {
     const reader = resp.body.getReader()
     const decoder = new TextDecoder()
     let buffer = ''
+    const onAbort = () => {
+      reader.cancel().catch(() => {})
+    }
+    options?.signal?.addEventListener('abort', onAbort)
 
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) {
-        break
-      }
-
-      buffer += decoder.decode(value, { stream: true })
-
-      let boundary = buffer.indexOf('\n\n')
-      while (boundary !== -1) {
-        const eventBlock = buffer.slice(0, boundary)
-        buffer = buffer.slice(boundary + 2)
-
-        for (const line of eventBlock.split('\n')) {
-          if (!line.startsWith('data: ')) {
-            continue
-          }
-
-          try {
-            const event = JSON.parse(line.slice(6)) as Record<string, unknown>
-            yield event
-            if (event.done) {
-              return
-            }
-          } catch {
-            // ignore malformed events
-          }
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) {
+          break
         }
 
-        boundary = buffer.indexOf('\n\n')
-      }
-    }
+        buffer += decoder.decode(value, { stream: true })
 
-    if (buffer.trim().startsWith('data: ')) {
-      try {
-        const event = JSON.parse(buffer.trim().slice(6)) as { content: string; done: boolean }
-        yield event
-      } catch {
-        // ignore malformed tail event
+        let boundary = buffer.indexOf('\n\n')
+        while (boundary !== -1) {
+          const eventBlock = buffer.slice(0, boundary)
+          buffer = buffer.slice(boundary + 2)
+
+          for (const line of eventBlock.split('\n')) {
+            if (!line.startsWith('data: ')) {
+              continue
+            }
+
+            try {
+              const event = JSON.parse(line.slice(6)) as Record<string, unknown>
+              yield event
+              if (event.done) {
+                return
+              }
+            } catch {
+              // ignore malformed events
+            }
+          }
+
+          boundary = buffer.indexOf('\n\n')
+        }
       }
+
+      if (buffer.trim().startsWith('data: ')) {
+        try {
+          const event = JSON.parse(buffer.trim().slice(6)) as { content: string; done: boolean }
+          yield event
+        } catch {
+          // ignore malformed tail event
+        }
+      }
+    } catch (error) {
+      if (options?.signal?.aborted) {
+        throw error
+      }
+      yield { content: '', done: true }
+    } finally {
+      options?.signal?.removeEventListener('abort', onAbort)
     }
   },
 }
