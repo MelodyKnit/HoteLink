@@ -264,6 +264,8 @@ export const orderApi = {
   changeStatus: (data: { order_id: number; target_status: string; operator_remark?: string }) => post('/admin/orders/change-status', data),
   checkIn: (data: { order_id: number; room_no: string; operator_remark?: string }) => post('/admin/orders/check-in', data),
   checkOut: (data: { order_id: number; consume_amount?: number; operator_remark?: string }) => post('/admin/orders/check-out', data),
+  extendStay: (data: { order_id: number; new_check_out_date: string; operator_remark?: string }) => post('/admin/orders/extend-stay', data),
+  switchRoom: (data: { order_id: number; new_room_no: string; operator_remark?: string }) => post('/admin/orders/switch-room', data),
 }
 
 // ========== Reviews ==========

@@ -203,6 +203,8 @@
 3. 管理端可后续执行：
    - `POST /api/v1/admin/orders/check-in`
    - `POST /api/v1/admin/orders/check-out`
+  - `POST /api/v1/admin/orders/extend-stay`
+  - `POST /api/v1/admin/orders/switch-room`
 
 ### 7.2 用户 AI 对话（含订房编排）
 

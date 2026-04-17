@@ -491,6 +491,20 @@ class CheckOutSerializer(serializers.Serializer):
     operator_remark = serializers.CharField(max_length=255, required=False, allow_blank=True)
 
 
+class OrderExtendStaySerializer(serializers.Serializer):
+    """OrderExtendStay 序列化器：用于续住参数校验。"""
+    order_id = serializers.IntegerField(min_value=1)
+    new_check_out_date = serializers.DateField()
+    operator_remark = serializers.CharField(max_length=255, required=False, allow_blank=True)
+
+
+class OrderSwitchRoomSerializer(serializers.Serializer):
+    """OrderSwitchRoom 序列化器：用于换房参数校验。"""
+    order_id = serializers.IntegerField(min_value=1)
+    new_room_no = serializers.CharField(max_length=20)
+    operator_remark = serializers.CharField(max_length=255, required=False, allow_blank=True)
+
+
 class ReplyReviewSerializer(serializers.Serializer):
     """ReplyReview 序列化器：用于接口参数校验或响应数据转换。"""
     review_id = serializers.IntegerField(min_value=1)

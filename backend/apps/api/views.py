@@ -114,6 +114,8 @@ from apps.api.serializers import (
     OrderCreateSerializer,
     OrderPaySerializer,
     OrderStatusSerializer,
+    OrderExtendStaySerializer,
+    OrderSwitchRoomSerializer,
     OrderUpdateSerializer,
     PasswordChangeSerializer,
     PointsLogSerializer,
@@ -2576,6 +2578,121 @@ class AdminOrdersCheckOutView(APIView):
         if previous_status == BookingOrder.STATUS_CHECKED_IN:
             add_points(order.user, 20, PointsLog.TYPE_CONSUME_REWARD, f"订单 {order.order_no} 入住奖励", order=order)
         return api_response(data={"order_id": order.id, "status": order.status})
+
+
+class AdminOrdersExtendStayView(APIView):
+    """续住办理接口：更新离店日期并写入操作备注。"""
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def post(self, request):
+        serializer = OrderExtendStaySerializer(data=request.data)
+        if not serializer.is_valid():
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
+        data = serializer.validated_data
+        order = BookingOrder.objects.filter(id=data["order_id"]).select_related("user").first()
+        if not order:
+            return api_response(code=4040, message="订单不存在", data=None, status_code=404)
+
+        if order.status in {
+            BookingOrder.STATUS_COMPLETED,
+            BookingOrder.STATUS_CANCELLED,
+            BookingOrder.STATUS_REFUNDING,
+            BookingOrder.STATUS_REFUNDED,
+        }:
+            return api_response(code=4093, message="当前订单状态不允许续住", data=None, status_code=409)
+        if order.status not in {BookingOrder.STATUS_PAID, BookingOrder.STATUS_CONFIRMED, BookingOrder.STATUS_CHECKED_IN}:
+            return api_response(code=4093, message="当前订单状态不允许续住", data=None, status_code=409)
+        if order.payment_status != BookingOrder.PAYMENT_PAID:
+            return api_response(code=4093, message="订单未支付，无法续住", data=None, status_code=409)
+
+        new_check_out_date = data["new_check_out_date"]
+        if new_check_out_date <= order.check_out_date:
+            return api_response(code=4093, message="新的离店日期必须晚于当前离店日期", data=None, status_code=409)
+        if new_check_out_date <= order.check_in_date:
+            return api_response(code=4093, message="离店日期必须晚于入住日期", data=None, status_code=409)
+
+        order.check_out_date = new_check_out_date
+        update_fields = ["check_out_date", "updated_at"]
+        operator_remark = (data.get("operator_remark", "") or "").strip()
+        base_note = f"续住办理：离店日期调整为 {new_check_out_date}"
+        if operator_remark:
+            base_note = f"{base_note}；备注：{operator_remark}"
+        if append_order_operator_remark(order, base_note):
+            update_fields.append("operator_remark")
+        order.save(update_fields=update_fields)
+
+        SystemNotice.objects.create(
+            user=order.user,
+            notice_type=SystemNotice.TYPE_ORDER,
+            title="续住办理完成",
+            content=f"订单 {order.order_no} 已完成续住，新的离店日期为 {order.check_out_date}。",
+            related_order=order,
+        )
+        return api_response(
+            data={
+                "order_id": order.id,
+                "check_out_date": order.check_out_date,
+                "status": order.status,
+            }
+        )
+
+
+class AdminOrdersSwitchRoomView(APIView):
+    """换房办理接口：更新房间号并写入操作备注。"""
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def post(self, request):
+        serializer = OrderSwitchRoomSerializer(data=request.data)
+        if not serializer.is_valid():
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
+        data = serializer.validated_data
+        order = BookingOrder.objects.filter(id=data["order_id"]).select_related("user").first()
+        if not order:
+            return api_response(code=4040, message="订单不存在", data=None, status_code=404)
+
+        if order.status in {
+            BookingOrder.STATUS_COMPLETED,
+            BookingOrder.STATUS_CANCELLED,
+            BookingOrder.STATUS_REFUNDING,
+            BookingOrder.STATUS_REFUNDED,
+        }:
+            return api_response(code=4093, message="当前订单状态不允许换房", data=None, status_code=409)
+        if order.status not in {BookingOrder.STATUS_PAID, BookingOrder.STATUS_CONFIRMED, BookingOrder.STATUS_CHECKED_IN}:
+            return api_response(code=4093, message="当前订单状态不允许换房", data=None, status_code=409)
+        if order.payment_status != BookingOrder.PAYMENT_PAID:
+            return api_response(code=4093, message="订单未支付，无法换房", data=None, status_code=409)
+
+        new_room_no = (data["new_room_no"] or "").strip()
+        if not new_room_no:
+            return api_response(code=4001, message="房间号不能为空", data=None, status_code=400)
+        if order.room_no and order.room_no.strip() == new_room_no:
+            return api_response(code=4093, message="新房间号与当前房间号一致", data=None, status_code=409)
+
+        old_room_no = order.room_no or "未分配"
+        order.room_no = new_room_no
+        update_fields = ["room_no", "updated_at"]
+        operator_remark = (data.get("operator_remark", "") or "").strip()
+        base_note = f"换房办理：{old_room_no} -> {new_room_no}"
+        if operator_remark:
+            base_note = f"{base_note}；备注：{operator_remark}"
+        if append_order_operator_remark(order, base_note):
+            update_fields.append("operator_remark")
+        order.save(update_fields=update_fields)
+
+        SystemNotice.objects.create(
+            user=order.user,
+            notice_type=SystemNotice.TYPE_ORDER,
+            title="换房办理完成",
+            content=f"订单 {order.order_no} 已完成换房，当前房间号为 {order.room_no}。",
+            related_order=order,
+        )
+        return api_response(
+            data={
+                "order_id": order.id,
+                "room_no": order.room_no,
+                "status": order.status,
+            }
+        )
 
 
 class AdminReviewsView(APIView):

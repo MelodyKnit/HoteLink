@@ -92,7 +92,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, h, defineComponent, watch, provide } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, h, defineComponent, watch, provide } from 'vue'
 import { useRoute } from 'vue-router'
 import { useUserAuthStore } from '@hotelink/store'
 import { userNoticeApi } from '@hotelink/api'
@@ -101,6 +101,7 @@ const auth = useUserAuthStore()
 const route = useRoute()
 const unreadCount = ref(0)
 const headerAvatarError = ref(false)
+let unreadTimer: number | null = null
 
 // 头像 URL 变化时重置加载错误状态
 watch(() => auth.user?.avatar, () => { headerAvatarError.value = false })
@@ -156,6 +157,12 @@ async function fetchUnreadCount() {
   if (res.data) unreadCount.value = res.data.unread_count
 }
 
+function refreshUnreadCountIfVisible() {
+  if (!document.hidden) {
+    fetchUnreadCount()
+  }
+}
+
 // 暴露给子页面（NotificationView）直接更新角标值
 provide('setUnreadCount', (n: number) => { unreadCount.value = n })
 provide('fetchUnreadCount', fetchUnreadCount)
@@ -168,5 +175,20 @@ watch(() => route.path, (newPath, oldPath) => {
 })
 
 onMounted(fetchUnreadCount)
+
+onMounted(() => {
+  window.addEventListener('focus', refreshUnreadCountIfVisible)
+  document.addEventListener('visibilitychange', refreshUnreadCountIfVisible)
+  unreadTimer = window.setInterval(refreshUnreadCountIfVisible, 60000)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('focus', refreshUnreadCountIfVisible)
+  document.removeEventListener('visibilitychange', refreshUnreadCountIfVisible)
+  if (unreadTimer !== null) {
+    window.clearInterval(unreadTimer)
+    unreadTimer = null
+  }
+})
 </script>
 

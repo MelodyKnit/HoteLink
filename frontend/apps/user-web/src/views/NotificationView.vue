@@ -214,7 +214,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, inject } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, inject } from 'vue'
 import { useRouter } from 'vue-router'
 import { userNoticeApi } from '@hotelink/api'
 import { useConfirm } from '@hotelink/ui'
@@ -244,6 +244,7 @@ const unreadCount = ref(0)
 const activeType = ref('all')
 const expandedId = ref<number | null>(null)
 const router = useRouter()
+let refreshTimer: number | null = null
 
 // ── Select-mode state ──
 const selectMode = ref(false)
@@ -481,9 +482,27 @@ async function deleteAll() {
   selectMode.value = false
 }
 
+function refreshNoticeFeedIfVisible() {
+  if (!document.hidden) {
+    fetchNotices(true)
+  }
+}
+
 onMounted(async () => {
   await fetchNotices(true)
   loading.value = false
+  window.addEventListener('focus', refreshNoticeFeedIfVisible)
+  document.addEventListener('visibilitychange', refreshNoticeFeedIfVisible)
+  refreshTimer = window.setInterval(refreshNoticeFeedIfVisible, 60000)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('focus', refreshNoticeFeedIfVisible)
+  document.removeEventListener('visibilitychange', refreshNoticeFeedIfVisible)
+  if (refreshTimer !== null) {
+    window.clearInterval(refreshTimer)
+    refreshTimer = null
+  }
 })
 </script>
 

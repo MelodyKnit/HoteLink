@@ -512,7 +512,7 @@ flowchart TD
 
 ## 8. 管理端界面设计清单
 
-> **管理端页面实现总览（22 路由 / 20 视图）**
+> **管理端页面实现总览（25 路由 / 23 视图）**
 >
 > | # | 设计页面 | 路由 | 视图文件 | 状态 |
 > |---|---------|------|---------|------|
@@ -526,9 +526,9 @@ flowchart TD
 > | 7 | 订单管理页 | `/admin/orders` | `OrderListView.vue` | ✅ 已实现 |
 > | 8 | 订单详情页 | `/admin/orders/:id` | `OrderDetailView.vue` | ✅ 已实现 |
 > | 9 | 新建预订页 | — | — | 📐 设计中 |
-> | 10 | 入住办理页 | — | — | 📐 设计中 |
-> | 11 | 退房结算页 | — | — | 📐 设计中 |
-> | 12 | 续住 / 换房页 | — | — | 📐 设计中 |
+> | 10 | 入住办理页 | `/admin/frontdesk/check-in` | `FrontdeskCheckInView.vue` | ✅ 已实现 |
+> | 11 | 退房结算页 | `/admin/frontdesk/check-out` | `FrontdeskCheckOutView.vue` | ✅ 已实现 |
+> | 12 | 续住 / 换房页 | `/admin/frontdesk/extend-switch` | `FrontdeskExtendSwitchView.vue` | ✅ 已实现 |
 > | 13 | 取消与退款处理页 | — | — | 📐 设计中 |
 > | 14 | 客户档案页 | `/admin/users` | `UserListView.vue` | ✅ 已实现（用户列表） |
 > | 15 | 会员管理页 | `/admin/members` | `MemberManageView.vue` | ✅ 已实现 |
@@ -699,6 +699,12 @@ flowchart TD
 - 押金收取
 - 入住确认
 
+实现补充（2026-04）：
+
+- 已落地独立流程页：`/admin/frontdesk/check-in`
+- 与订单管理页联动：支持从订单列表/详情快捷跳转并自动预选订单
+- 保留订单页快捷办理能力，同时提供完整流程办理面板
+
 #### 11. 退房结算页
 
 核心模块：
@@ -709,6 +715,12 @@ flowchart TD
 - 发票处理
 - 退款或补差
 
+实现补充（2026-04）：
+
+- 已落地独立流程页：`/admin/frontdesk/check-out`
+- 支持额外消费补录、押金抵扣登记、结算备注
+- 与订单管理页联动：支持从订单列表/详情快捷跳转并自动预选订单
+
 #### 12. 续住 / 换房页
 
 核心模块：
@@ -717,6 +729,12 @@ flowchart TD
 - 房态检查
 - 房间切换
 - 差价结算
+
+实现补充（2026-04）：
+
+- 已落地独立流程页：`/admin/frontdesk/extend-switch`
+- 页面内双流程 Tab（续住/换房）
+- 对接后端新增接口：`/api/v1/admin/orders/extend-stay`、`/api/v1/admin/orders/switch-room`
 
 #### 13. 取消与退款处理页
 

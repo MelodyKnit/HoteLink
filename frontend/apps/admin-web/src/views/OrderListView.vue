@@ -2,7 +2,7 @@
   <section>
     <PageHeader title="订单管理" subtitle="查看和处理所有预订订单" />
 
-    <div class="mb-4 flex flex-wrap gap-3">
+    <div class="mb-3 flex flex-wrap items-center gap-2.5">
       <input v-model="filters.keyword" placeholder="订单号/手机号/入住人" class="rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-teal-500" @keyup.enter="loadList" />
       <SelectField v-model="filters.status" size="sm" @change="loadList">
         <option value="">全部状态</option>
@@ -39,7 +39,7 @@
     </div>
 
     <div class="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
-      <DataTable :columns="columns" :rows="list" :loading="loading" :sort-value="filters.ordering" @sort-change="onTableSortChange">
+      <DataTable :columns="columns" :rows="list" :loading="loading" :sort-value="filters.ordering" :compact="true" @sort-change="onTableSortChange">
         <template #col-order_no="{ value }">
           <span class="inline-block max-w-[220px] truncate align-middle" :title="String(value || '')">
             {{ value || '-' }}
@@ -75,11 +75,68 @@
         </template>
         <template #col-pay_amount="{ value }">¥{{ formatMoney(value as number) }}</template>
         <template #actions="{ row }">
-          <div class="flex min-w-[152px] flex-wrap gap-2">
-            <router-link :to="{ path: `/admin/orders/${row.id}`, query: route.query }" class="inline-flex whitespace-nowrap text-sm text-teal-600 hover:underline">详情</router-link>
-            <button v-if="row.status === 'paid'" class="inline-flex whitespace-nowrap text-sm text-indigo-600 hover:underline disabled:cursor-not-allowed disabled:opacity-60" :disabled="actionLoading" @click="confirmOrder(row)">确认</button>
-            <button v-if="row.status === 'confirmed' || row.status === 'paid'" class="inline-flex whitespace-nowrap text-sm text-green-600 hover:underline disabled:cursor-not-allowed disabled:opacity-60" :disabled="actionLoading" @click="openCheckIn(row)">入住</button>
-            <button v-if="row.status === 'checked_in'" class="inline-flex whitespace-nowrap text-sm text-orange-600 hover:underline disabled:cursor-not-allowed disabled:opacity-60" :disabled="actionLoading" @click="openCheckOut(row)">退房</button>
+          <div class="relative inline-flex items-center justify-start pr-0.5">
+            <div class="relative">
+              <button
+                class="inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-slate-500 transition hover:border-slate-200 hover:bg-slate-100 hover:text-slate-700"
+                :class="isActionMenuOpen(Number(row.id)) ? 'border-slate-200 bg-slate-100 text-slate-700' : ''"
+                :aria-label="`展开订单 ${String(row.order_no || row.id)} 的操作菜单`"
+                @click.stop="toggleActionMenu(Number(row.id))"
+              >
+                <span aria-hidden="true" class="text-base leading-none">⋯</span>
+              </button>
+              <div
+                v-if="isActionMenuOpen(Number(row.id))"
+                class="absolute right-0 top-full z-30 mt-2 w-44 rounded-xl border border-slate-200 bg-white/95 p-1.5 shadow-[0_10px_24px_rgba(15,23,42,0.12)] backdrop-blur-sm"
+                @click.stop
+              >
+                <router-link
+                  :to="{ path: `/admin/orders/${row.id}`, query: route.query }"
+                  class="block rounded-md px-2 py-1.5 text-left text-[13px] text-slate-700 transition hover:bg-slate-100"
+                  @click="closeActionMenu"
+                >查看详情</router-link>
+                <div class="my-1.5 h-px bg-slate-100" />
+                <router-link
+                  v-if="row.status === 'paid' || row.status === 'confirmed'"
+                  :to="{ path: '/admin/frontdesk/check-in', query: { order_id: String(row.id) } }"
+                  class="block rounded-md px-2 py-1.5 text-left text-[13px] text-teal-700 transition hover:bg-teal-50"
+                  @click="closeActionMenu"
+                >完整入住流程</router-link>
+                <router-link
+                  v-if="row.status === 'checked_in' || row.status === 'paid' || row.status === 'confirmed'"
+                  :to="{ path: '/admin/frontdesk/check-out', query: { order_id: String(row.id) } }"
+                  class="block rounded-md px-2 py-1.5 text-left text-[13px] text-teal-700 transition hover:bg-teal-50"
+                  @click="closeActionMenu"
+                >完整退房流程</router-link>
+                <router-link
+                  v-if="row.status === 'checked_in' || row.status === 'paid' || row.status === 'confirmed'"
+                  :to="{ path: '/admin/frontdesk/extend-switch', query: { order_id: String(row.id) } }"
+                  class="block rounded-md px-2 py-1.5 text-left text-[13px] text-teal-700 transition hover:bg-teal-50"
+                  @click="closeActionMenu"
+                >续住/换房</router-link>
+                <div class="my-1.5 h-px bg-slate-100" />
+                <div class="flex items-center gap-1.5 px-1 pb-0.5">
+                  <button
+                    v-if="row.status === 'paid'"
+                    class="inline-flex h-7 flex-1 items-center justify-center rounded-md border border-indigo-200 bg-indigo-50 text-[12px] font-medium text-indigo-700 transition hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-60"
+                    :disabled="actionLoading"
+                    @click="handleMenuConfirm(row)"
+                  >确认</button>
+                  <button
+                    v-if="row.status === 'confirmed' || row.status === 'paid'"
+                    class="inline-flex h-7 flex-1 items-center justify-center rounded-md border border-teal-200 bg-teal-50 text-[12px] font-medium text-teal-700 transition hover:bg-teal-100 disabled:cursor-not-allowed disabled:opacity-60"
+                    :disabled="actionLoading"
+                    @click="handleMenuOpenCheckIn(row)"
+                  >入住</button>
+                  <button
+                    v-if="row.status === 'checked_in'"
+                    class="inline-flex h-7 flex-1 items-center justify-center rounded-md border border-slate-200 bg-slate-100 text-[12px] font-medium text-slate-700 transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-60"
+                    :disabled="actionLoading"
+                    @click="handleMenuOpenCheckOut(row)"
+                  >退房</button>
+                </div>
+              </div>
+            </div>
           </div>
         </template>
       </DataTable>
@@ -134,11 +191,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute } from 'vue-router'
 import { orderApi } from '@hotelink/api'
 import { formatMoney, ORDER_STATUS_MAP, PAYMENT_STATUS_MAP, extractApiError } from '@hotelink/utils'
 import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, useToast, useConfirm, SelectField } from '@hotelink/ui'
+import { emitOrderSync, onOrderSync } from '../utils/order-sync'
 
 const { showToast } = useToast()
 const { confirm: confirmDialog } = useConfirm()
@@ -170,6 +228,35 @@ const checkInForm = reactive({ order_id: 0, order_no: '', room_no: '', operator_
 const showCheckOut = ref(false)
 const checkOutForm = reactive({ order_id: 0, order_no: '', consume_amount: 0, operator_remark: '' })
 const actionLoading = ref(false)
+const activeActionMenuId = ref<number | null>(null)
+let stopOrderSync: (() => void) | null = null
+
+function toggleActionMenu(orderId: number) {
+  activeActionMenuId.value = activeActionMenuId.value === orderId ? null : orderId
+}
+
+function closeActionMenu() {
+  activeActionMenuId.value = null
+}
+
+function isActionMenuOpen(orderId: number) {
+  return activeActionMenuId.value === orderId
+}
+
+function handleMenuConfirm(row: Record<string, unknown>) {
+  closeActionMenu()
+  return confirmOrder(row)
+}
+
+function handleMenuOpenCheckIn(row: Record<string, unknown>) {
+  closeActionMenu()
+  openCheckIn(row)
+}
+
+function handleMenuOpenCheckOut(row: Record<string, unknown>) {
+  closeActionMenu()
+  openCheckOut(row)
+}
 
 function patchOrderRow(orderId: number, patch: Record<string, unknown>) {
   const nextStatus = String(patch.status || '')
@@ -231,6 +318,7 @@ async function confirmOrder(row: Record<string, unknown>) {
     if (res.code === 0) {
       showToast('订单已确认', 'success')
       patchOrderRow(row.id as number, { status: 'confirmed' })
+      emitOrderSync({ action: 'change-status', orderId: Number(row.id), source: 'admin-order-list' })
     } else {
       showToast(extractApiError(res, '确认订单失败'), 'error')
     }
@@ -268,6 +356,7 @@ async function handleCheckIn() {
       showToast('入住办理成功', 'success')
       showCheckIn.value = false
       patchOrderRow(checkInForm.order_id, { room_no: checkInForm.room_no, status: 'checked_in' })
+      emitOrderSync({ action: 'check-in', orderId: checkInForm.order_id, source: 'admin-order-list' })
     } else {
       showToast(extractApiError(res, '入住办理失败'), 'error')
     }
@@ -301,6 +390,7 @@ async function handleCheckOut() {
       showToast('退房办理成功', 'success')
       showCheckOut.value = false
       patchOrderRow(checkOutForm.order_id, { status: 'completed' })
+      emitOrderSync({ action: 'check-out', orderId: checkOutForm.order_id, source: 'admin-order-list' })
     } else {
       showToast(extractApiError(res, '退房办理失败'), 'error')
     }
@@ -311,5 +401,21 @@ async function handleCheckOut() {
   }
 }
 
-onMounted(loadList)
+onMounted(() => {
+  loadList()
+  window.addEventListener('click', closeActionMenu)
+  stopOrderSync = onOrderSync((payload) => {
+    if (payload.action === 'refresh' || payload.action === 'change-status' || payload.action === 'check-in' || payload.action === 'check-out' || payload.action === 'extend-stay' || payload.action === 'switch-room') {
+      loadList()
+    }
+  })
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('click', closeActionMenu)
+  if (stopOrderSync) {
+    stopOrderSync()
+    stopOrderSync = null
+  }
+})
 </script>

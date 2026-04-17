@@ -221,6 +221,18 @@
                 <p class="mt-1 text-xs text-slate-400">更新时间：{{ formatDateTime(order.updated_at || order.created_at) }}</p>
               </div>
 
+              <div v-if="getRecentChangeText(order)" class="mb-3 rounded-xl border px-3 py-2"
+                :class="getRecentChangeTag(order) === '回滚/纠正' ? 'border-amber-200 bg-amber-50/70' : getRecentChangeTag(order) === '异常' ? 'border-rose-200 bg-rose-50/70' : 'border-cyan-200 bg-cyan-50/70'">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                    :class="getRecentChangeTag(order) === '回滚/纠正' ? 'bg-amber-100 text-amber-700' : getRecentChangeTag(order) === '异常' ? 'bg-rose-100 text-rose-700' : 'bg-cyan-100 text-cyan-700'">
+                    {{ getRecentChangeTag(order) }}
+                  </span>
+                  <span class="text-[11px] text-gray-400">近期变更</span>
+                </div>
+                <p class="mt-1 text-xs leading-5 text-slate-700">{{ getRecentChangeText(order) }}</p>
+              </div>
+
               <router-link :to="`/my/orders/${order.id}`" class="mb-3 flex items-center gap-3">
                 <div class="flex h-16 w-16 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-xl">🏨</div>
                 <div class="min-w-0 flex-1">
@@ -282,7 +294,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { userOrderApi } from '@hotelink/api'
 import { ORDER_STATUS_MAP, PAYMENT_STATUS_MAP, formatMoney } from '@hotelink/utils'
@@ -310,6 +322,7 @@ const contentSlideTick = ref(0)
 const touchStartX = ref<number | null>(null)
 const touchStartY = ref<number | null>(null)
 const touchStartAt = ref(0)
+let refreshTimer: number | null = null
 
 const tabs = [
   { value: '', label: '全部' },
@@ -394,6 +407,51 @@ function orderProgressText(order: any): string {
   }
 }
 
+function splitRemarkSegments(raw: string): string[] {
+  return String(raw || '')
+    .split(/[；;\n]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function classifyChangeTag(text: string): string {
+  const normalized = String(text || '').toLowerCase()
+  if (normalized.includes('回滚') || normalized.includes('撤销') || normalized.includes('纠正') || normalized.includes('回退')) {
+    return '回滚/纠正'
+  }
+  if (normalized.includes('异常')) {
+    return '异常'
+  }
+  if (normalized.includes('续住')) {
+    return '续住'
+  }
+  if (normalized.includes('换房')) {
+    return '换房'
+  }
+  if (normalized.includes('入住')) {
+    return '入住'
+  }
+  if (normalized.includes('退房')) {
+    return '退房'
+  }
+  return '变更'
+}
+
+function getRecentChangeText(order: any): string {
+  const warning = String(order?.lifecycle_warning || '').trim()
+  if (warning) return warning
+
+  const segments = splitRemarkSegments(String(order?.operator_remark || ''))
+  if (!segments.length) return ''
+  return segments[segments.length - 1]
+}
+
+function getRecentChangeTag(order: any): string {
+  const text = getRecentChangeText(order)
+  if (!text) return ''
+  return classifyChangeTag(text)
+}
+
 function getHotelPath(order: any): string {
   const hotelId = Number(order?.hotel_id || order?.hotel || 0)
   if (!Number.isFinite(hotelId) || hotelId <= 0) return ''
@@ -476,6 +534,12 @@ async function fetchOrders(syncQuery = false) {
     total.value = 0
   } finally {
     loading.value = false
+  }
+}
+
+function refreshOrdersIfVisible() {
+  if (!document.hidden) {
+    fetchOrders(false)
   }
 }
 
@@ -569,6 +633,18 @@ function resetFilters() {
 onMounted(async () => {
   hydrateFromQuery()
   await fetchOrders(false)
+  window.addEventListener('focus', refreshOrdersIfVisible)
+  document.addEventListener('visibilitychange', refreshOrdersIfVisible)
+  refreshTimer = window.setInterval(refreshOrdersIfVisible, 60000)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('focus', refreshOrdersIfVisible)
+  document.removeEventListener('visibilitychange', refreshOrdersIfVisible)
+  if (refreshTimer !== null) {
+    window.clearInterval(refreshTimer)
+    refreshTimer = null
+  }
 })
 </script>
 

@@ -92,6 +92,7 @@ const todayStr = computed(() => {
 function isActive(path: string): boolean {
   if (route.path === path) return true
   if (path === '/admin/orders' && route.path.startsWith('/admin/orders/')) return true
+  if (path.startsWith('/admin/frontdesk') && route.path.startsWith(path)) return true
   return false
 }
 
@@ -120,6 +121,9 @@ const ALL_MENU_GROUPS = [
     label: '订单与前台',
     items: [
       { path: '/admin/orders', icon: '📋', label: '订单管理' },
+      { path: '/admin/frontdesk/check-in', icon: '🛎️', label: '入住办理' },
+      { path: '/admin/frontdesk/check-out', icon: '🧾', label: '退房结算' },
+      { path: '/admin/frontdesk/extend-switch', icon: '🔄', label: '续住/换房' },
     ],
   },
   {

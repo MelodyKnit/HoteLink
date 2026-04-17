@@ -31,6 +31,30 @@
         }" />
       </div>
 
+      <div v-if="changeEvents.length" class="mt-4 rounded-2xl bg-white p-5 shadow-sm">
+        <div class="mb-3 flex items-center justify-between gap-3">
+          <h4 class="font-semibold text-gray-800">订单变更轨迹</h4>
+          <span v-if="hasRollbackEvent" class="rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700">存在回滚/纠正</span>
+        </div>
+        <div class="space-y-2.5">
+          <div
+            v-for="(item, index) in changeEvents"
+            :key="`${item.type}-${index}`"
+            class="rounded-xl border px-3 py-2"
+            :class="item.type === 'rollback' ? 'border-amber-200 bg-amber-50/70' : item.type === 'warning' ? 'border-rose-200 bg-rose-50/70' : 'border-slate-200 bg-slate-50/80'"
+          >
+            <div class="mb-1 flex items-center gap-2">
+              <span class="rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                :class="item.type === 'extend' ? 'bg-indigo-100 text-indigo-700' : item.type === 'switch' ? 'bg-cyan-100 text-cyan-700' : item.type === 'checkin' ? 'bg-emerald-100 text-emerald-700' : item.type === 'checkout' ? 'bg-orange-100 text-orange-700' : item.type === 'rollback' ? 'bg-amber-100 text-amber-700' : item.type === 'warning' ? 'bg-rose-100 text-rose-700' : 'bg-slate-200 text-slate-700'">
+                {{ item.tag }}
+              </span>
+              <span class="text-xs text-gray-400">{{ item.time || '最近更新' }}</span>
+            </div>
+            <p class="text-sm leading-6 text-gray-700">{{ item.text }}</p>
+          </div>
+        </div>
+      </div>
+
       <!-- Hotel & Room -->
       <div
         v-if="hotelDetailPath"
@@ -61,18 +85,18 @@
         <div v-if="order.room_no" class="mt-2 text-sm text-gray-600">
           <span class="text-xs text-gray-400">房间号：</span>{{ order.room_no }}
         </div>
-        <div class="mt-4 flex flex-wrap gap-2">
+        <div class="mt-3 flex flex-wrap gap-2">
           <a
             :href="`tel:${supportPhone}`"
             @click.stop
-            class="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition hover:border-brand/30 hover:bg-brand/5"
+            class="inline-flex h-8 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
           >
             拨打客服电话
           </a>
           <button
             type="button"
             @click.stop="askAiCustomerService"
-            class="inline-flex h-10 items-center justify-center rounded-xl border border-brand/30 bg-brand/5 px-3 text-sm font-medium text-brand transition hover:bg-brand/10"
+            class="inline-flex h-8 items-center justify-center rounded-lg border border-teal-200 bg-white px-3 text-xs font-medium text-teal-700 transition hover:bg-teal-50"
           >
             询问 AI 客服
           </button>
@@ -96,18 +120,18 @@
         <div v-if="order.room_no" class="mt-2 text-sm text-gray-600">
           <span class="text-xs text-gray-400">房间号：</span>{{ order.room_no }}
         </div>
-        <div class="mt-4 flex flex-wrap gap-2">
+        <div class="mt-3 flex flex-wrap gap-2">
           <a
             :href="`tel:${supportPhone}`"
             @click.stop
-            class="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition hover:border-brand/30 hover:bg-brand/5"
+            class="inline-flex h-8 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
           >
             拨打客服电话
           </a>
           <button
             type="button"
             @click.stop="askAiCustomerService"
-            class="inline-flex h-10 items-center justify-center rounded-xl border border-brand/30 bg-brand/5 px-3 text-sm font-medium text-brand transition hover:bg-brand/10"
+            class="inline-flex h-8 items-center justify-center rounded-lg border border-teal-200 bg-white px-3 text-xs font-medium text-teal-700 transition hover:bg-teal-50"
           >
             询问 AI 客服
           </button>
@@ -297,7 +321,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { userOrderApi, userReviewApi, commonApi } from '@hotelink/api'
 import { ORDER_STATUS_MAP, PAYMENT_METHOD_MAP, PAYMENT_STATUS_MAP, buildImageThumbUrl, formatMoney } from '@hotelink/utils'
@@ -323,6 +347,7 @@ const reviewImages = ref<string[]>([])
 const reviewing = ref(false)
 const uploadingImage = ref(false)
 const reviewSuccessMsg = ref('')
+let refreshTimer: number | null = null
 
 const reviewCharCount = computed(() => reviewContent.value.trim().length)
 const reviewPointsPreview = computed(() => {
@@ -353,6 +378,63 @@ const showActionBar = computed(() => (
   || (order.value.status === 'completed' && !order.value.has_review)
   || showRebook.value
 ))
+
+type ChangeEventType = 'extend' | 'switch' | 'checkin' | 'checkout' | 'rollback' | 'warning' | 'other'
+
+interface ChangeEventItem {
+  type: ChangeEventType
+  tag: string
+  text: string
+  time?: string
+}
+
+function classifyChangeEvent(text: string): ChangeEventItem {
+  const normalized = text.toLowerCase()
+  if (normalized.includes('续住')) {
+    return { type: 'extend', tag: '续住', text }
+  }
+  if (normalized.includes('换房')) {
+    return { type: 'switch', tag: '换房', text }
+  }
+  if (normalized.includes('入住')) {
+    return { type: 'checkin', tag: '入住', text }
+  }
+  if (normalized.includes('退房')) {
+    return { type: 'checkout', tag: '退房', text }
+  }
+  if (normalized.includes('回滚') || normalized.includes('撤销') || normalized.includes('纠正') || normalized.includes('回退')) {
+    return { type: 'rollback', tag: '回滚/纠正', text }
+  }
+  if (normalized.includes('异常')) {
+    return { type: 'warning', tag: '异常', text }
+  }
+  return { type: 'other', tag: '变更', text }
+}
+
+const changeEvents = computed<ChangeEventItem[]>(() => {
+  const events: ChangeEventItem[] = []
+
+  const warning = String(order.value?.lifecycle_warning || '').trim()
+  if (warning) {
+    events.push({ type: 'warning', tag: '异常', text: warning, time: order.value?.updated_at })
+  }
+
+  const operatorRemark = String(order.value?.operator_remark || '').trim()
+  if (operatorRemark) {
+    const parts = operatorRemark
+      .split(/[；;\n]+/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+    for (const part of parts) {
+      const classified = classifyChangeEvent(part)
+      events.push({ ...classified, time: order.value?.updated_at })
+    }
+  }
+
+  return events
+})
+
+const hasRollbackEvent = computed(() => changeEvents.value.some((item) => item.type === 'rollback'))
 
 function openHotelDetail() {
   if (!hotelDetailPath.value) return
@@ -478,6 +560,18 @@ async function handleReview() {
   reviewing.value = false
 }
 
+function refreshOrderIfVisible() {
+  if (!document.hidden && !loading.value && orderId) {
+    userOrderApi.detail(orderId)
+      .then((res) => {
+        if (res.code === 0 && res.data) {
+          order.value = res.data
+        }
+      })
+      .catch(() => {})
+  }
+}
+
 onMounted(async () => {
   try {
     const res = await userOrderApi.detail(orderId)
@@ -494,6 +588,21 @@ onMounted(async () => {
     showToast('订单详情加载失败，请稍后重试', 'error')
   } finally {
     loading.value = false
+  }
+})
+
+onMounted(() => {
+  window.addEventListener('focus', refreshOrderIfVisible)
+  document.addEventListener('visibilitychange', refreshOrderIfVisible)
+  refreshTimer = window.setInterval(refreshOrderIfVisible, 90000)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('focus', refreshOrderIfVisible)
+  document.removeEventListener('visibilitychange', refreshOrderIfVisible)
+  if (refreshTimer !== null) {
+    window.clearInterval(refreshTimer)
+    refreshTimer = null
   }
 })
 </script>

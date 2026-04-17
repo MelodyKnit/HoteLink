@@ -20,17 +20,58 @@
         <OrderStepBar :status="order.status as string" :timestamps="orderTimestamps" />
       </div>
 
-      <div
-        v-if="lifecycleWarningText"
-        class="mb-6 rounded-2xl border border-rose-200 bg-gradient-to-r from-rose-50 via-white to-rose-50/40 p-5 shadow-sm"
-      >
-        <div class="flex items-start gap-3">
-          <div class="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-rose-100 text-xs font-bold text-rose-600">!</div>
-          <div class="min-w-0">
-            <h3 class="text-sm font-semibold text-rose-700">订单异常提醒</h3>
-            <p class="mt-1 text-sm leading-6 text-rose-600 break-words">{{ lifecycleWarningText }}</p>
-            <p class="mt-2 text-xs text-rose-400">该提示由系统自动识别，请结合订单操作备注进行人工核查。</p>
+      <div class="mb-6 grid gap-4 xl:grid-cols-3">
+        <div class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 xl:col-span-2">
+          <div class="mb-4 flex items-center justify-between gap-3">
+            <h3 class="text-sm font-semibold text-slate-700">状态摘要</h3>
+            <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-500">当前状态：{{ ORDER_STATUS_MAP[order.status as string]?.label || String(order.status) }}</span>
           </div>
+          <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <div class="rounded-xl bg-slate-50 px-4 py-3">
+              <p class="text-xs text-slate-400">房间号</p>
+              <p class="mt-1 text-sm font-semibold text-slate-800">{{ order.room_no || '未分配' }}</p>
+            </div>
+            <div class="rounded-xl bg-slate-50 px-4 py-3">
+              <p class="text-xs text-slate-400">入住日期</p>
+              <p class="mt-1 text-sm font-semibold text-slate-800">{{ order.check_in_date }}</p>
+            </div>
+            <div class="rounded-xl bg-slate-50 px-4 py-3">
+              <p class="text-xs text-slate-400">离店日期</p>
+              <p class="mt-1 text-sm font-semibold text-slate-800">{{ order.check_out_date }}</p>
+            </div>
+            <div class="rounded-xl bg-slate-50 px-4 py-3">
+              <p class="text-xs text-slate-400">支付状态</p>
+              <p class="mt-1 text-sm font-semibold text-slate-800">{{ PAYMENT_STATUS_MAP[order.payment_status as string] || String(order.payment_status) }}</p>
+            </div>
+          </div>
+          <div class="mt-4 grid gap-3 sm:grid-cols-2">
+            <div class="rounded-xl border border-slate-200 bg-white px-4 py-3">
+              <p class="text-xs text-slate-400">异常提示</p>
+              <div v-if="lifecycleWarningText" class="mt-1 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm leading-6 text-rose-700">
+                {{ lifecycleWarningText }}
+              </div>
+              <p v-else class="mt-1 text-sm text-slate-400">无异常</p>
+            </div>
+            <div class="rounded-xl border border-slate-200 bg-white px-4 py-3">
+              <p class="text-xs text-slate-400">本次变更</p>
+              <div v-if="operatorRemarkItems.length" class="mt-2 space-y-1.5">
+                <div v-for="(item, index) in operatorRemarkItems" :key="index" class="rounded-lg bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-700">
+                  {{ item }}
+                </div>
+              </div>
+              <p v-else class="mt-1 text-sm text-slate-400">暂无操作记录</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+          <h3 class="text-sm font-semibold text-slate-700">订单定位</h3>
+          <dl class="mt-4 space-y-3 text-sm">
+            <div class="flex justify-between gap-4"><dt class="text-slate-400">订单号</dt><dd class="text-right">{{ order.order_no }}</dd></div>
+            <div class="flex justify-between gap-4"><dt class="text-slate-400">酒店</dt><dd class="text-right">{{ order.hotel_name }}</dd></div>
+            <div class="flex justify-between gap-4"><dt class="text-slate-400">房型</dt><dd class="text-right">{{ order.room_type_name }}</dd></div>
+            <div class="flex justify-between gap-4"><dt class="text-slate-400">下单时间</dt><dd class="text-right">{{ formatDateTime(order.created_at as string) }}</dd></div>
+          </dl>
         </div>
       </div>
 
@@ -57,7 +98,6 @@
             <div class="flex justify-between"><dt class="text-slate-400">手机号</dt><dd>{{ order.guest_mobile }}</dd></div>
             <div class="flex justify-between"><dt class="text-slate-400">入住人数</dt><dd>{{ order.guest_count }}</dd></div>
             <div class="flex justify-between"><dt class="text-slate-400">客户备注</dt><dd>{{ order.remark || '-' }}</dd></div>
-            <div class="flex justify-between"><dt class="text-slate-400">操作备注</dt><dd>{{ order.operator_remark || '-' }}</dd></div>
           </dl>
         </div>
 
@@ -89,39 +129,65 @@
       </div>
 
       <!-- 操作按钮 -->
-      <div class="mt-6 flex flex-wrap gap-3">
-        <button
-          v-if="canCancelOrder"
-          class="rounded-lg bg-rose-600 px-5 py-2 text-sm font-medium text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
-          :disabled="actionLoading"
-          @click="openCancel"
-        >
-          {{ actionLoading ? '处理中…' : '取消订单' }}
-        </button>
-        <button
-          v-if="order.status === 'paid'"
-          class="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
-          :disabled="actionLoading"
-          @click="confirmOrder"
-        >
-          {{ actionLoading ? '处理中…' : '确认订单' }}
-        </button>
-        <button
-          v-if="order.status === 'confirmed' || order.status === 'paid'"
-          class="rounded-lg bg-green-600 px-5 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60"
-          :disabled="actionLoading"
-          @click="openCheckIn"
-        >
-          {{ actionLoading ? '处理中…' : '办理入住' }}
-        </button>
-        <button
-          v-if="order.status === 'checked_in'"
-          class="rounded-lg bg-orange-600 px-5 py-2 text-sm font-medium text-white hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-60"
-          :disabled="actionLoading"
-          @click="doCheckOut"
-        >
-          {{ actionLoading ? '处理中…' : '办理退房' }}
-        </button>
+      <div class="mt-6 grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+        <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <p class="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">流程入口</p>
+          <div class="flex flex-wrap gap-3">
+            <router-link
+              v-if="order.status === 'paid' || order.status === 'confirmed'"
+              :to="{ path: '/admin/frontdesk/check-in', query: { order_id: String(order.id) } }"
+              class="rounded-lg border border-cyan-200 bg-cyan-50 px-4 py-2 text-sm font-medium text-cyan-700 transition hover:bg-cyan-100"
+            >进入完整入住流程</router-link>
+            <router-link
+              v-if="order.status === 'checked_in' || order.status === 'paid' || order.status === 'confirmed'"
+              :to="{ path: '/admin/frontdesk/check-out', query: { order_id: String(order.id) } }"
+              class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-700 transition hover:bg-amber-100"
+            >进入完整退房流程</router-link>
+            <router-link
+              v-if="order.status === 'checked_in' || order.status === 'paid' || order.status === 'confirmed'"
+              :to="{ path: '/admin/frontdesk/extend-switch', query: { order_id: String(order.id) } }"
+              class="rounded-lg border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-medium text-violet-700 transition hover:bg-violet-100"
+            >进入续住/换房流程</router-link>
+          </div>
+        </div>
+
+        <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <p class="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">订单处理</p>
+          <div class="flex flex-wrap gap-3">
+            <button
+              v-if="canCancelOrder"
+              class="rounded-lg bg-rose-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+              :disabled="actionLoading"
+              @click="openCancel"
+            >
+              {{ actionLoading ? '处理中…' : '取消订单' }}
+            </button>
+            <button
+              v-if="order.status === 'paid'"
+              class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+              :disabled="actionLoading"
+              @click="confirmOrder"
+            >
+              {{ actionLoading ? '处理中…' : '确认订单' }}
+            </button>
+            <button
+              v-if="order.status === 'confirmed' || order.status === 'paid'"
+              class="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60"
+              :disabled="actionLoading"
+              @click="openCheckIn"
+            >
+              {{ actionLoading ? '处理中…' : '办理入住' }}
+            </button>
+            <button
+              v-if="order.status === 'checked_in'"
+              class="rounded-lg bg-orange-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-60"
+              :disabled="actionLoading"
+              @click="doCheckOut"
+            >
+              {{ actionLoading ? '处理中…' : '办理退房' }}
+            </button>
+          </div>
+        </div>
       </div>
     </template>
 
@@ -172,11 +238,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute } from 'vue-router'
 import { orderApi } from '@hotelink/api'
 import { formatMoney, formatDateTime, ORDER_STATUS_MAP, PAYMENT_STATUS_MAP, PAYMENT_METHOD_MAP } from '@hotelink/utils'
 import { PageHeader, StatusBadge, ModalDialog, OrderStepBar, useToast, useConfirm } from '@hotelink/ui'
+import { emitOrderSync, onOrderSync } from '../utils/order-sync'
 
 const { showToast } = useToast()
 const { confirm: confirmDialog } = useConfirm()
@@ -202,6 +269,7 @@ const loading = ref(true)
 const refreshing = ref(false)
 const order = ref<Record<string, unknown> | null>(null)
 const payments = ref<PaymentItem[]>([])
+let stopOrderSync: (() => void) | null = null
 
 // 用于订单进度条的时间戳映射
 const orderTimestamps = computed<Record<string, string | undefined>>(() => ({
@@ -215,9 +283,16 @@ const orderTimestamps = computed<Record<string, string | undefined>>(() => ({
 
 const lifecycleWarningText = computed(() => {
   const warning = String(order.value?.lifecycle_warning || '').trim()
-  if (warning) return warning
+  return warning
+})
+
+const operatorRemarkItems = computed(() => {
   const remark = String(order.value?.operator_remark || '').trim()
-  return remark.includes('异常提醒') ? remark : ''
+  if (!remark) return []
+  return remark
+    .split(/[；;\n]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
 })
 
 // 根据状态值返回对应展示信息。
@@ -266,6 +341,7 @@ async function confirmOrder() {
     const res = await orderApi.changeStatus({ order_id: order.value!.id as number, target_status: 'confirmed' })
     if (res.code === 0) {
       showToast('订单已确认', 'success')
+      emitOrderSync({ action: 'change-status', orderId: Number(order.value!.id), source: 'admin-order-detail' })
       loadDetail(true)
     } else {
       showToast(res.message || '确认失败', 'error')
@@ -293,6 +369,7 @@ async function submitCancel() {
     })
     if (res.code === 0) {
       showToast('订单已取消', 'success')
+      emitOrderSync({ action: 'change-status', orderId: Number(order.value!.id), source: 'admin-order-detail' })
       showCancelModal.value = false
       loadDetail(true)
     } else {
@@ -324,6 +401,7 @@ async function submitCheckIn() {
     if (res.code === 0) {
       showToast('入住办理成功', 'success')
       showCheckInModal.value = false
+      emitOrderSync({ action: 'check-in', orderId: Number(order.value!.id), source: 'admin-order-detail' })
       loadDetail(true)
     } else {
       showToast(res.message || '办理入住失败', 'error')
@@ -344,6 +422,7 @@ async function doCheckOut() {
     const res = await orderApi.checkOut({ order_id: order.value!.id as number })
     if (res.code === 0) {
       showToast('退房办理成功', 'success')
+      emitOrderSync({ action: 'check-out', orderId: Number(order.value!.id), source: 'admin-order-detail' })
       loadDetail(true)
     } else {
       showToast(res.message || '办理退房失败', 'error')
@@ -356,4 +435,19 @@ async function doCheckOut() {
 }
 
 onMounted(loadDetail)
+
+onMounted(() => {
+  stopOrderSync = onOrderSync((payload) => {
+    if (payload.orderId && Number(payload.orderId) === Number(route.params.id)) {
+      loadDetail(true)
+    }
+  })
+})
+
+onBeforeUnmount(() => {
+  if (stopOrderSync) {
+    stopOrderSync()
+    stopOrderSync = null
+  }
+})
 </script>

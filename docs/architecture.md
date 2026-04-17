@@ -56,7 +56,7 @@
 ### 3.2 前端
 
 - user-web：`28` 路由项、`25` 视图文件
-- admin-web：`22` 路由项、`20` 视图文件
+- admin-web：`25` 路由项、`23` 视图文件
 - 共享包：
   - `packages/api`
   - `packages/store`
