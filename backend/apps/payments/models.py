@@ -21,11 +21,13 @@ class PaymentRecord(models.Model):
     STATUS_UNPAID = "unpaid"
     STATUS_PAID = "paid"
     STATUS_FAILED = "failed"
+    STATUS_REFUNDING = "refunding"
     STATUS_REFUNDED = "refunded"
     STATUS_CHOICES = [
         (STATUS_UNPAID, "未支付"),
         (STATUS_PAID, "已支付"),
         (STATUS_FAILED, "支付失败"),
+        (STATUS_REFUNDING, "退款中"),
         (STATUS_REFUNDED, "已退款"),
     ]
 

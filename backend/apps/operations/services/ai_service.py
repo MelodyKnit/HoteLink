@@ -281,6 +281,7 @@ class AIChatService:
         *,
         model: str | None = None,
         temperature: float = 0.7,
+        max_tokens: int = 4096,
     ) -> dict[str, Any]:
         if not self.is_available():
             raise RuntimeError("AI service is not configured. Check AI_ENABLED and provider API keys.")
@@ -291,6 +292,7 @@ class AIChatService:
             model=use_model,
             messages=messages,
             temperature=temperature,
+            max_tokens=max_tokens,
         )
         content = ""
         if response.choices and response.choices[0].message:

@@ -359,6 +359,16 @@ stateDiagram-v2
 - AI 只在后端调用，不在前端暴露密钥
 - Prompt 明确禁止输出敏感信息
 
+### 8.4 AI 输入与运行时安全加固（2026-04 审计）
+
+- `AIChatSerializer.question` 新增 `max_length=2000` 校验，防止超长输入攻击
+- Prompt 模板渲染引擎从 `jinja2.Environment` 切换为 `jinja2.sandbox.SandboxedEnvironment`，阻止模板注入执行任意代码
+- `create_chat_completion()` 统一传入 `max_tokens=4096`，限制单次生成长度，防止异常高 token 消耗
+- AI 连通性测试接口 (`POST /admin/ai/test`) 错误响应不再暴露完整异常堆栈，仅返回脱敏摘要
+- `load_ai_settings()` 增加内存缓存，减少重复数据库查询
+- AI 调用日志 `status` 字段跟踪修正：成功/失败/异常状态准确记录
+- 流式输出错误分支修正 `ensure_ascii=False`，保证中文错误信息正确编码
+
 ## 9. 后续扩展规划
 
 以下扩展能力的接口状态请以 [api-spec.md](./api-spec.md) 和 [api-inventory.md](./api-inventory.md) 为准，功能路线图见 [feature-improvements.md](./feature-improvements.md)。

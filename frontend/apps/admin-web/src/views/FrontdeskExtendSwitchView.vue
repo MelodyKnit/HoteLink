@@ -94,12 +94,12 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { orderApi } from '@hotelink/api'
 import { extractApiError, ORDER_STATUS_MAP } from '@hotelink/utils'
 import { DataTable, PageHeader, Pagination, SelectField, StatusBadge, useToast } from '@hotelink/ui'
-import { emitOrderSync } from '../utils/order-sync'
+import { emitOrderSync, onOrderSync } from '../utils/order-sync'
 
 type OrderRow = Record<string, unknown>
 
@@ -278,8 +278,15 @@ async function handleSwitchRoom() {
   }
 }
 
+let cleanupSync: (() => void) | undefined
+
 onMounted(async () => {
   await loadList()
   await preloadOrderFromQuery()
+  cleanupSync = onOrderSync(() => loadList())
+})
+
+onBeforeUnmount(() => {
+  cleanupSync?.()
 })
 </script>

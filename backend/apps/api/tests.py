@@ -88,6 +88,14 @@ class ApiBaseTestCase(APITestCase):
             stock=8,
             status=RoomInventory.STATUS_AVAILABLE,
         )
+        for extra_day in range(2, 5):
+            RoomInventory.objects.create(
+                room_type=cls.room_type,
+                date=timezone.localdate() + timedelta(days=extra_day),
+                price=Decimal("399.00"),
+                stock=8,
+                status=RoomInventory.STATUS_AVAILABLE,
+            )
         cls.order = BookingOrder.objects.create(
             user=cls.user,
             hotel=cls.hotel,

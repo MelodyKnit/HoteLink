@@ -190,6 +190,10 @@ def _save_runtime_config(data: dict[str, Any]) -> None:
             raise
 
 
+_AI_SETTINGS_CACHE_KEY = "config.ai_settings"
+_AI_SETTINGS_CACHE_TTL = 60  # seconds
+
+
 def load_ai_settings() -> AISettings:
     """
     从环境变量和运行时配置加载 AI 设置。
@@ -197,6 +201,12 @@ def load_ai_settings() -> AISettings:
     加载优先级：运行时配置 > 环境变量 > 内置默认值。
     环境变量定义主供应商（向后兼容），运行时配置可添加额外供应商。
     """
+    from django.core.cache import cache
+
+    cached = cache.get(_AI_SETTINGS_CACHE_KEY)
+    if isinstance(cached, AISettings):
+        return cached
+
     enabled = _get_bool("AI_ENABLED", False)
 
     # 从环境变量构建主供应商（向后兼容）
@@ -240,7 +250,9 @@ def load_ai_settings() -> AISettings:
     if active_provider not in providers:
         active_provider = primary.name
 
-    return AISettings(enabled=enabled, active_provider=active_provider, providers=providers)
+    result = AISettings(enabled=enabled, active_provider=active_provider, providers=providers)
+    cache.set(_AI_SETTINGS_CACHE_KEY, result, _AI_SETTINGS_CACHE_TTL)
+    return result
 
 
 def update_ai_settings(
@@ -277,6 +289,18 @@ def update_ai_settings(
         runtime["providers"] = list(existing.values())
 
     _save_runtime_config(runtime)
+    from django.core.cache import cache
+    cache.delete(_AI_SETTINGS_CACHE_KEY)
+    return load_ai_settings()
+
+
+def delete_ai_provider(provider_name: str) -> AISettings:
+    """删除指定名称的运行时 AI 供应商配置并返回最新设置。"""
+    runtime = _load_runtime_config()
+    runtime["providers"] = [p for p in runtime.get("providers", []) if p.get("name") != provider_name]
+    _save_runtime_config(runtime)
+    from django.core.cache import cache
+    cache.delete(_AI_SETTINGS_CACHE_KEY)
     return load_ai_settings()
 
 

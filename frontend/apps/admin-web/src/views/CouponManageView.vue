@@ -122,10 +122,10 @@
               <label class="mb-1 block text-xs text-gray-500">会员等级要求</label>
               <SelectField v-model="form.required_level" class="w-full">
                 <option value="">不限</option>
-                <option value="silver">銀卡会员</option>
+                <option value="silver">银卡会员</option>
                 <option value="gold">金卡会员</option>
                 <option value="platinum">铂金会员</option>
-                <option value="diamond">钒石会员</option>
+                <option value="diamond">钻石会员</option>
               </SelectField>
             </div>
           </div>
@@ -199,10 +199,10 @@
               <label class="mb-1 block text-xs text-gray-500">会员等级要求</label>
               <SelectField v-model="editFormData.required_level" class="w-full">
                 <option value="">不限</option>
-                <option value="silver">銀卡会员</option>
+                <option value="silver">银卡会员</option>
                 <option value="gold">金卡会员</option>
                 <option value="platinum">铂金会员</option>
-                <option value="diamond">钒石会员</option>
+                <option value="diamond">钻石会员</option>
               </SelectField>
             </div>
           </div>

@@ -102,9 +102,11 @@ class UserProfile(models.Model):
         return level
 
     def refresh_level(self) -> bool:
-        """根据积分刷新会员等级，返回是否发生了升级。"""
+        """根据积分刷新会员等级，只升不降，返回是否发生了升级。"""
         new_level = self.compute_level()
-        if new_level != self.member_level:
+        current_threshold = self.MEMBER_THRESHOLDS.get(self.member_level, 0)
+        new_threshold = self.MEMBER_THRESHOLDS.get(new_level, 0)
+        if new_threshold > current_threshold:
             self.member_level = new_level
             self.save(update_fields=["member_level", "updated_at"])
             return True

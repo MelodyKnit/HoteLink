@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Any
 
 from django.conf import settings
-from jinja2 import Environment, FileSystemLoader, StrictUndefined, TemplateNotFound
+from jinja2 import FileSystemLoader, StrictUndefined, TemplateNotFound
+from jinja2.sandbox import SandboxedEnvironment
 
 SUPPORTED_SCENE_ALIASES = {
     "general": "customer_service",
@@ -53,7 +54,7 @@ class PromptTemplateService:
 
     def __init__(self) -> None:
         prompts_dir = Path(settings.BASE_DIR) / "prompts"
-        self.env = Environment(
+        self.env = SandboxedEnvironment(
             loader=FileSystemLoader(str(prompts_dir)),
             autoescape=False,
             trim_blocks=True,

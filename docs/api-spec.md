@@ -1,6 +1,6 @@
 # HoteLink API 规范（源码对齐版）
 
-> 更新时间：2026-04-17  
+> 更新时间：2026-04-18  
 > 对齐基线：`backend/apps/api/urls.py`、`backend/apps/api/views.py`
 
 ## 1. 文档范围
@@ -101,6 +101,9 @@
 
 - 全局启用 DRF 限流，匿名与登录用户都有默认速率限制
 - 登录、刷新、登出、首次初始化、上传、AI 生成类接口使用更严格的 scoped throttle
+- 注册接口独立限流（`3/minute`），防止批量注册
+- 用户修改密码后，旧 Token 会被加入黑名单，同时返回新 Token
+- 已禁用的用户尝试登录时，登录接口直接拒绝
 - 生产环境默认关闭 `/docs/`、`/redoc/`、`/schema/`，仅在 `ENABLE_API_DOCS=1` 时显式开启
 
 ---
@@ -182,6 +185,7 @@
 - `GET /api/v1/admin/hotels` 支持 `type` 查询参数过滤酒店类型
 - `POST /api/v1/admin/hotels/batch-update` 批量更新酒店类型，接受 `hotel_ids`（列表）和 `type`
 - `GET /api/v1/common/dicts` 新增字典项：`hotel_type`（酒店/民宿/短租）、`hotel_facility`（16 项设施枚举）
+- `GET /api/v1/admin/orders` 支持筛选参数：`status`、`payment_status`、`keyword`、`check_in_date`（入住日期）、`check_out_date`（退房日期），其中 `check_in_date` / `check_out_date` 为精确日期过滤
 - 管理端列表接口支持 `ordering` 参数（白名单校验，非法值自动回退为 `-id`）：
   - `GET /api/v1/admin/orders`：`id`、`order_no`、`guest_name`、`guest_mobile`、`hotel__name`、`room_type__name`、`check_in_date`、`check_out_date`、`pay_amount`、`status`、`payment_status`、`created_at`、`updated_at`
   - `GET /api/v1/admin/users`：`id`、`user__username`、`nickname`、`mobile`、`gender`、`role`、`member_level`、`points`、`status`、`created_at`、`updated_at`

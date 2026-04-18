@@ -515,9 +515,16 @@ async function handleCancel() {
   try {
     const res = await userOrderApi.cancel({ order_id: orderId, reason: cancelReason.value || '用户取消' })
     if (res.code === 0) {
-      order.value.status = 'cancelled'
       showCancelModal.value = false
       showToast('订单已取消', 'success')
+      // 重新拉取完整订单数据，确保 payment_status 等字段同步
+      try {
+        const detail = await userOrderApi.detail(orderId)
+        if (detail.code === 0 && detail.data) {
+          order.value = detail.data
+        }
+      } catch { /* fallback: 至少更新状态 */ }
+      if (order.value.status !== 'cancelled') order.value.status = 'cancelled'
     } else {
       showToast(res.message || '取消订单失败，请重试', 'error')
     }

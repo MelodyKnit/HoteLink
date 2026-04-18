@@ -108,7 +108,7 @@
             <div class="flex justify-between"><dt class="text-slate-400">原价</dt><dd>¥{{ formatMoney(order.original_amount as number) }}</dd></div>
             <div class="flex justify-between"><dt class="text-slate-400">优惠</dt><dd class="text-red-500">-¥{{ formatMoney(order.discount_amount as number) }}</dd></div>
             <div class="flex justify-between font-semibold"><dt class="text-slate-600">实付</dt><dd class="text-teal-700">¥{{ formatMoney(order.pay_amount as number) }}</dd></div>
-            <div class="flex justify-between"><dt class="text-slate-400">支付状态</dt><dd><StatusBadge :label="PAYMENT_STATUS_MAP[order.payment_status as string] || String(order.payment_status)" :type="order.payment_status === 'paid' ? 'success' : 'warning'" /></dd></div>
+            <div class="flex justify-between"><dt class="text-slate-400">支付状态</dt><dd><StatusBadge :label="PAYMENT_STATUS_MAP[order.payment_status as string] || String(order.payment_status)" :type="order.payment_status === 'paid' ? 'success' : order.payment_status === 'refunded' ? 'danger' : order.payment_status === 'refunding' ? 'warning' : 'warning'" /></dd></div>
           </dl>
         </div>
 
@@ -298,8 +298,8 @@ const operatorRemarkItems = computed(() => {
 // 根据状态值返回对应展示信息。
 function statusType(status: string) {
   if (status === 'checked_in' || status === 'completed') return 'success' as const
-  if (status === 'cancelled') return 'danger' as const
-  if (status === 'pending_payment') return 'warning' as const
+  if (status === 'cancelled' || status === 'refunded') return 'danger' as const
+  if (status === 'pending_payment' || status === 'refunding') return 'warning' as const
   return 'info' as const
 }
 

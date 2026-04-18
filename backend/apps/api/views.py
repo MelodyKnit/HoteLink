@@ -353,6 +353,17 @@ def mask_mobile(mobile: str) -> str:
     return f"{value[:3]}***{value[-3:]}"
 
 
+def _blacklist_user_tokens(user):
+    """将用户所有未过期的 Refresh Token 加入黑名单。"""
+    try:
+        from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, BlacklistedToken
+        tokens = OutstandingToken.objects.filter(user=user)
+        for token in tokens:
+            BlacklistedToken.objects.get_or_create(token=token)
+    except Exception:
+        pass  # 黑名单功能不可用时静默忽略
+
+
 def build_tokens_for_user(user: User) -> dict:
     """
     为指定用户生成 JWT Access / Refresh Token 对。
@@ -412,9 +423,9 @@ def make_order_no() -> str:
 
 
 def make_payment_no() -> str:
-    """生成唯一支付流水号，格式：PM + 时间戳(14位) + 4位随机数字。"""
+    """生成唯一支付流水号，格式：PM + 时间戳(14位) + 6位随机数字。"""
     now = timezone.localtime()
-    return f"PM{now.strftime('%Y%m%d%H%M%S')}{get_random_string(4, allowed_chars='0123456789')}"
+    return f"PM{now.strftime('%Y%m%d%H%M%S')}{get_random_string(6, allowed_chars='0123456789')}"
 
 
 def fallback_ai_reply(scene: str) -> str:
@@ -636,6 +647,8 @@ class ApiRootView(APIView):
 class UserRegisterView(APIView):
     """用户注册接口：创建 Django 用户并初始化 UserProfile。"""
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "auth_register"
 
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
@@ -643,16 +656,17 @@ class UserRegisterView(APIView):
             return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
 
         data = serializer.validated_data
-        user = User.objects.create_user(
-            username=data["username"],
-            password=data["password"],
-            email=data.get("email", ""),
-        )
-        UserProfile.objects.create(
-            user=user,
-            nickname=data["username"],
-            mobile=data["mobile"],
-        )
+        with transaction.atomic():
+            user = User.objects.create_user(
+                username=data["username"],
+                password=data["password"],
+                email=data.get("email", ""),
+            )
+            UserProfile.objects.create(
+                user=user,
+                nickname=data["username"],
+                mobile=data["mobile"],
+            )
         return api_response(data={"user_id": user.id, "username": user.username})
 
 
@@ -729,6 +743,8 @@ class BaseLoginView(APIView):
             return api_response(code=4010, message="用户名或密码错误", data=None, status_code=401)
 
         profile = ensure_profile(user)
+        if profile.status != UserProfile.STATUS_ACTIVE:
+            return api_response(code=4031, message="账号已被禁用或锁定，请联系管理员", data=None, status_code=403)
         if self.required_roles and profile.role not in self.required_roles and not user.is_superuser:
             return api_response(code=4030, message="权限不足", data=None, status_code=403)
 
@@ -990,7 +1006,7 @@ class PublicHotelDetailView(APIView):
         if not hotel_id:
             return api_response(code=4002, message="缺少 hotel_id", data=None, status_code=400)
         try:
-            hotel = Hotel.objects.prefetch_related("room_types").get(pk=hotel_id)
+            hotel = Hotel.objects.prefetch_related("room_types").get(pk=hotel_id, status=Hotel.STATUS_ONLINE)
         except Hotel.DoesNotExist:
             return api_response(code=4040, message="酒店不存在", data=None, status_code=404)
         return api_response(data=HotelDetailSerializer(hotel).data)
@@ -1115,7 +1131,10 @@ class UserPasswordChangeView(APIView):
             return api_response(code=4001, message="旧密码不正确", data=None, status_code=400)
         request.user.set_password(data["new_password"])
         request.user.save()
-        return api_response(data={"changed": True})
+        # 撤销该用户所有未过期的 Refresh Token，防止旧 Token 继续使用
+        _blacklist_user_tokens(request.user)
+        new_tokens = build_tokens_for_user(request.user)
+        return api_response(data={"changed": True, **new_tokens})
 
 
 class UserFavoritesView(APIView):
@@ -1156,7 +1175,11 @@ class UserOrdersView(APIView):
         queryset = BookingOrder.objects.filter(user=request.user).select_related("hotel", "room_type").prefetch_related("payments")
         status_param = request.query_params.get("status")
         if status_param:
-            queryset = queryset.filter(status=status_param)
+            statuses = [s.strip() for s in status_param.split(",") if s.strip()]
+            if len(statuses) == 1:
+                queryset = queryset.filter(status=statuses[0])
+            elif statuses:
+                queryset = queryset.filter(status__in=statuses)
 
         payment_status_param = request.query_params.get("payment_status")
         if payment_status_param:
@@ -1287,7 +1310,7 @@ class UserOrdersDetailView(APIView):
         order_id = request.query_params.get("order_id")
         if not order_id:
             return api_response(code=4002, message="缺少 order_id", data=None, status_code=400)
-        order = BookingOrder.objects.filter(id=order_id, user=request.user).select_related("hotel", "room_type").first()
+        order = BookingOrder.objects.filter(id=order_id, user=request.user).select_related("hotel", "room_type").prefetch_related("payments").first()
         if not order:
             return api_response(code=4040, message="订单不存在", data=None, status_code=404)
         return api_response(data=BookingOrderSerializer(order).data)
@@ -1311,13 +1334,12 @@ class UserOrdersCreateView(APIView):
         nights = (data["check_out_date"] - data["check_in_date"]).days
         if nights <= 0:
             return api_response(code=4001, message="离店日期必须大于入住日期", data=None, status_code=400)
-        original_amount = room_type.base_price * nights
+        if data["check_in_date"] < timezone.localdate():
+            return api_response(code=4001, message="入住日期不能早于今天", data=None, status_code=400)
 
         # 1. 会员折扣
         profile = ensure_profile(request.user)
         member_discount_rate = Decimal(str(profile.discount_rate))
-        member_discounted = (original_amount * member_discount_rate).quantize(Decimal("0.01"))
-        member_discount_amount = original_amount - member_discounted
 
         # 2. 优惠券：在事务内加行锁，防止同一张券被并发订单同时核销
         coupon_discount_amount = Decimal("0.00")
@@ -1339,6 +1361,14 @@ class UserOrdersCreateView(APIView):
             for inv in inventories:
                 inv.stock -= 1
                 inv.save(update_fields=["stock", "updated_at"])
+
+            # 使用按日库存价格计算总价（支持动态定价）
+            original_amount = sum(inv_map[d].price for d in date_range)
+            if original_amount <= 0:
+                original_amount = room_type.base_price * nights
+
+            member_discounted = (original_amount * member_discount_rate).quantize(Decimal("0.01"))
+            member_discount_amount = original_amount - member_discounted
 
             if coupon_id:
                 from django.utils import timezone as tz
@@ -1427,6 +1457,8 @@ class UserOrdersUpdateView(APIView):
         order = BookingOrder.objects.filter(id=data["order_id"], user=request.user).first()
         if not order:
             return api_response(code=4040, message="订单不存在", data=None, status_code=404)
+        if order.status in {BookingOrder.STATUS_COMPLETED, BookingOrder.STATUS_CANCELLED, BookingOrder.STATUS_REFUNDED}:
+            return api_response(code=4093, message="当前订单状态不允许修改", data=None, status_code=409)
         updated_fields = []
         for field in ["guest_name", "guest_mobile", "remark"]:
             if field in data:
@@ -1481,20 +1513,20 @@ class UserOrdersPayView(APIView):
             order.status = BookingOrder.STATUS_PAID
             if not order.paid_at:
                 order.paid_at = paid_at
-            order.save(update_fields=["payment_status", "status", "paid_at", "updated_at"])
-
-        # 支付成功后奖励积分：每消费10元=1积分 × 会员倍率（事务外，不影响支付原子性）
-        profile = ensure_profile(request.user)
-        base_points = int(order.pay_amount / Decimal("10"))
-        earned_points = max(1, int(base_points * Decimal(str(profile.points_multiplier))))
-        if earned_points > 0:
-            order.points_earned = earned_points
-            order.save(update_fields=["points_earned"])
-            add_points(
-                request.user, earned_points, PointsLog.TYPE_CONSUME_REWARD,
-                f"订单 {order.order_no} 消费奖励（{profile.points_multiplier}x倍率）",
-                order=order,
-            )
+            # 支付成功后奖励积分（事务内，保证一致性）
+            profile = ensure_profile(request.user)
+            base_points = int(order.pay_amount / Decimal("10"))
+            earned_points = int(base_points * Decimal(str(profile.points_multiplier))) if base_points > 0 else 0
+            if earned_points > 0:
+                order.points_earned = earned_points
+                order.save(update_fields=["payment_status", "status", "paid_at", "points_earned", "updated_at"])
+                add_points(
+                    request.user, earned_points, PointsLog.TYPE_CONSUME_REWARD,
+                    f"订单 {order.order_no} 消费奖励（{profile.points_multiplier}x倍率）",
+                    order=order,
+                )
+            else:
+                order.save(update_fields=["payment_status", "status", "paid_at", "updated_at"])
 
         SystemNotice.objects.create(
             user=request.user,
@@ -1507,7 +1539,7 @@ class UserOrdersPayView(APIView):
 
 
 class UserOrdersCancelView(APIView):
-    """用户取消订单接口：限制已入住/已完成/已取消订单不可取消。"""
+    """用户取消订单接口：限制已入住/已完成/已取消/退款中/已退款订单不可取消。"""
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -1515,16 +1547,38 @@ class UserOrdersCancelView(APIView):
         if not serializer.is_valid():
             return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         data = serializer.validated_data
-        order = BookingOrder.objects.filter(id=data["order_id"], user=request.user).first()
-        if not order:
-            return api_response(code=4040, message="订单不存在", data=None, status_code=404)
-        if order.status in {BookingOrder.STATUS_COMPLETED, BookingOrder.STATUS_CANCELLED, BookingOrder.STATUS_CHECKED_IN}:
-            return api_response(code=4093, message="当前状态不允许取消", data=None, status_code=409)
+
         with transaction.atomic():
+            order = BookingOrder.objects.select_for_update().filter(id=data["order_id"], user=request.user).first()
+            if not order:
+                return api_response(code=4040, message="订单不存在", data=None, status_code=404)
+            non_cancellable = {
+                BookingOrder.STATUS_COMPLETED, BookingOrder.STATUS_CANCELLED,
+                BookingOrder.STATUS_CHECKED_IN, BookingOrder.STATUS_REFUNDING,
+                BookingOrder.STATUS_REFUNDED,
+            }
+            if order.status in non_cancellable:
+                return api_response(code=4093, message="当前状态不允许取消", data=None, status_code=409)
+
+            was_paid = order.payment_status == BookingOrder.PAYMENT_PAID
             order.status = BookingOrder.STATUS_CANCELLED
             order.cancelled_at = timezone.now()
-            order.operator_remark = data.get("reason", "")
-            order.save(update_fields=["status", "cancelled_at", "operator_remark", "updated_at"])
+            update_fields = ["status", "cancelled_at", "updated_at"]
+
+            reason = data.get("reason", "")
+            if reason and append_order_operator_remark(order, reason):
+                update_fields.append("operator_remark")
+
+            # 已支付订单取消时处理退款
+            if was_paid:
+                order.payment_status = BookingOrder.PAYMENT_REFUNDED
+                update_fields.append("payment_status")
+                PaymentRecord.objects.filter(
+                    order=order, status=PaymentRecord.STATUS_PAID,
+                ).update(status=PaymentRecord.STATUS_REFUNDED)
+
+            order.save(update_fields=update_fields)
+
             # 归还库存
             nights = (order.check_out_date - order.check_in_date).days
             date_range = [order.check_in_date + timedelta(days=i) for i in range(nights)]
@@ -1538,6 +1592,16 @@ class UserOrdersCancelView(APIView):
                     status=UserCoupon.STATUS_USED,
                     used_order_id=order.id,
                 ).update(status=UserCoupon.STATUS_UNUSED, used_order=None, used_at=None)
+            # 已支付订单取消时回收积分
+            if was_paid and order.points_earned > 0:
+                add_points(
+                    order.user, -order.points_earned, PointsLog.TYPE_CONSUME_REWARD,
+                    f"订单 {order.order_no} 取消，回收消费积分",
+                    order=order,
+                )
+                order.points_earned = 0
+                order.save(update_fields=["points_earned"])
+
         return api_response(data={"order_id": order.id, "status": order.status})
 
 
@@ -1922,13 +1986,14 @@ class UserAIChatView(APIView):
             return api_response(code=4002, message=str(exc), data=None, status_code=400)
 
         answer = result["answer"] or fallback_ai_reply(result["scene"])
+        ai_status = AICallLog.STATUS_SUCCESS if result["answer"] else AICallLog.STATUS_FAILED
         latency_ms = int((time.perf_counter() - started_at) * 1000)
         record_ai_call_log(
             user=request.user,
             scene=result["scene"],
             service=service,
             result=result,
-            status=AICallLog.STATUS_SUCCESS,
+            status=ai_status,
             latency_ms=latency_ms,
         )
         session = persist_ai_chat_turn(
@@ -1979,13 +2044,14 @@ class UserAIChatStreamView(APIView):
 
         scene = result["scene"]
         answer = result["answer"] or fallback_ai_reply(scene)
+        ai_status = AICallLog.STATUS_SUCCESS if result["answer"] else AICallLog.STATUS_FAILED
         latency_ms = int((time.perf_counter() - started_at) * 1000)
         record_ai_call_log(
             user=request.user,
             scene=scene,
             service=service,
             result=result,
-            status=AICallLog.STATUS_SUCCESS,
+            status=ai_status,
             latency_ms=latency_ms,
         )
         booking_assistant = result.get("booking_assistant")
@@ -2010,7 +2076,7 @@ class UserAIChatStreamView(APIView):
             except Exception:
                 fallback = fallback_ai_reply(scene)
                 yield f"data: {json.dumps({'type': 'chunk', 'content': fallback, 'done': False}, ensure_ascii=False)}\n\n"
-                yield f"data: {json.dumps({'type': 'done', 'content': '', 'done': True})}\n\n"
+                yield f"data: {json.dumps({'type': 'done', 'content': '', 'done': True}, ensure_ascii=False)}\n\n"
 
         response = StreamingHttpResponse(event_stream(), content_type="text/event-stream; charset=utf-8")
         response["Cache-Control"] = "no-cache"
@@ -2031,7 +2097,11 @@ class AdminDashboardOverviewView(APIView):
         today_revenue = BookingOrder.objects.filter(created_at__date=today, payment_status=BookingOrder.PAYMENT_PAID).aggregate(total=Sum("pay_amount"))["total"] or Decimal("0.00")
         month_revenue = BookingOrder.objects.filter(created_at__date__gte=month_start, payment_status=BookingOrder.PAYMENT_PAID).aggregate(total=Sum("pay_amount"))["total"] or Decimal("0.00")
         total_rooms = RoomType.objects.aggregate(total=Sum("stock"))["total"] or 0
-        occupied = BookingOrder.objects.filter(status=BookingOrder.STATUS_CHECKED_IN).count()
+        occupied = BookingOrder.objects.filter(
+            status=BookingOrder.STATUS_CHECKED_IN,
+            check_in_date__lte=today,
+            check_out_date__gt=today,
+        ).count()
         occupancy_rate = round((occupied / total_rooms) * 100, 2) if total_rooms else 0
         return api_response(
             data={
@@ -2176,8 +2246,20 @@ class AdminHotelsView(APIView):
             for field, value in serializer.validated_data.items():
                 if field != "hotel_id":
                     setattr(hotel, field, value)
+            # 下架/草稿状态变更前检查活跃订单
+            if hotel.status != Hotel.STATUS_ONLINE and getattr(hotel, '_original_status', hotel.status) == Hotel.STATUS_ONLINE:
+                pass  # 新状态已经不是 online，需要检查
+            new_status = serializer.validated_data.get("status")
+            if new_status and new_status != Hotel.STATUS_ONLINE:
+                has_active = BookingOrder.objects.filter(hotel=hotel).exclude(
+                    status__in=[BookingOrder.STATUS_CANCELLED, BookingOrder.STATUS_COMPLETED, BookingOrder.STATUS_REFUNDED]
+                ).exists()
+                if has_active:
+                    return api_response(code=4091, message="该酒店存在未完结订单，无法下架", data=None, status_code=409)
             hotel.save()
             return api_response(data=HotelSimpleSerializer(hotel).data)
+        if not request.path.endswith("/delete"):
+            return api_response(code=4001, message="未知操作", data=None, status_code=400)
         if get_user_role(request.user) != "system_admin":
             return api_response(code=4030, message="仅系统管理员可以删除酒店", data=None, status_code=403)
         hotel_id = request.data.get("hotel_id")
@@ -2333,15 +2415,17 @@ class AdminInventoryView(APIView):
             with transaction.atomic():
                 room_type = RoomType.objects.select_for_update().filter(pk=room_type_id).first()
                 if room_type:
-                    existing = RoomInventory.objects.filter(
-                        room_type_id=room_type_id,
-                        date__gte=start_date,
-                        date__lte=end_date,
-                    ).exists()
-                    if not existing:
-                        to_create = []
-                        current = start_date
-                        while current <= end_date:
+                    existing_dates = set(
+                        RoomInventory.objects.filter(
+                            room_type_id=room_type_id,
+                            date__gte=start_date,
+                            date__lte=end_date,
+                        ).values_list("date", flat=True)
+                    )
+                    to_create = []
+                    current = start_date
+                    while current <= end_date:
+                        if current not in existing_dates:
                             to_create.append(
                                 RoomInventory(
                                     room_type_id=room_type.id,
@@ -2351,7 +2435,8 @@ class AdminInventoryView(APIView):
                                     status=RoomInventory.STATUS_AVAILABLE,
                                 )
                             )
-                            current += timedelta(days=1)
+                        current += timedelta(days=1)
+                    if to_create:
                         RoomInventory.objects.bulk_create(to_create)
         queryset = RoomInventory.objects.all()
         if room_type_id:
@@ -2370,15 +2455,16 @@ class AdminInventoryView(APIView):
         if not serializer.is_valid():
             return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         data = serializer.validated_data
-        inventory, _ = RoomInventory.objects.update_or_create(
-            room_type_id=data["room_type_id"],
-            date=data["date"],
-            defaults={
-                "price": data["price"],
-                "stock": data["stock"],
-                "status": data["status"],
-            },
-        )
+        with transaction.atomic():
+            inventory, _ = RoomInventory.objects.update_or_create(
+                room_type_id=data["room_type_id"],
+                date=data["date"],
+                defaults={
+                    "price": data["price"],
+                    "stock": data["stock"],
+                    "status": data["status"],
+                },
+            )
         return api_response(data=RoomInventorySerializer(inventory).data)
 
 
@@ -2415,6 +2501,12 @@ class AdminOrdersView(APIView):
             )
         if status:
             queryset = queryset.filter(status=status)
+        check_in_date = parse_date(request.query_params.get("check_in_date", ""))
+        check_out_date = parse_date(request.query_params.get("check_out_date", ""))
+        if check_in_date:
+            queryset = queryset.filter(check_in_date=check_in_date)
+        if check_out_date:
+            queryset = queryset.filter(check_out_date=check_out_date)
         if ordering not in self._ORDERING_WHITELIST:
             ordering = "-id"
         queryset = queryset.order_by(ordering)
@@ -2429,7 +2521,9 @@ class AdminOrdersDetailView(APIView):
 
     def get(self, request):
         order_id = request.query_params.get("order_id")
-        order = BookingOrder.objects.filter(id=order_id).select_related("hotel", "room_type").first()
+        if not order_id or not str(order_id).isdigit():
+            return api_response(code=4002, message="缺少或无效的 order_id", data=None, status_code=400)
+        order = BookingOrder.objects.filter(id=order_id).select_related("hotel", "room_type").prefetch_related("payments").first()
         if not order:
             return api_response(code=4040, message="订单不存在", data=None, status_code=404)
         payload = BookingOrderSerializer(order).data
@@ -2445,73 +2539,107 @@ class AdminOrdersChangeStatusView(APIView):
         serializer = OrderStatusSerializer(data=request.data)
         if not serializer.is_valid():
             return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
-        order = BookingOrder.objects.filter(id=serializer.validated_data["order_id"]).first()
-        if not order:
-            return api_response(code=4040, message="订单不存在", data=None, status_code=404)
         target_status = serializer.validated_data["target_status"]
         operator_remark = (serializer.validated_data.get("operator_remark", "") or "").strip()
         today = timezone.localdate()
 
-        closed_statuses = {
-            BookingOrder.STATUS_COMPLETED,
-            BookingOrder.STATUS_CANCELLED,
-            BookingOrder.STATUS_REFUNDED,
-        }
-        if order.status in closed_statuses and target_status != order.status:
-            return api_response(code=4093, message="当前订单已关闭，无法再变更状态", data=None, status_code=409)
-        if target_status == BookingOrder.STATUS_PENDING_PAYMENT:
-            return api_response(code=4093, message="不支持手动回退为待支付状态", data=None, status_code=409)
-        if target_status == BookingOrder.STATUS_CANCELLED and order.status in {BookingOrder.STATUS_CHECKED_IN, BookingOrder.STATUS_COMPLETED, BookingOrder.STATUS_CANCELLED, BookingOrder.STATUS_REFUNDED}:
-            return api_response(code=4093, message="当前订单状态不允许取消", data=None, status_code=409)
+        with transaction.atomic():
+            order = BookingOrder.objects.select_for_update().filter(
+                id=serializer.validated_data["order_id"]
+            ).first()
+            if not order:
+                return api_response(code=4040, message="订单不存在", data=None, status_code=404)
 
-        if target_status == BookingOrder.STATUS_CONFIRMED and order.status != BookingOrder.STATUS_PAID:
-            return api_response(code=4093, message="仅已支付订单可确认", data=None, status_code=409)
-        if target_status == BookingOrder.STATUS_CHECKED_IN:
-            if order.status not in {BookingOrder.STATUS_PAID, BookingOrder.STATUS_CONFIRMED}:
-                return api_response(code=4093, message="当前订单状态不允许办理入住", data=None, status_code=409)
-            if order.payment_status != BookingOrder.PAYMENT_PAID:
-                return api_response(code=4093, message="订单未支付，无法办理入住", data=None, status_code=409)
-            if is_order_checkout_overdue(order, today=today):
-                return api_response(code=4093, message="订单已超过离店日期，无法办理入住，请人工核查", data=None, status_code=409)
+            closed_statuses = {
+                BookingOrder.STATUS_COMPLETED,
+                BookingOrder.STATUS_CANCELLED,
+                BookingOrder.STATUS_REFUNDED,
+            }
+            if order.status in closed_statuses and target_status != order.status:
+                return api_response(code=4093, message="当前订单已关闭，无法再变更状态", data=None, status_code=409)
+            if target_status == BookingOrder.STATUS_PENDING_PAYMENT:
+                return api_response(code=4093, message="不支持手动回退为待支付状态", data=None, status_code=409)
+            if target_status == BookingOrder.STATUS_CANCELLED and order.status in {BookingOrder.STATUS_CHECKED_IN, BookingOrder.STATUS_COMPLETED, BookingOrder.STATUS_CANCELLED, BookingOrder.STATUS_REFUNDED}:
+                return api_response(code=4093, message="当前订单状态不允许取消", data=None, status_code=409)
 
-        should_mark_direct_complete = False
-        if target_status == BookingOrder.STATUS_COMPLETED:
-            if order.status not in {BookingOrder.STATUS_CHECKED_IN, BookingOrder.STATUS_PAID, BookingOrder.STATUS_CONFIRMED}:
-                return api_response(code=4093, message="当前订单状态不允许直接完结", data=None, status_code=409)
-            if order.payment_status != BookingOrder.PAYMENT_PAID:
-                return api_response(code=4093, message="订单未支付，无法完结", data=None, status_code=409)
-            if order.status in {BookingOrder.STATUS_PAID, BookingOrder.STATUS_CONFIRMED}:
-                if not is_order_checkout_overdue(order, today=today):
-                    return api_response(code=4093, message="未到离店日期，请先办理入住后再退房", data=None, status_code=409)
-                should_mark_direct_complete = True
+            if target_status == BookingOrder.STATUS_CONFIRMED and order.status != BookingOrder.STATUS_PAID:
+                return api_response(code=4093, message="仅已支付订单可确认", data=None, status_code=409)
+            if target_status == BookingOrder.STATUS_CHECKED_IN:
+                if order.status not in {BookingOrder.STATUS_PAID, BookingOrder.STATUS_CONFIRMED}:
+                    return api_response(code=4093, message="当前订单状态不允许办理入住", data=None, status_code=409)
+                if order.payment_status != BookingOrder.PAYMENT_PAID:
+                    return api_response(code=4093, message="订单未支付，无法办理入住", data=None, status_code=409)
+                if is_order_checkout_overdue(order, today=today):
+                    return api_response(code=4093, message="订单已超过离店日期，无法办理入住，请人工核查", data=None, status_code=409)
 
-        order.status = target_status
-        update_fields = ["status", "updated_at"]
-        now = timezone.now()
-        if target_status == BookingOrder.STATUS_PAID and not order.paid_at:
-            order.paid_at = now
-            update_fields.append("paid_at")
-        if target_status == BookingOrder.STATUS_CONFIRMED and not order.confirmed_at:
-            order.confirmed_at = now
-            update_fields.append("confirmed_at")
-        if target_status == BookingOrder.STATUS_CHECKED_IN and not order.checked_in_at:
-            order.checked_in_at = now
-            update_fields.append("checked_in_at")
-        if target_status == BookingOrder.STATUS_COMPLETED and not order.completed_at:
-            order.completed_at = now
-            update_fields.append("completed_at")
-        if target_status == BookingOrder.STATUS_CANCELLED and not order.cancelled_at:
-            order.cancelled_at = now
-            update_fields.append("cancelled_at")
-        if target_status == BookingOrder.STATUS_CANCELLED and operator_remark:
-            note = f"人工取消订单：{operator_remark}"
-            if append_order_operator_remark(order, note):
-                update_fields.append("operator_remark")
-        if should_mark_direct_complete:
-            note = f"系统提示：离店日 {order.check_out_date} 已过，人工直接完结（未登记入住）"
-            if append_order_operator_remark(order, note):
-                update_fields.append("operator_remark")
-        order.save(update_fields=update_fields)
+            should_mark_direct_complete = False
+            if target_status == BookingOrder.STATUS_COMPLETED:
+                if order.status not in {BookingOrder.STATUS_CHECKED_IN, BookingOrder.STATUS_PAID, BookingOrder.STATUS_CONFIRMED}:
+                    return api_response(code=4093, message="当前订单状态不允许直接完结", data=None, status_code=409)
+                if order.payment_status != BookingOrder.PAYMENT_PAID:
+                    return api_response(code=4093, message="订单未支付，无法完结", data=None, status_code=409)
+                if order.status in {BookingOrder.STATUS_PAID, BookingOrder.STATUS_CONFIRMED}:
+                    if not is_order_checkout_overdue(order, today=today):
+                        return api_response(code=4093, message="未到离店日期，请先办理入住后再退房", data=None, status_code=409)
+                    should_mark_direct_complete = True
+
+            was_paid = order.payment_status == BookingOrder.PAYMENT_PAID
+            order.status = target_status
+            update_fields = ["status", "updated_at"]
+            now = timezone.now()
+            if target_status == BookingOrder.STATUS_PAID and not order.paid_at:
+                order.paid_at = now
+                update_fields.append("paid_at")
+            if target_status == BookingOrder.STATUS_CONFIRMED and not order.confirmed_at:
+                order.confirmed_at = now
+                update_fields.append("confirmed_at")
+            if target_status == BookingOrder.STATUS_CHECKED_IN and not order.checked_in_at:
+                order.checked_in_at = now
+                update_fields.append("checked_in_at")
+            if target_status == BookingOrder.STATUS_COMPLETED and not order.completed_at:
+                order.completed_at = now
+                update_fields.append("completed_at")
+            if target_status == BookingOrder.STATUS_CANCELLED and not order.cancelled_at:
+                order.cancelled_at = now
+                update_fields.append("cancelled_at")
+            if target_status == BookingOrder.STATUS_CANCELLED and operator_remark:
+                note = f"人工取消订单：{operator_remark}"
+                if append_order_operator_remark(order, note):
+                    update_fields.append("operator_remark")
+            if should_mark_direct_complete:
+                note = f"系统提示：离店日 {order.check_out_date} 已过，人工直接完结（未登记入住）"
+                if append_order_operator_remark(order, note):
+                    update_fields.append("operator_remark")
+
+            # 管理员取消订单时归还库存、优惠券、处理退款
+            if target_status == BookingOrder.STATUS_CANCELLED:
+                nights = (order.check_out_date - order.check_in_date).days
+                date_range = [order.check_in_date + timedelta(days=i) for i in range(nights)]
+                RoomInventory.objects.filter(
+                    room_type_id=order.room_type_id, date__in=date_range,
+                ).update(stock=F("stock") + 1)
+                if order.coupon_id:
+                    UserCoupon.objects.filter(
+                        pk=order.coupon_id,
+                        status=UserCoupon.STATUS_USED,
+                        used_order_id=order.id,
+                    ).update(status=UserCoupon.STATUS_UNUSED, used_order=None, used_at=None)
+                if was_paid:
+                    order.payment_status = BookingOrder.PAYMENT_REFUNDED
+                    update_fields.append("payment_status")
+                    PaymentRecord.objects.filter(
+                        order=order, status=PaymentRecord.STATUS_PAID,
+                    ).update(status=PaymentRecord.STATUS_REFUNDED)
+                    if order.points_earned > 0:
+                        add_points(
+                            order.user, -order.points_earned, PointsLog.TYPE_CONSUME_REWARD,
+                            f"订单 {order.order_no} 管理员取消，回收消费积分",
+                            order=order,
+                        )
+                        order.points_earned = 0
+                        update_fields.append("points_earned")
+
+            order.save(update_fields=update_fields)
         # 发送订单状态变更通知
         _notice_map = {
             BookingOrder.STATUS_CONFIRMED: (
@@ -2544,26 +2672,40 @@ class AdminOrdersCheckInView(APIView):
         if not serializer.is_valid():
             return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         data = serializer.validated_data
-        order = BookingOrder.objects.filter(id=data["order_id"]).select_related("user").first()
-        if not order:
-            return api_response(code=4040, message="订单不存在", data=None, status_code=404)
 
-        if order.status not in {BookingOrder.STATUS_PAID, BookingOrder.STATUS_CONFIRMED}:
-            return api_response(code=4093, message="当前订单状态不允许办理入住", data=None, status_code=409)
-        if order.payment_status != BookingOrder.PAYMENT_PAID:
-            return api_response(code=4093, message="订单未支付，无法办理入住", data=None, status_code=409)
-        if is_order_checkout_overdue(order):
-            return api_response(code=4093, message="订单已超过离店日期，无法办理入住，请人工核查", data=None, status_code=409)
+        with transaction.atomic():
+            order = BookingOrder.objects.select_for_update().filter(id=data["order_id"]).select_related("user").first()
+            if not order:
+                return api_response(code=4040, message="订单不存在", data=None, status_code=404)
 
-        order_remark = (data.get("operator_remark", "") or "").strip()
-        order.status = BookingOrder.STATUS_CHECKED_IN
-        if not order.checked_in_at:
-            order.checked_in_at = timezone.now()
-        order.room_no = data["room_no"]
-        update_fields = ["status", "checked_in_at", "room_no", "updated_at"]
-        if order_remark and append_order_operator_remark(order, order_remark):
-            update_fields.append("operator_remark")
-        order.save(update_fields=update_fields)
+            if order.status not in {BookingOrder.STATUS_PAID, BookingOrder.STATUS_CONFIRMED}:
+                return api_response(code=4093, message="当前订单状态不允许办理入住", data=None, status_code=409)
+            if order.payment_status != BookingOrder.PAYMENT_PAID:
+                return api_response(code=4093, message="订单未支付，无法办理入住", data=None, status_code=409)
+            if is_order_checkout_overdue(order):
+                return api_response(code=4093, message="订单已超过离店日期，无法办理入住，请人工核查", data=None, status_code=409)
+
+            # 房间号冲突检测：同酒店同时间段不允许重复入住
+            room_no = data["room_no"]
+            room_conflict = BookingOrder.objects.filter(
+                hotel_id=order.hotel_id,
+                room_no=room_no,
+                status=BookingOrder.STATUS_CHECKED_IN,
+                check_in_date__lt=order.check_out_date,
+                check_out_date__gt=order.check_in_date,
+            ).exclude(pk=order.pk).exists()
+            if room_conflict:
+                return api_response(code=4093, message=f"房间 {room_no} 在该日期范围内已被占用", data=None, status_code=409)
+
+            order_remark = (data.get("operator_remark", "") or "").strip()
+            order.status = BookingOrder.STATUS_CHECKED_IN
+            if not order.checked_in_at:
+                order.checked_in_at = timezone.now()
+            order.room_no = room_no
+            update_fields = ["status", "checked_in_at", "room_no", "updated_at"]
+            if order_remark and append_order_operator_remark(order, order_remark):
+                update_fields.append("operator_remark")
+            order.save(update_fields=update_fields)
         SystemNotice.objects.create(
             user=order.user,
             notice_type=SystemNotice.TYPE_ORDER,
@@ -2583,42 +2725,44 @@ class AdminOrdersCheckOutView(APIView):
         if not serializer.is_valid():
             return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         data = serializer.validated_data
-        order = BookingOrder.objects.filter(id=data["order_id"]).select_related("user").first()
-        if not order:
-            return api_response(code=4040, message="订单不存在", data=None, status_code=404)
 
-        if order.status in {
-            BookingOrder.STATUS_COMPLETED,
-            BookingOrder.STATUS_CANCELLED,
-            BookingOrder.STATUS_REFUNDED,
-            BookingOrder.STATUS_REFUNDING,
-        }:
-            return api_response(code=4093, message="当前订单状态不允许办理退房", data=None, status_code=409)
-        if order.status not in {BookingOrder.STATUS_CHECKED_IN, BookingOrder.STATUS_PAID, BookingOrder.STATUS_CONFIRMED}:
-            return api_response(code=4093, message="当前订单状态不允许办理退房", data=None, status_code=409)
-        if order.payment_status != BookingOrder.PAYMENT_PAID:
-            return api_response(code=4093, message="订单未支付，无法办理退房", data=None, status_code=409)
+        with transaction.atomic():
+            order = BookingOrder.objects.select_for_update().filter(id=data["order_id"]).select_related("user").first()
+            if not order:
+                return api_response(code=4040, message="订单不存在", data=None, status_code=404)
 
-        overdue_without_checkin = order.status in {BookingOrder.STATUS_PAID, BookingOrder.STATUS_CONFIRMED}
-        if overdue_without_checkin and not is_order_checkout_overdue(order):
-            return api_response(code=4093, message="未到离店日期，请先办理入住", data=None, status_code=409)
+            if order.status in {
+                BookingOrder.STATUS_COMPLETED,
+                BookingOrder.STATUS_CANCELLED,
+                BookingOrder.STATUS_REFUNDED,
+                BookingOrder.STATUS_REFUNDING,
+            }:
+                return api_response(code=4093, message="当前订单状态不允许办理退房", data=None, status_code=409)
+            if order.status not in {BookingOrder.STATUS_CHECKED_IN, BookingOrder.STATUS_PAID, BookingOrder.STATUS_CONFIRMED}:
+                return api_response(code=4093, message="当前订单状态不允许办理退房", data=None, status_code=409)
+            if order.payment_status != BookingOrder.PAYMENT_PAID:
+                return api_response(code=4093, message="订单未支付，无法办理退房", data=None, status_code=409)
 
-        previous_status = order.status
-        manual_remark = (data.get("operator_remark", "") or "").strip()
-        update_fields = ["status", "completed_at", "updated_at"]
-        order.status = BookingOrder.STATUS_COMPLETED
-        if not order.completed_at:
-            order.completed_at = timezone.now()
-        remark_updated = False
-        if manual_remark and append_order_operator_remark(order, manual_remark):
-            remark_updated = True
-        if overdue_without_checkin:
-            note = f"系统提示：离店日 {order.check_out_date} 已过，补录退房（未登记入住）"
-            if append_order_operator_remark(order, note):
+            overdue_without_checkin = order.status in {BookingOrder.STATUS_PAID, BookingOrder.STATUS_CONFIRMED}
+            if overdue_without_checkin and not is_order_checkout_overdue(order):
+                return api_response(code=4093, message="未到离店日期，请先办理入住", data=None, status_code=409)
+
+            previous_status = order.status
+            manual_remark = (data.get("operator_remark", "") or "").strip()
+            update_fields = ["status", "completed_at", "updated_at"]
+            order.status = BookingOrder.STATUS_COMPLETED
+            if not order.completed_at:
+                order.completed_at = timezone.now()
+            remark_updated = False
+            if manual_remark and append_order_operator_remark(order, manual_remark):
                 remark_updated = True
-        if remark_updated:
-            update_fields.append("operator_remark")
-        order.save(update_fields=update_fields)
+            if overdue_without_checkin:
+                note = f"系统提示：离店日 {order.check_out_date} 已过，补录退房（未登记入住）"
+                if append_order_operator_remark(order, note):
+                    remark_updated = True
+            if remark_updated:
+                update_fields.append("operator_remark")
+            order.save(update_fields=update_fields)
         SystemNotice.objects.create(
             user=order.user,
             notice_type=SystemNotice.TYPE_ORDER,
@@ -2641,43 +2785,66 @@ class AdminOrdersExtendStayView(APIView):
         if not serializer.is_valid():
             return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         data = serializer.validated_data
-        order = BookingOrder.objects.filter(id=data["order_id"]).select_related("user").first()
-        if not order:
-            return api_response(code=4040, message="订单不存在", data=None, status_code=404)
 
-        if order.status in {
-            BookingOrder.STATUS_COMPLETED,
-            BookingOrder.STATUS_CANCELLED,
-            BookingOrder.STATUS_REFUNDING,
-            BookingOrder.STATUS_REFUNDED,
-        }:
-            return api_response(code=4093, message="当前订单状态不允许续住", data=None, status_code=409)
-        if order.status not in {BookingOrder.STATUS_PAID, BookingOrder.STATUS_CONFIRMED, BookingOrder.STATUS_CHECKED_IN}:
-            return api_response(code=4093, message="当前订单状态不允许续住", data=None, status_code=409)
-        if order.payment_status != BookingOrder.PAYMENT_PAID:
-            return api_response(code=4093, message="订单未支付，无法续住", data=None, status_code=409)
+        with transaction.atomic():
+            order = BookingOrder.objects.select_for_update().filter(id=data["order_id"]).select_related("user").first()
+            if not order:
+                return api_response(code=4040, message="订单不存在", data=None, status_code=404)
 
-        new_check_out_date = data["new_check_out_date"]
-        if new_check_out_date <= order.check_out_date:
-            return api_response(code=4093, message="新的离店日期必须晚于当前离店日期", data=None, status_code=409)
-        if new_check_out_date <= order.check_in_date:
-            return api_response(code=4093, message="离店日期必须晚于入住日期", data=None, status_code=409)
+            if order.status in {
+                BookingOrder.STATUS_COMPLETED,
+                BookingOrder.STATUS_CANCELLED,
+                BookingOrder.STATUS_REFUNDING,
+                BookingOrder.STATUS_REFUNDED,
+            }:
+                return api_response(code=4093, message="当前订单状态不允许续住", data=None, status_code=409)
+            if order.status not in {BookingOrder.STATUS_PAID, BookingOrder.STATUS_CONFIRMED, BookingOrder.STATUS_CHECKED_IN}:
+                return api_response(code=4093, message="当前订单状态不允许续住", data=None, status_code=409)
+            if order.payment_status != BookingOrder.PAYMENT_PAID:
+                return api_response(code=4093, message="订单未支付，无法续住", data=None, status_code=409)
 
-        order.check_out_date = new_check_out_date
-        update_fields = ["check_out_date", "updated_at"]
-        operator_remark = (data.get("operator_remark", "") or "").strip()
-        base_note = f"续住办理：离店日期调整为 {new_check_out_date}"
-        if operator_remark:
-            base_note = f"{base_note}；备注：{operator_remark}"
-        if append_order_operator_remark(order, base_note):
-            update_fields.append("operator_remark")
-        order.save(update_fields=update_fields)
+            new_check_out_date = data["new_check_out_date"]
+            if new_check_out_date <= order.check_out_date:
+                return api_response(code=4093, message="新的离店日期必须晚于当前离店日期", data=None, status_code=409)
+            if new_check_out_date <= order.check_in_date:
+                return api_response(code=4093, message="离店日期必须晚于入住日期", data=None, status_code=409)
+
+            # 检查并扣减新增日期的库存
+            extra_days = (new_check_out_date - order.check_out_date).days
+            extra_date_range = [order.check_out_date + timedelta(days=i) for i in range(extra_days)]
+
+            extra_inventories = list(
+                RoomInventory.objects.select_for_update()
+                .filter(room_type_id=order.room_type_id, date__in=extra_date_range, status="available")
+            )
+            inv_map = {inv.date: inv for inv in extra_inventories}
+            for d in extra_date_range:
+                inv = inv_map.get(d)
+                if not inv or inv.stock <= 0:
+                    return api_response(code=4003, message=f"{d} 库存不足，无法续住", data=None, status_code=400)
+            for inv in extra_inventories:
+                inv.stock -= 1
+                inv.save(update_fields=["stock", "updated_at"])
+
+            # 重新计算金额：新增天数按库存日价格累加
+            extra_amount = sum(inv_map[d].price for d in extra_date_range)
+            order.check_out_date = new_check_out_date
+            order.original_amount = order.original_amount + extra_amount
+            order.pay_amount = order.pay_amount + extra_amount
+            update_fields = ["check_out_date", "original_amount", "pay_amount", "updated_at"]
+            operator_remark = (data.get("operator_remark", "") or "").strip()
+            base_note = f"续住办理：离店日期调整为 {new_check_out_date}，新增 {extra_days} 晚 ¥{extra_amount}"
+            if operator_remark:
+                base_note = f"{base_note}；备注：{operator_remark}"
+            if append_order_operator_remark(order, base_note):
+                update_fields.append("operator_remark")
+            order.save(update_fields=update_fields)
 
         SystemNotice.objects.create(
             user=order.user,
             notice_type=SystemNotice.TYPE_ORDER,
             title="续住办理完成",
-            content=f"订单 {order.order_no} 已完成续住，新的离店日期为 {order.check_out_date}。",
+            content=f"订单 {order.order_no} 已完成续住，新的离店日期为 {new_check_out_date}，新增费用 ¥{extra_amount}。",
             related_order=order,
         )
         return api_response(
@@ -2698,38 +2865,51 @@ class AdminOrdersSwitchRoomView(APIView):
         if not serializer.is_valid():
             return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         data = serializer.validated_data
-        order = BookingOrder.objects.filter(id=data["order_id"]).select_related("user").first()
-        if not order:
-            return api_response(code=4040, message="订单不存在", data=None, status_code=404)
 
-        if order.status in {
-            BookingOrder.STATUS_COMPLETED,
-            BookingOrder.STATUS_CANCELLED,
-            BookingOrder.STATUS_REFUNDING,
-            BookingOrder.STATUS_REFUNDED,
-        }:
-            return api_response(code=4093, message="当前订单状态不允许换房", data=None, status_code=409)
-        if order.status not in {BookingOrder.STATUS_PAID, BookingOrder.STATUS_CONFIRMED, BookingOrder.STATUS_CHECKED_IN}:
-            return api_response(code=4093, message="当前订单状态不允许换房", data=None, status_code=409)
-        if order.payment_status != BookingOrder.PAYMENT_PAID:
-            return api_response(code=4093, message="订单未支付，无法换房", data=None, status_code=409)
+        with transaction.atomic():
+            order = BookingOrder.objects.select_for_update().filter(id=data["order_id"]).select_related("user").first()
+            if not order:
+                return api_response(code=4040, message="订单不存在", data=None, status_code=404)
 
-        new_room_no = (data["new_room_no"] or "").strip()
-        if not new_room_no:
-            return api_response(code=4001, message="房间号不能为空", data=None, status_code=400)
-        if order.room_no and order.room_no.strip() == new_room_no:
-            return api_response(code=4093, message="新房间号与当前房间号一致", data=None, status_code=409)
+            if order.status in {
+                BookingOrder.STATUS_COMPLETED,
+                BookingOrder.STATUS_CANCELLED,
+                BookingOrder.STATUS_REFUNDING,
+                BookingOrder.STATUS_REFUNDED,
+            }:
+                return api_response(code=4093, message="当前订单状态不允许换房", data=None, status_code=409)
+            if order.status not in {BookingOrder.STATUS_PAID, BookingOrder.STATUS_CONFIRMED, BookingOrder.STATUS_CHECKED_IN}:
+                return api_response(code=4093, message="当前订单状态不允许换房", data=None, status_code=409)
+            if order.payment_status != BookingOrder.PAYMENT_PAID:
+                return api_response(code=4093, message="订单未支付，无法换房", data=None, status_code=409)
 
-        old_room_no = order.room_no or "未分配"
-        order.room_no = new_room_no
-        update_fields = ["room_no", "updated_at"]
-        operator_remark = (data.get("operator_remark", "") or "").strip()
-        base_note = f"换房办理：{old_room_no} -> {new_room_no}"
-        if operator_remark:
-            base_note = f"{base_note}；备注：{operator_remark}"
-        if append_order_operator_remark(order, base_note):
-            update_fields.append("operator_remark")
-        order.save(update_fields=update_fields)
+            new_room_no = (data["new_room_no"] or "").strip()
+            if not new_room_no:
+                return api_response(code=4001, message="房间号不能为空", data=None, status_code=400)
+            if order.room_no and order.room_no.strip() == new_room_no:
+                return api_response(code=4093, message="新房间号与当前房间号一致", data=None, status_code=409)
+
+            # 新房间号冲突检测
+            room_conflict = BookingOrder.objects.filter(
+                hotel_id=order.hotel_id,
+                room_no=new_room_no,
+                status=BookingOrder.STATUS_CHECKED_IN,
+                check_in_date__lt=order.check_out_date,
+                check_out_date__gt=order.check_in_date,
+            ).exclude(pk=order.pk).exists()
+            if room_conflict:
+                return api_response(code=4093, message=f"房间 {new_room_no} 在该日期范围内已被占用", data=None, status_code=409)
+
+            old_room_no = order.room_no or "未分配"
+            order.room_no = new_room_no
+            update_fields = ["room_no", "updated_at"]
+            operator_remark = (data.get("operator_remark", "") or "").strip()
+            base_note = f"换房办理：{old_room_no} -> {new_room_no}"
+            if operator_remark:
+                base_note = f"{base_note}；备注：{operator_remark}"
+            if append_order_operator_remark(order, base_note):
+                update_fields.append("operator_remark")
+            order.save(update_fields=update_fields)
 
         SystemNotice.objects.create(
             user=order.user,
@@ -2950,6 +3130,7 @@ class AdminEmployeeResetPasswordView(APIView):
         new_password = self._generate_password()
         profile.user.set_password(new_password)
         profile.user.save(update_fields=["password"])
+        _blacklist_user_tokens(profile.user)
         return api_response(data={"user_id": user_id, "new_password": new_password, "message": "密码已重置，请尽快通知用户修改"})
 
 
@@ -2986,6 +3167,7 @@ class AdminUserResetPasswordView(APIView):
         new_password = AdminEmployeeResetPasswordView._generate_password()
         user.set_password(new_password)
         user.save(update_fields=["password"])
+        _blacklist_user_tokens(user)
         return api_response(data={"user_id": user_id, "new_password": new_password, "message": "密码已重置"})
 
 
@@ -3265,11 +3447,8 @@ class AdminAIProviderDeleteView(APIView):
         ai_settings = load_ai_settings()
         if provider_name == ai_settings.active_provider:
             return api_response(code=4093, message="不能删除当前活跃的供应商，请先切换到其他供应商", data=None, status_code=409)
-        from config.ai import _load_runtime_config, _save_runtime_config
-        runtime = _load_runtime_config()
-        runtime["providers"] = [p for p in runtime.get("providers", []) if p.get("name") != provider_name]
-        _save_runtime_config(runtime)
-        new_settings = load_ai_settings()
+        from config.ai import delete_ai_provider
+        new_settings = delete_ai_provider(provider_name)
         return api_response(data={
             "providers": new_settings.list_providers(),
         })
@@ -3340,7 +3519,7 @@ class AdminAITestView(APIView):
                 error_message=str(exc),
                 latency_ms=int((time.perf_counter() - started_at) * 1000),
             )
-            return api_response(code=5001, message="AI 测试调用失败", data={"error": str(exc)}, status_code=500)
+            return api_response(code=5001, message="AI 测试调用失败，请检查供应商配置", data=None, status_code=500)
 
 
 class AdminAIReportSummaryView(APIView):

@@ -1,7 +1,7 @@
 # HoteLink 系统功能改进与增强规划
 
 > 编制日期：2026-04-08
-> 最近更新：2026-04-17
+> 最近更新：2026-04-18
 > 文档目标：对 HoteLink 酒店预订管理平台进行全面审查，梳理可增强、可补全、可深化的功能方向，重点围绕 AI 能力利用进行拓展。
 > 关联文档：[api-spec.md](./api-spec.md) 与 [api-inventory.md](./api-inventory.md) 用于查看当前接口实现状态。
 
@@ -65,6 +65,7 @@
   - [5.6 自动化测试覆盖](#56-自动化测试覆盖)
   - [5.7 日志与监控体系](#57-日志与监控体系)
 - [六、实施优先级建议](#六实施优先级建议)
+- [七、模块审计与缺陷修复记录（2026-04-18）](#七模块审计与缺陷修复记录2026-04-18)
 
 ---
 
@@ -748,6 +749,81 @@
 | 25 | 全文搜索引擎（5.2） | 大 | 搜索体验 |
 | 26 | 自动化测试（5.6） | 大 | 工程质量 |
 | 27 | 多语言支持（3.6） | 大 | 国际化 |
+
+---
+
+## 七、模块审计与缺陷修复记录（2026-04-18）
+
+> 本节记录针对全系统各模块的逐一审计与修复。按模块分类，每条标注严重级别（C=Critical / M=Major / I=Important / m=Minor）。
+
+### 7.1 订单模块（bookings / api）
+
+| # | 级别 | 问题 | 修复 |
+|---|------|------|------|
+| 1 | C | `UserOrdersCreateView` 下单时库存被重复扣减 | 移除冗余扣减，仅保留一次 `F()` 原子扣减 |
+| 2 | C | `BaseLoginView` 未校验用户禁用状态 | 登录前检查 `is_active`，禁用用户拒绝登录 |
+| 3 | C | 修改密码后旧 Token 仍可使用 | 密码修改后调用 `_blacklist_user_tokens()` 并返回新 Token |
+| 4 | M | 会员等级刷新逻辑允许降级 | 改为 upgrade-only，仅在积分达到更高等级时升级 |
+| 5 | M | 优惠券折扣缺少 min/max 校验 | 对 `discount` 字段增加合理区间验证 |
+| 6 | I | 酒店详情接口泄露已下架酒店 | 详情查询增加 `status=online` 过滤 |
+| 7 | I | 支付倒计时使用前端本地时间 | 改为后端返回 `server_time`，前端据此计算剩余时间 |
+
+### 7.2 酒店模块（hotels）
+
+| # | 级别 | 问题 | 修复 |
+|---|------|------|------|
+| 1 | M | 酒店下架/设为草稿时未检查活跃订单 | 下架前校验是否存在进行中订单，有则阻断 |
+| 2 | I | `AdminInventoryView.post()` 无事务保护 | 包裹 `transaction.atomic()` |
+
+### 7.3 支付模块（payments）
+
+| # | 级别 | 问题 | 修复 |
+|---|------|------|------|
+| 1 | m | `make_payment_no()` 随机位数不足（4位） | 扩展至 6 位随机数 |
+| 2 | I | 订单详情未预加载支付记录 | 详情视图增加 `prefetch_related("payments")` |
+| 3 | M | 缺少"退款中"支付状态 | 新增 `refunding` 支付状态 |
+
+### 7.4 CRM 模块
+
+| # | 级别 | 问题 | 修复 |
+|---|------|------|------|
+| 1 | m | `CouponManageView` 会员等级名称拼写错误 | 修正"銀卡会员→银卡会员""钒石会员→钻石会员" |
+| 2 | I | `CouponTemplate`、`UserCoupon`、`PointsLog`、`Review` 未注册 Django Admin | 补充 `admin.site.register` |
+| 3 | m | `PointsLogAdmin` 字段名与模型不一致 | 修正为 `log_type`、`points`、`balance` |
+
+### 7.5 用户与认证模块（users / auth）
+
+| # | 级别 | 问题 | 修复 |
+|---|------|------|------|
+| 1 | M | 注册接口无独立限流 | 新增 `3/minute` 注册专用 throttle |
+| 2 | C | 密码修改后旧令牌仍有效 | 新增 `_blacklist_user_tokens()` 工具函数，密码修改时调用 |
+
+### 7.6 运营模块（operations / frontdesk）
+
+| # | 级别 | 问题 | 修复 |
+|---|------|------|------|
+| C-1 | C | 库存自动填充存在"部分空洞"bug | 修复填充逻辑覆盖所有日期范围 |
+| C-2 | C | 入住/换房缺少房号冲突检测 | 校验目标房间是否已被占用 |
+| I-2 | I | Dashboard 入住率计算不准确 | 修正为实际在住 / 总库存 |
+| I-3 | I | DashboardView ECharts 实例未销毁导致内存泄漏 | 组件卸载时 dispose 图表实例 |
+| I-4 | I | `ExtendStay` 存在 TOCTOU 竞态 | 增加乐观锁 / 事务保护 |
+| I-6 | I | 5 个 operations 模型未注册 Django Admin | 补充 `admin.site.register` |
+| M-2 | M | 入住/退房操作缺少资格前置校验 | 前端按钮增加 eligibility guard |
+| M-3 | M | 前台入住/退房页面缺少日期筛选 | 新增 `check_in_date` / `check_out_date` 筛选条件 |
+| M-5 | M | 图表日期选择器分散在各图表组件内 | 提取到页面共享区域 |
+
+### 7.7 AI 模块
+
+| # | 级别 | 问题 | 修复 |
+|---|------|------|------|
+| C-1 | C | `AIChatSerializer.question` 无长度限制 | 新增 `max_length=2000` |
+| C-2 | C | Jinja2 使用普通 Environment | 切换为 `SandboxedEnvironment` 防模板注入 |
+| C-3 | C | AI 调用日志 status 跟踪不准确 | 修正状态记录逻辑 |
+| I-2 | I | AI 测试端点暴露完整异常堆栈 | 错误信息脱敏处理 |
+| I-7 | I | `create_chat_completion` 未限制生成长度 | 增加 `max_tokens=4096` |
+| m-3 | m | 流式错误分支 `ensure_ascii` 未关闭 | 设置 `ensure_ascii=False` |
+| m-5 | m | 删除供应商逻辑散落在视图内 | 提取为公共函数 `delete_ai_provider()` |
+| m-7 | m | `load_ai_settings()` 每次查数据库 | 增加内存缓存 |
 
 ---
 

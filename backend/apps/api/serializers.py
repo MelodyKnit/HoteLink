@@ -1,5 +1,6 @@
 """apps/api/serializers.py —— API 请求与响应序列化定义。"""
 
+from decimal import Decimal
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
 from django.conf import settings
@@ -79,6 +80,7 @@ class HotelSimpleSerializer(serializers.ModelSerializer):
             "address",
             "star",
             "phone",
+            "description",
             "cover_image",
             "cover_thumb",
             "images",
@@ -430,6 +432,8 @@ class HotelCreateSerializer(serializers.ModelSerializer):
         ]
         extra_kwargs = {
             "name": {"validators": []},
+            "star": {"min_value": 1, "max_value": 5},
+            "rating": {"read_only": True},
         }
 
 
@@ -533,7 +537,7 @@ class ReportTaskCreateSerializer(serializers.Serializer):
 class AIChatSerializer(serializers.Serializer):
     """AIChat 序列化器：用于接口参数校验或响应数据转换。"""
     scene = serializers.CharField(max_length=50)
-    question = serializers.CharField()
+    question = serializers.CharField(max_length=2000)
     hotel_id = serializers.IntegerField(required=False, allow_null=True)
     order_id = serializers.IntegerField(required=False, allow_null=True)
     session_id = serializers.IntegerField(required=False, allow_null=True, min_value=1)
@@ -669,7 +673,7 @@ class CouponTemplateCreateSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=100)
     coupon_type = serializers.ChoiceField(choices=CouponTemplate.TYPE_CHOICES)
     amount = serializers.DecimalField(max_digits=10, decimal_places=2, default=0)
-    discount = serializers.DecimalField(max_digits=3, decimal_places=1, default=10)
+    discount = serializers.DecimalField(max_digits=3, decimal_places=1, default=10, min_value=Decimal("0.1"), max_value=Decimal("9.9"))
     min_amount = serializers.DecimalField(max_digits=10, decimal_places=2, default=0)
     total_count = serializers.IntegerField(min_value=1, default=100)
     per_user_limit = serializers.IntegerField(min_value=1, default=1)
@@ -739,7 +743,7 @@ class CouponTemplateEditSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=100, required=False)
     coupon_type = serializers.ChoiceField(choices=CouponTemplate.TYPE_CHOICES, required=False)
     amount = serializers.DecimalField(max_digits=10, decimal_places=2, required=False)
-    discount = serializers.DecimalField(max_digits=3, decimal_places=1, required=False)
+    discount = serializers.DecimalField(max_digits=3, decimal_places=1, required=False, min_value=Decimal("0.1"), max_value=Decimal("9.9"))
     min_amount = serializers.DecimalField(max_digits=10, decimal_places=2, required=False)
     total_count = serializers.IntegerField(min_value=1, required=False)
     per_user_limit = serializers.IntegerField(min_value=1, required=False)
@@ -749,6 +753,13 @@ class CouponTemplateEditSerializer(serializers.Serializer):
     valid_start = serializers.DateField(required=False)
     valid_end = serializers.DateField(required=False)
     status = serializers.ChoiceField(choices=[("active", "有效"), ("inactive", "已下架")], required=False)
+
+    def validate(self, attrs):
+        start = attrs.get("valid_start")
+        end = attrs.get("valid_end")
+        if start and end and start > end:
+            raise serializers.ValidationError({"valid_end": ["结束日期不能早于开始日期"]})
+        return attrs
 
 
 class AISettingsUpdateSerializer(serializers.Serializer):

@@ -12,6 +12,8 @@
         <option value="checked_in">已入住</option>
         <option value="completed">已完成</option>
         <option value="cancelled">已取消</option>
+        <option value="refunding">退款中</option>
+        <option value="refunded">已退款</option>
       </SelectField>
       <SelectField v-model="filters.ordering" size="sm" @change="onSortChange">
         <option value="-id">ID 最新优先</option>
@@ -271,8 +273,9 @@ function patchOrderRow(orderId: number, patch: Record<string, unknown>) {
 // 根据状态值返回对应展示信息。
 function statusType(status: string) {
   if (status === 'checked_in' || status === 'completed') return 'success' as const
-  if (status === 'cancelled') return 'danger' as const
+  if (status === 'cancelled' || status === 'refunded') return 'danger' as const
   if (status === 'pending_payment') return 'warning' as const
+  if (status === 'refunding') return 'warning' as const
   return 'info' as const
 }
 

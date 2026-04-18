@@ -52,11 +52,14 @@
         <p v-if="countdown > 0 && !isPaid" class="mt-3 text-center text-xs text-gray-400">
           请在 <span class="font-semibold text-orange-600">{{ Math.floor(countdown / 60) }}:{{ String(countdown % 60).padStart(2, '0') }}</span> 内完成支付
         </p>
+        <p v-else-if="countdown <= 0 && !isPaid && !loading" class="mt-3 text-center text-xs text-red-500">
+          支付时间已过期，订单可能已被自动取消，请返回订单列表查看
+        </p>
 
         <!-- Pay button -->
         <div class="sticky bottom-16 mt-6 md:bottom-0">
-          <button @click="handlePay" :disabled="paying || isPaid" class="w-full rounded-2xl bg-brand py-3.5 text-center text-sm font-semibold text-white transition hover:bg-brand-dark disabled:opacity-50">
-            {{ paying ? '支付中...' : isPaid ? '订单已支付' : `确认支付 ¥${payableAmount}` }}
+          <button @click="handlePay" :disabled="paying || isPaid || countdown <= 0" class="w-full rounded-2xl bg-brand py-3.5 text-center text-sm font-semibold text-white transition hover:bg-brand-dark disabled:opacity-50">
+            {{ paying ? '支付中...' : isPaid ? '订单已支付' : countdown <= 0 ? '支付已过期' : `确认支付 ¥${payableAmount}` }}
           </button>
         </div>
 
@@ -83,7 +86,7 @@ const paying = ref(false)
 const error = ref('')
 const order = ref<any>({})
 const payMethod = ref('mock')
-const countdown = ref(900) // 15 min
+const countdown = ref(0)
 let timer: ReturnType<typeof setInterval>
 const payableAmount = computed(() => formatMoney(order.value?.pay_amount ?? order.value?.total_amount ?? order.value?.original_amount ?? 0))
 const isPaid = computed(() => order.value?.payment_status === 'paid')
@@ -136,6 +139,16 @@ onMounted(async () => {
     const res = await userOrderApi.detail(orderId)
     if (res.code === 0 && res.data) {
       order.value = res.data
+      // 根据订单创建时间计算剩余支付时间（默认 30 分钟）
+      const cancelMinutes = 30
+      if (res.data.created_at) {
+        const createdTime = new Date(res.data.created_at).getTime()
+        const deadline = createdTime + cancelMinutes * 60 * 1000
+        const remaining = Math.max(0, Math.floor((deadline - Date.now()) / 1000))
+        countdown.value = remaining
+      } else {
+        countdown.value = cancelMinutes * 60
+      }
     } else {
       error.value = res.message || '订单信息加载失败，请稍后重试'
       showToast(error.value, 'error')
@@ -146,8 +159,19 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
-  timer = setInterval(() => {
-    if (countdown.value > 0) countdown.value--
+  timer = setInterval(async () => {
+    if (countdown.value > 0) {
+      countdown.value--
+      if (countdown.value <= 0) {
+        // 倒计时归零，刷新订单状态确认是否已被系统取消
+        try {
+          const refreshRes = await userOrderApi.detail(orderId)
+          if (refreshRes.code === 0 && refreshRes.data) {
+            order.value = refreshRes.data
+          }
+        } catch { /* ignore */ }
+      }
+    }
   }, 1000)
 })
 

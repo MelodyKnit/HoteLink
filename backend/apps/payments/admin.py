@@ -1,6 +1,13 @@
 """payments admin 配置模块。"""
 
 from django.contrib import admin
+from .models import PaymentRecord
 
-# 可在此注册后台管理模型，便于 superadmin 页面维护数据
+
+@admin.register(PaymentRecord)
+class PaymentRecordAdmin(admin.ModelAdmin):
+    list_display = ("id", "payment_no", "order_id", "method", "status", "amount", "paid_at", "created_at")
+    list_filter = ("status", "method")
+    search_fields = ("payment_no", "order__order_no")
+    readonly_fields = ("payment_no", "order", "method", "amount", "paid_at", "created_at")
 

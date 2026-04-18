@@ -29,7 +29,7 @@
     <div class="mb-3 rounded-2xl bg-white px-3 py-1.5 shadow-sm ring-1 ring-gray-100">
       <div class="flex items-center gap-2">
         <div class="min-w-0 flex-1">
-          <div class="relative grid h-9 grid-cols-4 rounded-xl bg-slate-50 p-1 ring-1 ring-inset ring-gray-200">
+          <div class="relative grid h-9 grid-cols-6 rounded-xl bg-slate-50 p-1 ring-1 ring-inset ring-gray-200">
             <span
               class="pointer-events-none absolute bottom-1 left-1 top-1 rounded-lg bg-white shadow-sm transition-transform duration-300 ease-out"
               :style="tabSliderStyle"
@@ -327,8 +327,10 @@ let refreshTimer: number | null = null
 const tabs = [
   { value: '', label: '全部' },
   { value: 'pending_payment', label: '待支付' },
-  { value: 'confirmed', label: '待入住' },
+  { value: 'paid,confirmed', label: '待入住' },
+  { value: 'checked_in', label: '已入住' },
   { value: 'completed', label: '已完成' },
+  { value: 'cancelled', label: '已取消' },
 ]
 
 const paymentStatusOptions = [
@@ -363,6 +365,8 @@ function statusBadge(s: string): string {
   if (s === 'pending_payment') return 'bg-amber-50 text-amber-700'
   if (s === 'cancelled') return 'bg-gray-100 text-gray-500'
   if (s === 'confirmed') return 'bg-indigo-50 text-indigo-700'
+  if (s === 'refunding') return 'bg-orange-50 text-orange-700'
+  if (s === 'refunded') return 'bg-rose-50 text-rose-700'
   return 'bg-slate-100 text-slate-600'
 }
 

@@ -183,6 +183,7 @@ REST_FRAMEWORK = {
         "anon": os.getenv("API_THROTTLE_ANON", "120/minute"),
         "user": os.getenv("API_THROTTLE_USER", "300/minute"),
         "auth_login": os.getenv("API_THROTTLE_AUTH_LOGIN", "5/minute"),
+        "auth_register": os.getenv("API_THROTTLE_AUTH_REGISTER", "3/minute"),
         "auth_refresh": os.getenv("API_THROTTLE_AUTH_REFRESH", "20/minute"),
         "auth_logout": os.getenv("API_THROTTLE_AUTH_LOGOUT", "30/minute"),
         "system_init": os.getenv("API_THROTTLE_SYSTEM_INIT", "3/hour"),

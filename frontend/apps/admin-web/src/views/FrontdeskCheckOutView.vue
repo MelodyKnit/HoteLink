@@ -18,6 +18,13 @@
         <option value="completed">已完成</option>
         <option value="cancelled">已取消</option>
       </SelectField>
+      <input
+        v-model="checkOutDate"
+        type="date"
+        class="rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-teal-500"
+        title="离店日期筛选"
+        @change="onFilterChange"
+      />
       <button class="rounded-lg bg-slate-100 px-3 py-2 text-sm hover:bg-slate-200" @click="loadList">搜索</button>
     </div>
 
@@ -41,6 +48,16 @@
         <h3 class="mb-4 text-base font-semibold text-slate-700">结算面板</h3>
         <div v-if="!selectedOrder" class="rounded-lg border border-dashed border-slate-200 px-4 py-10 text-center text-sm text-slate-400">
           请先在左侧选择订单
+        </div>
+        <div v-else-if="!canCheckOut" class="space-y-4">
+          <div class="rounded-lg bg-slate-50 px-3 py-2 text-sm">
+            <p>订单号：{{ selectedOrder.order_no }}</p>
+            <p>入住人：{{ selectedOrder.guest_name }} / {{ selectedOrder.guest_mobile }}</p>
+            <p>状态：{{ ORDER_STATUS_MAP[String(selectedOrder.status)]?.label || selectedOrder.status }}</p>
+          </div>
+          <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+            当前订单状态不支持办理退房，仅「已入住」的订单可操作。
+          </div>
         </div>
         <form v-else class="space-y-4" @submit.prevent="handleCheckOut">
           <div class="rounded-lg bg-slate-50 px-3 py-2 text-sm">
@@ -92,12 +109,12 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { orderApi } from '@hotelink/api'
 import { extractApiError, formatMoney, ORDER_STATUS_MAP } from '@hotelink/utils'
 import { DataTable, PageHeader, Pagination, SelectField, StatusBadge, useToast } from '@hotelink/ui'
-import { emitOrderSync } from '../utils/order-sync'
+import { emitOrderSync, onOrderSync } from '../utils/order-sync'
 
 type OrderRow = Record<string, unknown>
 
@@ -123,6 +140,7 @@ const pageSize = ref(20)
 const total = ref(0)
 const keyword = ref('')
 const status = ref('checked_in')
+const checkOutDate = ref(new Date().toISOString().slice(0, 10))
 
 const selectedOrder = ref<OrderRow | null>(null)
 const consumeAmount = ref<number>(0)
@@ -130,6 +148,11 @@ const depositDeduction = ref<number>(0)
 const remark = ref('')
 
 const allowedStatuses = new Set(['pending_payment', 'paid', 'confirmed', 'checked_in', 'completed', 'cancelled'])
+
+const canCheckOut = computed(() => {
+  if (!selectedOrder.value) return false
+  return String(selectedOrder.value.status) === 'checked_in'
+})
 
 function onPageChange(p: number) {
   page.value = p
@@ -170,6 +193,9 @@ async function loadList() {
     }
     if (keyword.value.trim()) {
       params.keyword = keyword.value.trim()
+    }
+    if (checkOutDate.value) {
+      params.check_out_date = checkOutDate.value
     }
     const res = await orderApi.list(params)
     if (res.code === 0 && res.data) {
@@ -242,8 +268,15 @@ async function handleCheckOut() {
   }
 }
 
+let cleanupSync: (() => void) | undefined
+
 onMounted(async () => {
   await loadList()
   await preloadOrderFromQuery()
+  cleanupSync = onOrderSync(() => loadList())
+})
+
+onBeforeUnmount(() => {
+  cleanupSync?.()
 })
 </script>

@@ -125,6 +125,7 @@ export const PAYMENT_STATUS_MAP: Record<string, string> = {
   unpaid: '未支付',
   paid: '已支付',
   failed: '支付失败',
+  refunding: '退款中',
   refunded: '已退款',
 }
 

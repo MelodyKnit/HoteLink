@@ -18,16 +18,17 @@
     </div>
 
     <!-- Charts -->
+    <div class="flex items-center justify-between">
+      <h3 class="text-base font-semibold text-slate-900">数据趋势</h3>
+      <SelectField v-model="dateRange" size="sm" @change="loadCharts">
+        <option value="7">近7天</option>
+        <option value="14">近14天</option>
+        <option value="30">近30天</option>
+      </SelectField>
+    </div>
     <div class="grid gap-6 xl:grid-cols-2">
       <div class="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
-        <div class="mb-4 flex items-center justify-between">
-          <h3 class="text-base font-semibold text-slate-900">营收趋势</h3>
-          <SelectField v-model="dateRange" size="sm" @change="loadCharts">
-            <option value="7">近7天</option>
-            <option value="14">近14天</option>
-            <option value="30">近30天</option>
-          </SelectField>
-        </div>
+        <h3 class="mb-4 text-base font-semibold text-slate-900">营收趋势</h3>
         <div ref="revenueChartRef" class="h-72" />
       </div>
 
@@ -52,7 +53,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, nextTick } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import * as echarts from 'echarts'
 import { dashboardApi } from '@hotelink/api'
 import { formatMoney, formatDate } from '@hotelink/utils'
@@ -124,13 +125,22 @@ async function loadCharts() {
   }
 }
 
+function handleResize() {
+  revenueChart?.resize()
+  orderChart?.resize()
+}
+
 onMounted(() => {
   loadOverview()
   loadCharts()
+  window.addEventListener('resize', handleResize)
+})
 
-  window.addEventListener('resize', () => {
-    revenueChart?.resize()
-    orderChart?.resize()
-  })
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', handleResize)
+  revenueChart?.dispose()
+  orderChart?.dispose()
+  revenueChart = null
+  orderChart = null
 })
 </script>
