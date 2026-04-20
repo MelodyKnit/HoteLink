@@ -1,7 +1,7 @@
 <template>
   <div class="min-h-screen bg-gray-50">
     <header class="sticky top-0 z-40 flex h-14 items-center border-b border-gray-100 bg-white/95 px-4 backdrop-blur">
-      <button @click="$router.back()" class="mr-3 rounded-lg p-1 text-gray-600 hover:bg-gray-100">← 返回</button>
+      <button @click="goBack()" class="mr-3 rounded-lg p-1 text-gray-600 hover:bg-gray-100">← 返回</button>
       <h1 class="text-sm font-semibold text-gray-800">我的优惠券</h1>
     </header>
 
@@ -19,8 +19,11 @@
         <div class="h-8 w-8 animate-spin rounded-full border-4 border-brand border-t-transparent" />
       </div>
 
+      <Transition name="fade" mode="out-in">
+      <div :key="activeTab" v-if="!loading">
+
       <!-- Claim Section -->
-      <div v-if="activeTab === 'claim' && !loading">
+      <div v-if="activeTab === 'claim'">
         <div class="mb-3 flex items-center justify-between rounded-xl bg-brand/5 px-3 py-2">
           <span class="text-xs text-gray-600">我的积分：<span class="font-bold text-brand">{{ userPoints.toLocaleString() }}</span></span>
           <span class="text-xs text-gray-400">100积分 = ¥1</span>
@@ -57,7 +60,7 @@
       </div>
 
       <!-- My Coupons -->
-      <div v-if="activeTab !== 'claim' && !loading">
+      <div v-if="activeTab !== 'claim'">
         <div v-if="filtered.length === 0" class="py-20 text-center">
           <p class="text-4xl">🎫</p>
           <p class="mt-2 text-sm text-gray-400">暂无{{ tabs.find(t => t.value === activeTab)?.label }}</p>
@@ -84,6 +87,8 @@
           </div>
         </div>
       </div>
+      </div>
+      </Transition>
 
     </div>
   </div>
@@ -93,9 +98,16 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { userCouponApi, userPointsApi } from '@hotelink/api'
 import { useToast, useConfirm } from '@hotelink/ui'
+import { useRouter } from 'vue-router'
 
 const { showToast } = useToast()
 const { confirm: confirmDialog } = useConfirm()
+const router = useRouter()
+
+function goBack() {
+  if (window.history.length > 1) router.back()
+  else router.push('/my')
+}
 
 const tabs = [
   { label: '领券中心', value: 'claim' },
@@ -166,3 +178,8 @@ onMounted(async () => {
   loading.value = false
 })
 </script>
+
+<style scoped>
+.fade-enter-active, .fade-leave-active { transition: opacity 0.15s ease; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
+</style>

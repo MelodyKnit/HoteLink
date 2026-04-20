@@ -138,7 +138,7 @@
           </tr>
         </tbody>
       </table>
-      <div v-if="total > pageSize" class="border-t border-slate-100 px-4 py-3">
+      <div class="border-t border-slate-100 px-4 py-3">
         <Pagination :page="page" :page-size="pageSize" :total="total" @change="loadLogs" />
       </div>
     </div>

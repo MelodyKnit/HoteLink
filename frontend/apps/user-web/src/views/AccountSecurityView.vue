@@ -5,7 +5,12 @@
       <h1 class="text-sm font-semibold text-gray-800">账号与安全</h1>
     </header>
 
-    <div class="mx-auto max-w-2xl space-y-4 px-4 py-6">
+    <div v-if="pageLoading" class="mx-auto max-w-2xl px-4 py-6 space-y-4">
+      <div class="h-28 animate-pulse rounded-2xl bg-gray-200"></div>
+      <div v-for="i in 4" :key="i" class="h-20 animate-pulse rounded-2xl bg-gray-200"></div>
+    </div>
+
+    <div v-else class="mx-auto max-w-2xl space-y-4 px-4 py-6">
       <section class="rounded-2xl bg-gradient-to-r from-brand to-teal-500 p-4 text-white shadow-sm">
         <div class="flex items-center justify-between">
           <div>
@@ -231,6 +236,7 @@ const SECURITY_PREFS_KEY = 'hotelink_user_security_prefs'
 
 const { showToast } = useToast()
 const authStore = useUserAuthStore()
+const pageLoading = ref(true)
 
 const activeSheet = ref<ActiveSheet>(null)
 const securityForm = ref({
@@ -535,9 +541,13 @@ watch(
   { deep: true }
 )
 
-onMounted(() => {
+onMounted(async () => {
   loadSecurityPrefs()
-  void loadSecurityProfile()
+  try {
+    await loadSecurityProfile()
+  } finally {
+    pageLoading.value = false
+  }
 })
 </script>
 

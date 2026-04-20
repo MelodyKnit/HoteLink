@@ -221,7 +221,7 @@
       <p class="text-sm text-slate-500">请确认并输入该客户分配的房间号。</p>
       <div>
         <label class="mb-1 block text-sm font-medium">房间号</label>
-        <input v-model="checkInRoomNo" required autofocus class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-teal-500" placeholder="如 301" @keyup.enter="submitCheckIn" />
+        <RoomSuggestInput v-model="checkInRoomNo" :available="roomSuggestions" :occupied="occupiedRooms" placeholder="如 301" />
       </div>
     </div>
     <template #footer>
@@ -242,7 +242,7 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute } from 'vue-router'
 import { orderApi } from '@hotelink/api'
 import { formatMoney, formatDateTime, ORDER_STATUS_MAP, PAYMENT_STATUS_MAP, PAYMENT_METHOD_MAP } from '@hotelink/utils'
-import { PageHeader, StatusBadge, ModalDialog, OrderStepBar, useToast, useConfirm } from '@hotelink/ui'
+import { PageHeader, StatusBadge, ModalDialog, OrderStepBar, RoomSuggestInput, useToast, useConfirm } from '@hotelink/ui'
 import { emitOrderSync, onOrderSync } from '../utils/order-sync'
 
 const { showToast } = useToast()
@@ -261,6 +261,8 @@ const route = useRoute()
 
 const showCheckInModal = ref(false)
 const checkInRoomNo = ref('')
+const roomSuggestions = ref<string[]>([])
+const occupiedRooms = ref<string[]>([])
 const showCancelModal = ref(false)
 const cancelReason = ref('')
 const actionLoading = ref(false)
@@ -386,6 +388,27 @@ async function submitCancel() {
 function openCheckIn() {
   checkInRoomNo.value = ''
   showCheckInModal.value = true
+  fetchRoomSuggestions()
+}
+
+async function fetchRoomSuggestions() {
+  if (!order.value) return
+  const hotelId = Number(order.value.hotel_id || order.value.hotel || 0)
+  if (!hotelId) return
+  try {
+    const res = await orderApi.roomSuggestions({
+      hotel_id: hotelId,
+      check_in: String(order.value.check_in_date || ''),
+      check_out: String(order.value.check_out_date || ''),
+    })
+    if (res.code === 0 && res.data) {
+      roomSuggestions.value = res.data.available || []
+      occupiedRooms.value = res.data.occupied || []
+    }
+  } catch {
+    roomSuggestions.value = []
+    occupiedRooms.value = []
+  }
 }
 
 // 提交入住并办理。

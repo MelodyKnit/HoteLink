@@ -1,7 +1,7 @@
 <template>
   <div class="min-h-screen bg-gray-50">
     <header class="sticky top-0 z-40 flex h-14 items-center border-b border-gray-100 bg-white/95 px-4 backdrop-blur">
-      <button @click="$router.back()" class="mr-3 rounded-lg p-1 text-gray-600 hover:bg-gray-100">← 返回</button>
+      <button @click="goBack()" class="mr-3 rounded-lg p-1 text-gray-600 hover:bg-gray-100">← 返回</button>
       <h1 class="text-sm font-semibold text-gray-800">关于我们</h1>
     </header>
 
@@ -65,6 +65,15 @@
 </template>
 
 <script setup lang="ts">
+import { useRouter } from 'vue-router'
+
+const router = useRouter()
+
+function goBack() {
+  if (window.history.length > 1) router.back()
+  else router.push('/')
+}
+
 const values = [
   { icon: '🎯', title: '用户至上', desc: '以用户体验为核心' },
   { icon: '🔒', title: '安全可靠', desc: '保障信息与资金安全' },

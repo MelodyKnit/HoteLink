@@ -5,6 +5,8 @@
     </header>
 
     <div class="mx-auto max-w-md px-4 py-16 text-center">
+      <div v-if="loading" class="py-12 text-sm text-gray-400">正在查询支付结果…</div>
+      <template v-else>
       <p v-if="error" class="mb-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-600">{{ error }}</p>
 
       <div class="text-6xl">{{ success ? '✅' : '❌' }}</div>
@@ -28,6 +30,7 @@
         <router-link :to="`/my/orders/${orderId}`" class="rounded-2xl bg-brand px-6 py-3 text-sm font-semibold text-white transition hover:bg-brand-dark">查看订单</router-link>
         <router-link to="/" class="rounded-2xl border border-gray-200 px-6 py-3 text-sm font-medium text-gray-600 transition hover:bg-gray-50">返回首页</router-link>
       </div>
+      </template>
     </div>
   </div>
 </template>
@@ -40,7 +43,8 @@ import { formatMoney } from '@hotelink/utils'
 
 const route = useRoute()
 const orderId = Number(route.params.orderId)
-const success = ref(true)
+const loading = ref(true)
+const success = ref(false)
 const order = ref<any>({})
 const error = ref('')
 const payableAmount = computed(() => formatMoney(order.value?.pay_amount ?? order.value?.total_amount ?? order.value?.original_amount ?? 0))
@@ -59,6 +63,8 @@ onMounted(async () => {
     order.value = {}
     error.value = '支付结果读取失败，请稍后在订单页查看'
     success.value = false
+  } finally {
+    loading.value = false
   }
 })
 </script>

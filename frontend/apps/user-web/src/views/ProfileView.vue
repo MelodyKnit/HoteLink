@@ -1,14 +1,23 @@
 <template>
   <div class="min-h-screen bg-gray-50">
     <header class="sticky top-0 z-40 flex h-14 items-center border-b border-gray-100 bg-white/95 px-4 backdrop-blur">
-      <button @click="$router.back()" class="mr-3 rounded-lg p-1 text-gray-600 hover:bg-gray-100">← 返回</button>
+      <button @click="goBack()" class="mr-3 rounded-lg p-1 text-gray-600 hover:bg-gray-100">← 返回</button>
       <h1 class="text-sm font-semibold text-gray-800">个人资料</h1>
     </header>
 
-    <div class="mx-auto max-w-2xl px-4 py-6">
+    <div v-if="pageLoading" class="mx-auto max-w-2xl px-4 py-6 space-y-4">
+      <div class="flex flex-col items-center">
+        <div class="h-24 w-24 animate-pulse rounded-full bg-gray-200"></div>
+        <div class="mt-3 h-3 w-40 animate-pulse rounded bg-gray-200"></div>
+      </div>
+      <div v-for="i in 4" :key="i" class="h-24 animate-pulse rounded-2xl bg-gray-200"></div>
+    </div>
+
+    <div v-else class="mx-auto max-w-2xl px-4 py-6">
       <div class="flex flex-col items-center">
         <div class="relative">
-          <img :src="form.avatar || '/default-avatar.svg'" class="h-24 w-24 rounded-full border-4 border-white object-cover shadow" />
+          <img v-if="form.avatar" :src="form.avatar" class="h-24 w-24 rounded-full border-4 border-white object-cover shadow" />
+          <div v-else class="flex h-24 w-24 items-center justify-center rounded-full border-4 border-white bg-gray-200 text-3xl font-bold text-gray-500 shadow">{{ (form.nickname || form.username || '?')[0] }}</div>
           <label class="absolute bottom-0 right-0 flex h-8 w-8 cursor-pointer items-center justify-center rounded-full bg-brand text-white shadow">
             <span class="text-xs">📷</span>
             <input type="file" accept="image/*" class="hidden" @change="handleAvatar" />
@@ -75,12 +84,21 @@ import { userProfileApi } from '@hotelink/api'
 import { useUserAuthStore } from '@hotelink/store'
 import { useToast } from '@hotelink/ui'
 import { extractApiError, extractApiFieldErrors, formatDate } from '@hotelink/utils'
+import { useRouter } from 'vue-router'
 
 type ProfileField = 'nickname' | 'birthday'
 
 const { showToast } = useToast()
 const authStore = useUserAuthStore()
+const router = useRouter()
+
+function goBack() {
+  if (window.history.length > 1) router.back()
+  else router.push('/my')
+}
+
 const saving = ref(false)
+const pageLoading = ref(true)
 const today = formatDate(new Date())
 const genderOpts = [
   { label: '男', value: 'male' },
@@ -206,14 +224,19 @@ onMounted(async () => {
       form.value.nickname = (res.data as any).nickname || ''
       form.value.gender = (res.data as any).gender || 'unknown'
       form.value.birthday = (res.data as any).birthday || ''
+    } else {
+      showToast(res.message || '个人资料加载失败', 'error')
     }
   } catch {
+    showToast('个人资料加载失败，请稍后重试', 'error')
     form.value = {
       avatar: '',
       nickname: authStore.user?.username || '',
       gender: 'unknown',
       birthday: '',
     }
+  } finally {
+    pageLoading.value = false
   }
 })
 </script>

@@ -1,5 +1,7 @@
 # HoteLink AI 集成说明
 
+> 更新时间：2026-04-20
+
 ## 1. 文档目标
 
 本文件用于说明项目中的 AI 能力如何接入、当前落地情况、配置方式，以及如何保证密钥与隐私安全。
@@ -178,7 +180,7 @@ build_ai_client(provider) → OpenAI compatible client
 
 ### 4.4 已落地的防幻觉机制
 
-- **场景白名单**：仅支持 `customer_service`，兼容 `general` → `customer_service`、`booking_assistant` → `customer_service`
+- **场景隔离**：共 12+ 独立 AI 场景，每个场景拥有独立 Prompt 模板目录；用户端（customer_service、booking_assistant、hotel_compare、recommendations）与管理端（report_summary、review_summary、reply_suggestion、pricing_suggestion、content_generate、marketing_copy、anomaly_report、business_report）各自约束
 - **非白名单场景**：服务端直接拒绝（`PromptSceneError` + `4002`）
 - **Prompt 强约束**：通过 Jinja 模板明确禁止编造库存、价格、退款规则、会员权益等
 - **上下文绑定**：仅注入系统已知数据（用户订单、关联酒店/房型、系统通知、字典枚举、推荐酒店）
@@ -193,9 +195,19 @@ build_ai_client(provider) → OpenAI compatible client
 
 ```
 backend/prompts/
-└── customer_service/
-    ├── system.j2    # 系统提示词
-    └── user.j2      # 用户提示词
+├── anomaly_report/
+├── booking_assistant/
+├── business_report/
+├── content_generate/
+├── customer_service/
+├── hotel_compare/
+├── marketing_copy/
+├── pricing_suggestion/
+├── recommendations/
+├── reply_suggestion/
+├── report_summary/
+├── review_sentiment/
+└── review_summary/
 ```
 
 ### 5.2 system.j2 上下文变量

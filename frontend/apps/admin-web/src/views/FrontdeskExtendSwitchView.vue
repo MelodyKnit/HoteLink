@@ -53,6 +53,10 @@
           请先在左侧选择订单
         </div>
 
+        <div v-else-if="!isEligibleForAction" class="rounded-lg border border-amber-300 bg-amber-50 px-4 py-6 text-center text-sm text-amber-700">
+          当前订单状态为「{{ ORDER_STATUS_MAP[String(selectedOrder.status)]?.label || selectedOrder.status }}」，仅「已入住」订单可办理续住/换房
+        </div>
+
         <form v-else-if="tab === 'extend'" class="space-y-4" @submit.prevent="handleExtendStay">
           <div class="rounded-lg bg-slate-50 px-3 py-2 text-sm">
             <p>订单号：{{ selectedOrder.order_no }}</p>
@@ -94,7 +98,7 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { orderApi } from '@hotelink/api'
 import { extractApiError, ORDER_STATUS_MAP } from '@hotelink/utils'
@@ -130,6 +134,11 @@ const selectedOrder = ref<OrderRow | null>(null)
 const newCheckOutDate = ref('')
 const newRoomNo = ref('')
 const remark = ref('')
+
+const isEligibleForAction = computed(() => {
+  if (!selectedOrder.value) return false
+  return String(selectedOrder.value.status) === 'checked_in'
+})
 
 const allowedStatuses = new Set(['pending_payment', 'paid', 'confirmed', 'checked_in', 'completed', 'cancelled'])
 

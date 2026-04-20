@@ -31,16 +31,22 @@
               <label class="block text-xs font-medium text-gray-500">密码</label>
               <span class="text-[11px] text-gray-400">区分大小写</span>
             </div>
+            <div class="relative">
             <input
               v-model="form.password"
-              type="password"
+              :type="showPassword ? 'text' : 'password'"
               autocomplete="current-password"
               placeholder="请输入密码"
-              class="w-full rounded-xl border px-4 py-3 text-sm outline-none transition"
+              class="w-full rounded-xl border px-4 py-3 pr-10 text-sm outline-none transition"
               :class="fieldErrors.password ? 'border-red-300 bg-red-50/70 focus:border-red-400 focus:ring-1 focus:ring-red-200' : 'border-gray-200 focus:border-brand focus:ring-1 focus:ring-brand'"
               @input="clearFieldError('password')"
               @blur="validatePasswordField"
             />
+            <button type="button" @click="showPassword = !showPassword" class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600" tabindex="-1">
+              <span v-if="showPassword" class="text-sm">🙈</span>
+              <span v-else class="text-sm">👁</span>
+            </button>
+            </div>
             <p v-if="fieldErrors.password" class="mt-1 text-xs text-red-500">{{ fieldErrors.password }}</p>
             <p v-else class="mt-1 text-xs text-gray-400">若连续输错，请先检查输入法和键盘大写状态。</p>
           </div>
@@ -74,6 +80,7 @@ const route = useRoute()
 const auth = useUserAuthStore()
 const loading = ref(false)
 const error = ref('')
+const showPassword = ref(false)
 
 const form = ref({ username: '', password: '' })
 const fieldErrors = ref<{ username?: string; password?: string }>({})

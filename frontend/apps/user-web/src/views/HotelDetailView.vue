@@ -5,7 +5,7 @@
       <button @click="$router.back()" class="mr-3 rounded-lg p-1 text-gray-600 hover:bg-gray-100">← 返回</button>
       <h1 class="truncate text-sm font-semibold text-gray-800">{{ hotel.name || '酒店详情' }}</h1>
       <div class="flex-1" />
-      <button @click="toggleFav" class="text-xl" :class="isFav ? 'text-red-500' : 'text-gray-300'">{{ isFav ? '❤️' : '🤍' }}</button>
+      <button @click="toggleFav" :disabled="togglingFav" class="text-xl transition-opacity" :class="[isFav ? 'text-red-500' : 'text-gray-300', togglingFav ? 'opacity-50' : '']" >{{ isFav ? '❤️' : '🤍' }}</button>
     </header>
 
     <div v-if="loading" class="mx-auto max-w-5xl space-y-4 px-4 py-6">
@@ -181,7 +181,7 @@
                     <span class="text-lg font-bold text-orange-600">¥{{ room.base_price }}</span>
                     <span class="text-xs text-gray-400">/晚</span>
                   </div>
-                  <button @click="handleBook(room)" class="rounded-full bg-brand px-5 py-1.5 text-sm font-medium text-white transition hover:bg-brand-dark">预订</button>
+                  <button @click="handleBook(room)" :disabled="bookingLoading === room.id" class="rounded-full bg-brand px-5 py-1.5 text-sm font-medium text-white transition hover:bg-brand-dark disabled:opacity-50">{{ bookingLoading === room.id ? '跳转中...' : '预订' }}</button>
                 </div>
               </div>
             </div>
@@ -289,6 +289,8 @@ const galleryAutoPlayTimer = ref<ReturnType<typeof setInterval> | null>(null)
 const GALLERY_AUTO_PLAY_INTERVAL_MS = 5000
 const mapProvider = ref<'amap' | 'baidu' | 'google'>('amap')
 const isFav = ref(false)
+const togglingFav = ref(false)
+const bookingLoading = ref<number | null>(null)
 const error = ref('')
 const bedTypeMap = BED_TYPE_MAP
 
@@ -650,8 +652,20 @@ function onPreviewTouchEnd() {
   previewPinchStartDistance.value = 0
 }
 
+async function checkFavStatus(hotelId: number) {
+  if (!getToken()) return
+  try {
+    const res = await userFavoriteApi.list({ page: 1, page_size: 200 })
+    if (res.code === 0 && res.data) {
+      const items = (res.data as any).items || []
+      isFav.value = items.some((item: any) => Number(item.hotel_id || item.hotel) === hotelId)
+    }
+  } catch { /* ignore */ }
+}
+
 // 切换Fav显示状态。
 async function toggleFav() {
+  if (togglingFav.value) return
   const hotelId = Number(route.params.id)
   if (!getToken()) {
     showToast('请先登录后再进行收藏操作', 'warning')
@@ -659,6 +673,7 @@ async function toggleFav() {
     return
   }
   if (!Number.isFinite(hotelId) || hotelId <= 0) return
+  togglingFav.value = true
   try {
     if (isFav.value) {
       const res = await userFavoriteApi.remove(hotelId)
@@ -679,15 +694,20 @@ async function toggleFav() {
     }
   } catch {
     showToast('收藏操作失败，请检查网络后重试', 'error')
+  } finally {
+    togglingFav.value = false
   }
 }
 
 // 处理 Book 交互逻辑。
 function handleBook(room: any) {
+  if (bookingLoading.value) return
   const hotelId = Number(route.params.id)
   if (!getToken()) { router.push({ name: 'login', query: { redirect: route.fullPath } }); return }
   if (!Number.isFinite(hotelId) || hotelId <= 0) return
+  bookingLoading.value = room.id
   router.push({ path: '/booking', query: { hotel_id: String(hotelId), room_type_id: String(room.id), room_name: room.name, price: String(room.base_price), hotel_name: hotel.value.name } })
+  bookingLoading.value = null
 }
 
 async function loadHotelDetail() {
@@ -714,6 +734,7 @@ async function loadHotelDetail() {
           currentImg.value = 0
         }
         startGalleryAutoPlay()
+        checkFavStatus(hotelId)
       } else {
         hotel.value = {}
         error.value = hotelRes.message || '酒店详情加载失败'

@@ -165,7 +165,7 @@ CACHES = {
 # REST Framework 全局默认配置：使用 JWT 认证、登录用户才能访问、支持过滤和开放 API 文档
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "apps.api.authentication.ActiveUserJWTAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": (
         "rest_framework.permissions.IsAuthenticated",
@@ -180,16 +180,16 @@ REST_FRAMEWORK = {
         "rest_framework.throttling.ScopedRateThrottle",
     ),
     "DEFAULT_THROTTLE_RATES": {
-        "anon": os.getenv("API_THROTTLE_ANON", "120/minute"),
-        "user": os.getenv("API_THROTTLE_USER", "300/minute"),
-        "auth_login": os.getenv("API_THROTTLE_AUTH_LOGIN", "5/minute"),
-        "auth_register": os.getenv("API_THROTTLE_AUTH_REGISTER", "3/minute"),
-        "auth_refresh": os.getenv("API_THROTTLE_AUTH_REFRESH", "20/minute"),
-        "auth_logout": os.getenv("API_THROTTLE_AUTH_LOGOUT", "30/minute"),
-        "system_init": os.getenv("API_THROTTLE_SYSTEM_INIT", "3/hour"),
-        "upload": os.getenv("API_THROTTLE_UPLOAD", "20/hour"),
-        "ai_user": os.getenv("API_THROTTLE_AI_USER", "30/hour"),
-        "ai_admin": os.getenv("API_THROTTLE_AI_ADMIN", "60/hour"),
+        "anon": os.getenv("API_THROTTLE_ANON", "600/minute"),
+        "user": os.getenv("API_THROTTLE_USER", "1500/minute"),
+        "auth_login": os.getenv("API_THROTTLE_AUTH_LOGIN", "15/minute"),
+        "auth_register": os.getenv("API_THROTTLE_AUTH_REGISTER", "9/minute"),
+        "auth_refresh": os.getenv("API_THROTTLE_AUTH_REFRESH", "100/minute"),
+        "auth_logout": os.getenv("API_THROTTLE_AUTH_LOGOUT", "150/minute"),
+        "system_init": os.getenv("API_THROTTLE_SYSTEM_INIT", "15/hour"),
+        "upload": os.getenv("API_THROTTLE_UPLOAD", "100/hour"),
+        "ai_user": os.getenv("API_THROTTLE_AI_USER", "150/hour"),
+        "ai_admin": os.getenv("API_THROTTLE_AI_ADMIN", "300/hour"),
     },
 }
 
@@ -236,6 +236,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.bookings.tasks.sweep_order_lifecycle_anomalies",
         "schedule": timedelta(minutes=max(1, ORDER_LIFECYCLE_SWEEP_INTERVAL_MINUTES)),
         "args": (max(1, ORDER_LIFECYCLE_SWEEP_BATCH_SIZE),),
+    },
+    "coupon-expire-sweep": {
+        "task": "apps.bookings.tasks.sweep_expired_coupons",
+        "schedule": timedelta(hours=6),
     },
 }
 

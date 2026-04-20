@@ -57,6 +57,7 @@ class Review(models.Model):
     auto_tags = models.JSONField(default=list, blank=True, help_text="AI 自动生成的评价标签列表")
     sentiment_keywords = models.JSONField(default=list, blank=True, help_text="AI 提取的关键词列表")
     sentiment_analyzed_at = models.DateTimeField(null=True, blank=True, help_text="最后一次 AI 情感分析时间")
+    is_visible = models.BooleanField(default=True, help_text="是否对外可见（管理员可隐藏评价）")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -140,6 +141,9 @@ class CouponTemplate(models.Model):
         verbose_name = "Coupon Template"
         verbose_name_plural = "Coupon Templates"
         ordering = ["-id"]
+        indexes = [
+            models.Index(fields=["status", "valid_start", "valid_end"], name="idx_coupon_tpl_active"),
+        ]
 
     def __str__(self) -> str:
         return self.name

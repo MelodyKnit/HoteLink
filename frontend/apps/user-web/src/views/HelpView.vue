@@ -48,7 +48,7 @@
       <div class="mt-6">
         <h3 class="mb-3 font-semibold text-gray-800">帮助分类</h3>
         <div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
-          <div v-for="cat in categories" :key="cat.title" class="flex flex-col items-center rounded-2xl bg-white p-4 shadow-sm">
+          <div v-for="cat in categories" :key="cat.title" class="flex flex-col items-center rounded-2xl bg-white p-4 shadow-sm cursor-default">
             <span class="text-2xl">{{ cat.icon }}</span>
             <p class="mt-2 text-sm font-medium text-gray-800">{{ cat.title }}</p>
           </div>

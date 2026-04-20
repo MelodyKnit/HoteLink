@@ -266,6 +266,7 @@ export const orderApi = {
   checkOut: (data: { order_id: number; consume_amount?: number; operator_remark?: string }) => post('/admin/orders/check-out', data),
   extendStay: (data: { order_id: number; new_check_out_date: string; operator_remark?: string }) => post('/admin/orders/extend-stay', data),
   switchRoom: (data: { order_id: number; new_room_no: string; operator_remark?: string }) => post('/admin/orders/switch-room', data),
+  roomSuggestions: (params: { hotel_id: number; check_in?: string; check_out?: string }) => get<{ available: string[]; occupied: string[] }>('/admin/orders/room-suggestions', params),
 }
 
 // ========== Reviews ==========

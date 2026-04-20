@@ -24,7 +24,7 @@
               <input v-model="checkOut" type="date" :min="checkIn || today" class="home-date-input w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-800 outline-none focus:border-brand" />
             </div>
           </div>
-          <button type="button" @click="handleSearch" class="mt-4 w-full rounded-xl bg-brand px-8 py-3 text-sm font-semibold text-white transition hover:bg-brand-dark md:mt-0 md:w-auto">搜索</button>
+          <button type="button" @click="handleSearch" :disabled="!keyword && !checkIn" class="mt-4 w-full rounded-xl bg-brand px-8 py-3 text-sm font-semibold text-white transition hover:bg-brand-dark disabled:opacity-50 disabled:cursor-not-allowed md:mt-0 md:w-auto">搜索</button>
         </div>
       </div>
     </section>
@@ -309,6 +309,8 @@ onMounted(async () => {
       if (res.data.promotions?.length) {
         promotions.value = res.data.promotions.map((p: any) => ({ ...p, desc: '' }))
       }
+    } else {
+      error.value = res.message || '首页数据加载失败'
     }
   } catch {
     recommendedHotels.value = []

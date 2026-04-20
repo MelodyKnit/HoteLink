@@ -17,7 +17,7 @@
 > - AI 集成：[ai-integration.md](./ai-integration.md)
 > - 功能规划：[feature-improvements.md](./feature-improvements.md)
 
-> 状态说明（2026-04-17）：本文件包含“已实现 + 设计中”两类内容。路由与接口的最新实现口径请同时参考 [source-of-truth.md](./source-of-truth.md) 与 [api-inventory.md](./api-inventory.md)。
+> 状态说明（2026-04-20）：本文件包含“已实现 + 设计中”两类内容。路由与接口的最新实现口径请同时参考 [source-of-truth.md](./source-of-truth.md) 与 [api-inventory.md](./api-inventory.md)。
 
 实现状态标记：已实现 = 页面与路由均已落地，设计中 = 仅有设计规划
 
@@ -1145,6 +1145,12 @@ const { toastVisible, toastMessage, toastType, showToast, closeToast } = useToas
   <Toast :visible="toastVisible" :message="toastMessage" :type="toastType" @close="closeToast" />
 </template>
 ```
+
+前端错误处理已全面加固（2026-04-20）：
+
+- **user-web**: 6 个视图增加 API 错误反馈（NotificationView, ProfileView, OrderListView, ReviewListView, HomeView, HotelCompareView），统一使用 useToast 或 error.value 展示失败信息
+- **admin-web**: 3 个视图增加 API 错误反馈（AISettingsView, UserListView, ReportView），统一使用 showToast 展示失败信息
+- 所有异步操作包裹 try/catch，乐观更新失败时自动回滚
 
 ### 13.2 图片上传
 

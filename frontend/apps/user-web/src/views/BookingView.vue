@@ -5,7 +5,11 @@
       <h1 class="text-sm font-semibold text-gray-800">填写订单</h1>
     </header>
 
-    <div class="mx-auto max-w-2xl px-4 py-6 pb-28 md:pb-8">
+    <div v-if="pageLoading" class="flex justify-center py-20">
+      <div class="h-8 w-8 animate-spin rounded-full border-4 border-brand border-t-transparent"></div>
+    </div>
+
+    <div v-else class="mx-auto max-w-2xl px-4 py-6 pb-28 md:pb-8">
       <!-- Room Summary -->
       <div class="surface-card rounded-2xl p-5">
         <h3 class="font-semibold text-gray-800">{{ hotelName }}</h3>
@@ -239,6 +243,7 @@ const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1)
 const checkInDate = ref(today)
 const checkOutDate = ref(formatDate(tomorrow))
 const submitting = ref(false)
+const pageLoading = ref(true)
 const error = ref('')
 type BookingField = 'check_in_date' | 'check_out_date' | 'guest_name' | 'guest_mobile' | 'remark'
 const fieldErrors = ref<Partial<Record<BookingField, string>>>({})
@@ -585,6 +590,12 @@ async function handleSubmit() {
 }
 
 onMounted(async () => {
+  if (!hotelId || !roomTypeId || !Number.isFinite(hotelId) || !Number.isFinite(roomTypeId)) {
+    showToast('预订参数不完整，请从酒店详情页发起预订', 'warning')
+    router.replace('/')
+    pageLoading.value = false
+    return
+  }
   loadGuestHistory()
   try {
     const profileRes = await userProfileApi.get()
@@ -596,6 +607,8 @@ onMounted(async () => {
     }
   } catch {
     showToast('会员信息加载失败，已按普通会员价格展示', 'warning')
+  } finally {
+    pageLoading.value = false
   }
 })
 

@@ -1,6 +1,6 @@
 # HoteLink API 规范（源码对齐版）
 
-> 更新时间：2026-04-18  
+> 更新时间：2026-04-20  
 > 对齐基线：`backend/apps/api/urls.py`、`backend/apps/api/views.py`
 
 ## 1. 文档范围
@@ -101,7 +101,19 @@
 
 - 全局启用 DRF 限流，匿名与登录用户都有默认速率限制
 - 登录、刷新、登出、首次初始化、上传、AI 生成类接口使用更严格的 scoped throttle
-- 注册接口独立限流（`3/minute`），防止批量注册
+- 当前限流速率（可通过环境变量 `API_THROTTLE_*` 覆盖）：
+  - `anon`：600/min
+  - `user`：1500/min
+  - `auth_login`：15/min
+  - `auth_register`：9/min
+  - `auth_refresh`：100/min
+  - `auth_logout`：150/min
+  - `system_init`：15/hour
+  - `upload`：100/hour
+  - `ai_user`：150/hour
+  - `ai_admin`：300/hour
+- 注册接口独立限流（`9/minute`），防止批量注册
+- 所有认证端点使用 `ActiveUserJWTAuthentication`，在 JWT 校验通过后额外检查用户 `is_active` 状态；已禁用或锁定的用户即使持有有效 Token 也会被拒绝
 - 用户修改密码后，旧 Token 会被加入黑名单，同时返回新 Token
 - 已禁用的用户尝试登录时，登录接口直接拒绝
 - 生产环境默认关闭 `/docs/`、`/redoc/`、`/schema/`，仅在 `ENABLE_API_DOCS=1` 时显式开启
@@ -175,6 +187,7 @@
 - **优惠券管理完善**：`POST /api/v1/admin/coupons/update` 现支持全字段编辑（名称/类型/面额/折扣/门槛/库存/积分/等级/有效期/状态）；新增 `POST /api/v1/admin/coupons/delete`（已有用户领取则返回 4091 禁止删除）
 - **报表任务删除**：`POST /api/v1/admin/reports/tasks/delete`（运行中的任务不可删除，返回 4091）
 - **删除安全**：酒店删除和房型删除前校验是否存在进行中订单（4091 阻断），通知批量删除前端增加二次确认弹窗
+- **评价可见性**：管理端评价接口支持切换 `is_visible` 字段来隐藏/显示评价
 
 补充说明：
 
@@ -195,6 +208,7 @@
 注意：
 
 - `/api/v1/admin/orders/detail` 返回订单基础信息外，还包含 `payments`（支付记录列表）与订单状态时间字段（如 `paid_at`、`confirmed_at`、`checked_in_at`、`completed_at`、`cancelled_at`）
+- BookingOrder 支付状态新增 `PAYMENT_REFUNDING`（退款中），用于标记已发起退款但尚未到账的中间态
 
 ---
 

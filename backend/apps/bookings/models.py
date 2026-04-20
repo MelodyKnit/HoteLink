@@ -28,11 +28,13 @@ class BookingOrder(models.Model):
     PAYMENT_UNPAID = "unpaid"
     PAYMENT_PAID = "paid"
     PAYMENT_FAILED = "failed"
+    PAYMENT_REFUNDING = "refunding"
     PAYMENT_REFUNDED = "refunded"
     PAYMENT_STATUS_CHOICES = [
         (PAYMENT_UNPAID, "未支付"),
         (PAYMENT_PAID, "已支付"),
         (PAYMENT_FAILED, "支付失败"),
+        (PAYMENT_REFUNDING, "退款中"),
         (PAYMENT_REFUNDED, "已退款"),
     ]
 
@@ -66,7 +68,7 @@ class BookingOrder(models.Model):
     pay_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     coupon = models.ForeignKey("crm.UserCoupon", on_delete=models.SET_NULL, null=True, blank=True, related_name="orders")
     points_earned = models.PositiveIntegerField(default=0, help_text="本单获得积分")
-    created_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

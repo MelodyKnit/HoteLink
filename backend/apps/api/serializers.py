@@ -223,6 +223,8 @@ class BookingOrderSerializer(serializers.ModelSerializer):
         return obj.pay_amount
 
     def get_has_review(self, obj):
+        if hasattr(obj, '_has_review'):
+            return obj._has_review > 0
         try:
             return obj.review is not None
         except Exception:
@@ -267,6 +269,8 @@ class BookingOrderSerializer(serializers.ModelSerializer):
             "remark",
             "operator_remark",
             "original_amount",
+            "member_discount_amount",
+            "coupon_discount_amount",
             "discount_amount",
             "pay_amount",
             "total_amount",
@@ -275,6 +279,19 @@ class BookingOrderSerializer(serializers.ModelSerializer):
             "lifecycle_warning",
             "created_at",
         ]
+
+
+class UserBookingOrderSerializer(BookingOrderSerializer):
+    """用户端订单序列化器：隐藏管理员备注和运维信息。"""
+
+    def get_lifecycle_warning(self, obj):
+        return ""
+
+    def get_is_lifecycle_anomaly(self, obj):
+        return False
+
+    class Meta(BookingOrderSerializer.Meta):
+        fields = [f for f in BookingOrderSerializer.Meta.fields if f not in ("operator_remark", "is_lifecycle_anomaly", "lifecycle_warning")]
 
 
 class PaymentRecordSerializer(serializers.ModelSerializer):

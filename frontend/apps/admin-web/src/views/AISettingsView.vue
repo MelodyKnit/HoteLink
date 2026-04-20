@@ -260,24 +260,33 @@ const testForm = reactive({
 // 加载 AI 配置
 async function loadSettings() {
   loading.value = true
-  const res = await aiApi.settings()
-  if (res.code === 0 && res.data) {
-    aiEnabled.value = res.data.ai_enabled
-    providers.value = res.data.providers
-    builtinProviders.value = res.data.builtin_providers
-  } else if (res.code !== 0) {
-    showToast(res.message || '加载配置失败', 'error')
+  try {
+    const res = await aiApi.settings()
+    if (res.code === 0 && res.data) {
+      aiEnabled.value = res.data.ai_enabled
+      providers.value = res.data.providers
+      builtinProviders.value = res.data.builtin_providers
+    } else if (res.code !== 0) {
+      showToast(res.message || '加载配置失败', 'error')
+    }
+  } catch {
+    showToast('AI 配置加载失败，请检查网络', 'error')
+  } finally {
+    loading.value = false
   }
-  loading.value = false
 }
 
 // 切换 AI 功能总开关
 async function toggleEnabled() {
-  const res = await aiApi.updateSettings({ ai_enabled: aiEnabled.value })
-  if (res.code === 0) {
-    showToast(aiEnabled.value ? 'AI 功能已启用' : 'AI 功能已关闭', 'success')
-  } else {
-    showToast(res.message || '操作失败', 'error')
+  try {
+    const res = await aiApi.updateSettings({ ai_enabled: aiEnabled.value })
+    if (res.code === 0) {
+      showToast(aiEnabled.value ? 'AI 功能已启用' : 'AI 功能已关闭', 'success')
+    } else {
+      showToast(res.message || '操作失败', 'error')
+    }
+  } catch {
+    showToast('AI 开关切换失败，请重试', 'error')
   }
 }
 
@@ -391,23 +400,28 @@ async function saveProvider() {
   form.reasoning_model = form.reasoning_model.trim()
 
   saving.value = true
-  const payload: Record<string, unknown> = { ...form }
-  if (!payload.api_key) delete payload.api_key
-  const res = await aiApi.addProvider(payload as Parameters<typeof aiApi.addProvider>[0])
-  saving.value = false
-  if (res.code === 0) {
-    closeForm()
-    await loadSettings()
-    showToast('保存成功', 'success')
-  } else {
-    showToast(extractApiError(res, '保存失败，请检查填写内容', {
-      name: '标识名称',
-      label: '显示名称',
-      base_url: 'Base URL',
-      api_key: 'API Key',
-      chat_model: 'Chat 模型',
-      reasoning_model: 'Reasoning 模型',
-    }), 'error')
+  try {
+    const payload: Record<string, unknown> = { ...form }
+    if (!payload.api_key) delete payload.api_key
+    const res = await aiApi.addProvider(payload as Parameters<typeof aiApi.addProvider>[0])
+    if (res.code === 0) {
+      closeForm()
+      await loadSettings()
+      showToast('保存成功', 'success')
+    } else {
+      showToast(extractApiError(res, '保存失败，请检查填写内容', {
+        name: '标识名称',
+        label: '显示名称',
+        base_url: 'Base URL',
+        api_key: 'API Key',
+        chat_model: 'Chat 模型',
+        reasoning_model: 'Reasoning 模型',
+      }), 'error')
+    }
+  } catch {
+    showToast('保存失败，请检查网络后重试', 'error')
+  } finally {
+    saving.value = false
   }
 }
 
@@ -419,25 +433,31 @@ async function runAiTest() {
     return
   }
   testLoading.value = true
-  const res = await aiApi.test({
-    message,
-    provider_name: testForm.provider_name || undefined,
-  })
-  testLoading.value = false
+  try {
+    const res = await aiApi.test({
+      message,
+      provider_name: testForm.provider_name || undefined,
+    })
 
-  if (res.code === 0 && res.data) {
-    testResult.value = {
-      provider: String(res.data.provider || ''),
-      model: String(res.data.model || ''),
-      answer: String(res.data.answer || ''),
-      latency_ms: Number(res.data.latency_ms || 0),
+    if (res.code === 0 && res.data) {
+      testResult.value = {
+        provider: String(res.data.provider || ''),
+        model: String(res.data.model || ''),
+        answer: String(res.data.answer || ''),
+        latency_ms: Number(res.data.latency_ms || 0),
+      }
+      showToast('AI 测试成功', 'success')
+      return
     }
-    showToast('AI 测试成功', 'success')
-    return
-  }
 
-  testResult.value = null
-  showToast(extractApiError(res, 'AI 测试失败，请检查当前供应商配置'), 'error')
+    testResult.value = null
+    showToast(extractApiError(res, 'AI 测试失败，请检查当前供应商配置'), 'error')
+  } catch {
+    testResult.value = null
+    showToast('AI 测试请求失败，请检查网络', 'error')
+  } finally {
+    testLoading.value = false
+  }
 }
 
 onMounted(loadSettings)

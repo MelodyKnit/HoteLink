@@ -243,3 +243,18 @@ def sweep_order_lifecycle_anomalies(self, batch_size: int = 500):
         "marked": marked_count,
         "date": today.isoformat(),
     }
+
+
+@shared_task(bind=True)
+def sweep_expired_coupons(self, batch_size: int = 1000):
+    """周期巡检：将已过有效期但仍为 unused 的用户优惠券标记为 expired。"""
+    from apps.crm.models import UserCoupon
+
+    today = timezone.localdate()
+    updated = UserCoupon.objects.filter(
+        status=UserCoupon.STATUS_UNUSED,
+        valid_end__lt=today,
+    ).update(status=UserCoupon.STATUS_EXPIRED)
+
+    logger.info("sweep_expired_coupons: marked_expired=%s today=%s", updated, today.isoformat())
+    return {"marked_expired": updated, "date": today.isoformat()}

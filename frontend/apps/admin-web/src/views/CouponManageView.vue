@@ -1,24 +1,30 @@
 <template>
   <div class="space-y-6">
-    <div class="flex items-center justify-between">
-      <h2 class="text-lg font-bold text-gray-800">优惠券管理</h2>
-      <button @click="showCreate = true" class="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark">
-        + 创建优惠券
-      </button>
-    </div>
+    <PageHeader title="优惠券管理" subtitle="创建和管理优惠券模板">
+      <template #actions>
+        <button class="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700" @click="showCreate = true">+ 创建优惠券</button>
+      </template>
+    </PageHeader>
 
+    <template v-if="loading">
+      <div class="grid grid-cols-3 gap-4">
+        <div v-for="i in 3" :key="i" class="h-20 animate-pulse rounded-xl bg-slate-100"></div>
+      </div>
+      <div class="h-64 animate-pulse rounded-xl bg-slate-100"></div>
+    </template>
+    <template v-else>
     <!-- Stats -->
     <div class="grid grid-cols-3 gap-4">
       <div class="rounded-xl bg-white p-4 shadow-sm">
-        <p class="text-xs text-gray-400">有效模板</p>
-        <p class="mt-1 text-2xl font-bold text-brand">{{ stats.active }}</p>
+        <p class="text-xs text-slate-400">有效模板</p>
+        <p class="mt-1 text-2xl font-bold text-teal-600">{{ stats.active }}</p>
       </div>
       <div class="rounded-xl bg-white p-4 shadow-sm">
-        <p class="text-xs text-gray-400">总发行量</p>
-        <p class="mt-1 text-2xl font-bold text-gray-800">{{ stats.totalIssued }}</p>
+        <p class="text-xs text-slate-400">总发行量</p>
+        <p class="mt-1 text-2xl font-bold text-slate-800">{{ stats.totalIssued }}</p>
       </div>
       <div class="rounded-xl bg-white p-4 shadow-sm">
-        <p class="text-xs text-gray-400">已领取</p>
+        <p class="text-xs text-slate-400">已领取</p>
         <p class="mt-1 text-2xl font-bold text-orange-500">{{ stats.totalClaimed }}</p>
       </div>
     </div>
@@ -26,7 +32,7 @@
     <!-- Table -->
     <div class="overflow-hidden rounded-xl bg-white shadow-sm">
       <table class="w-full text-sm">
-        <thead class="bg-gray-50 text-xs text-gray-500">
+        <thead class="bg-slate-50 text-xs text-slate-500">
           <tr>
             <th class="px-4 py-3 text-left">名称</th>
             <th class="px-4 py-3 text-left">类型</th>
@@ -40,9 +46,9 @@
             <th class="px-4 py-3 text-left">操作</th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-gray-50">
-          <tr v-for="tpl in templates" :key="tpl.id" class="hover:bg-gray-50">
-            <td class="px-4 py-3 font-medium text-gray-800">{{ tpl.name }}</td>
+        <tbody class="divide-y divide-slate-50">
+          <tr v-for="tpl in templates" :key="tpl.id" class="hover:bg-slate-50">
+            <td class="px-4 py-3 font-medium text-slate-800">{{ tpl.name }}</td>
             <td class="px-4 py-3">
               <span class="rounded-full px-2 py-0.5 text-xs" :class="tpl.coupon_type === 'cash' ? 'bg-green-50 text-green-600' : 'bg-orange-50 text-orange-600'">
                 {{ tpl.coupon_type === 'cash' ? '满减券' : '折扣券' }}
@@ -51,13 +57,13 @@
             <td class="px-4 py-3">
               {{ tpl.coupon_type === 'cash' ? `¥${tpl.amount}` : `${tpl.discount}折` }}
             </td>
-            <td class="px-4 py-3 text-gray-500">{{ tpl.min_amount > 0 ? `满¥${tpl.min_amount}` : '无门槛' }}</td>
+            <td class="px-4 py-3 text-slate-500">{{ tpl.min_amount > 0 ? `满¥${tpl.min_amount}` : '无门槛' }}</td>
             <td class="px-4 py-3">{{ tpl.claimed_count }}/{{ tpl.total_count }}</td>
             <td class="px-4 py-3">{{ tpl.points_cost > 0 ? `${tpl.points_cost}积分` : '免费' }}</td>
-            <td class="px-4 py-3 text-gray-500">{{ levelLabel(tpl.required_level) }}</td>
-            <td class="px-4 py-3 text-xs text-gray-400">{{ tpl.valid_start }} ~ {{ tpl.valid_end }}</td>
+            <td class="px-4 py-3 text-slate-500">{{ levelLabel(tpl.required_level) }}</td>
+            <td class="px-4 py-3 text-xs text-slate-400">{{ tpl.valid_start }} ~ {{ tpl.valid_end }}</td>
             <td class="px-4 py-3">
-              <span class="rounded-full px-2 py-0.5 text-xs" :class="tpl.status === 'active' ? 'bg-green-50 text-green-600' : 'bg-gray-100 text-gray-400'">
+              <span class="rounded-full px-2 py-0.5 text-xs" :class="tpl.status === 'active' ? 'bg-green-50 text-green-600' : 'bg-slate-100 text-slate-400'">
                 {{ tpl.status === 'active' ? '有效' : '已下架' }}
               </span>
             </td>
@@ -65,189 +71,185 @@
               <div class="flex gap-2">
                 <button @click="openEdit(tpl)" class="text-xs text-teal-600 hover:underline">编辑</button>
                 <button v-if="tpl.status === 'active'" @click="toggleStatus(tpl, 'inactive')" class="text-xs text-red-500 hover:underline">下架</button>
-                <button v-else @click="toggleStatus(tpl, 'active')" class="text-xs text-brand hover:underline">上架</button>
+                <button v-else @click="toggleStatus(tpl, 'active')" class="text-xs text-teal-600 hover:underline">上架</button>
                 <button @click="handleDelete(tpl)" class="text-xs text-red-500 hover:underline">删除</button>
               </div>
             </td>
           </tr>
           <tr v-if="templates.length === 0">
-            <td colspan="10" class="px-4 py-12 text-center text-gray-400">暂无优惠券模板</td>
+            <td colspan="10" class="px-4 py-12 text-center text-slate-400">暂无优惠券模板</td>
           </tr>
         </tbody>
       </table>
     </div>
+    </template>
 
     <!-- Create Modal -->
-    <div v-if="showCreate" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40" @click.self="showCreate = false">
-      <div class="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl">
-        <h3 class="mb-4 text-lg font-bold text-gray-800">创建优惠券</h3>
-        <div class="space-y-3">
-          <div>
-            <label class="mb-1 block text-xs text-gray-500">券名称</label>
-            <input v-model="form.name" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
-          </div>
-          <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label class="mb-1 block text-xs text-gray-500">类型</label>
-              <SelectField v-model="form.coupon_type" class="w-full">
-                <option value="cash">满减券</option>
-                <option value="discount">折扣券</option>
-              </SelectField>
-            </div>
-            <div v-if="form.coupon_type === 'cash'">
-              <label class="mb-1 block text-xs text-gray-500">减免金额(¥)</label>
-              <input v-model.number="form.amount" type="number" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
-            </div>
-            <div v-else>
-              <label class="mb-1 block text-xs text-gray-500">折扣(如9=9折)</label>
-              <input v-model.number="form.discount" type="number" step="0.1" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
-            </div>
-          </div>
-          <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label class="mb-1 block text-xs text-gray-500">最低消费(¥)</label>
-              <input v-model.number="form.min_amount" type="number" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
-            </div>
-            <div>
-              <label class="mb-1 block text-xs text-gray-500">发行数量</label>
-              <input v-model.number="form.total_count" type="number" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
-            </div>
-          </div>
-          <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label class="mb-1 block text-xs text-gray-500">积分成本(0=免费)</label>
-              <input v-model.number="form.points_cost" type="number" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
-            </div>
-            <div>
-              <label class="mb-1 block text-xs text-gray-500">会员等级要求</label>
-              <SelectField v-model="form.required_level" class="w-full">
-                <option value="">不限</option>
-                <option value="silver">银卡会员</option>
-                <option value="gold">金卡会员</option>
-                <option value="platinum">铂金会员</option>
-                <option value="diamond">钻石会员</option>
-              </SelectField>
-            </div>
-          </div>
-          <div class="grid grid-cols-3 gap-3">
-            <div>
-              <label class="mb-1 block text-xs text-gray-500">有效天数</label>
-              <input v-model.number="form.valid_days" type="number" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
-            </div>
-            <div>
-              <label class="mb-1 block text-xs text-gray-500">活动开始</label>
-              <input v-model="form.valid_start" type="date" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
-            </div>
-            <div>
-              <label class="mb-1 block text-xs text-gray-500">活动结束</label>
-              <input v-model="form.valid_end" type="date" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
-            </div>
-          </div>
-          <div v-if="createError" class="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">{{ createError }}</div>
+    <ModalDialog :visible="showCreate" title="创建优惠券" size="lg" @close="showCreate = false">
+      <div class="space-y-3">
+        <div>
+          <label class="mb-1 block text-xs text-slate-500">券名称</label>
+          <input v-model="form.name" class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-teal-500" />
         </div>
-        <div class="mt-5 flex justify-end gap-3">
-          <button @click="showCreate = false" class="rounded-lg border border-gray-200 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50">取消</button>
-          <button @click="handleCreate" :disabled="creating" class="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-50">
-            {{ creating ? '创建中...' : '创建' }}
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Edit Modal -->
-    <div v-if="showEdit" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40" @click.self="showEdit = false">
-      <div class="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl">
-        <h3 class="mb-4 text-lg font-bold text-gray-800">编辑优惠券</h3>
-        <div class="space-y-3">
+        <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="mb-1 block text-xs text-gray-500">券名称</label>
-            <input v-model="editFormData.name" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
-          </div>
-          <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label class="mb-1 block text-xs text-gray-500">类型</label>
-              <SelectField v-model="editFormData.coupon_type" class="w-full">
-                <option value="cash">满减券</option>
-                <option value="discount">折扣券</option>
-              </SelectField>
-            </div>
-            <div v-if="editFormData.coupon_type === 'cash'">
-              <label class="mb-1 block text-xs text-gray-500">减免金额(¥)</label>
-              <input v-model.number="editFormData.amount" type="number" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
-            </div>
-            <div v-else>
-              <label class="mb-1 block text-xs text-gray-500">折扣(如9=9折)</label>
-              <input v-model.number="editFormData.discount" type="number" step="0.1" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
-            </div>
-          </div>
-          <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label class="mb-1 block text-xs text-gray-500">最低消费(¥)</label>
-              <input v-model.number="editFormData.min_amount" type="number" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
-            </div>
-            <div>
-              <label class="mb-1 block text-xs text-gray-500">发行数量</label>
-              <input v-model.number="editFormData.total_count" type="number" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
-            </div>
-          </div>
-          <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label class="mb-1 block text-xs text-gray-500">积分成本(0=免费)</label>
-              <input v-model.number="editFormData.points_cost" type="number" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
-            </div>
-            <div>
-              <label class="mb-1 block text-xs text-gray-500">会员等级要求</label>
-              <SelectField v-model="editFormData.required_level" class="w-full">
-                <option value="">不限</option>
-                <option value="silver">银卡会员</option>
-                <option value="gold">金卡会员</option>
-                <option value="platinum">铂金会员</option>
-                <option value="diamond">钻石会员</option>
-              </SelectField>
-            </div>
-          </div>
-          <div class="grid grid-cols-3 gap-3">
-            <div>
-              <label class="mb-1 block text-xs text-gray-500">有效天数</label>
-              <input v-model.number="editFormData.valid_days" type="number" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
-            </div>
-            <div>
-              <label class="mb-1 block text-xs text-gray-500">活动开始</label>
-              <input v-model="editFormData.valid_start" type="date" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
-            </div>
-            <div>
-              <label class="mb-1 block text-xs text-gray-500">活动结束</label>
-              <input v-model="editFormData.valid_end" type="date" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
-            </div>
-          </div>
-          <div>
-            <label class="mb-1 block text-xs text-gray-500">状态</label>
-            <SelectField v-model="editFormData.status" class="w-full">
-              <option value="active">有效</option>
-              <option value="inactive">下架</option>
+            <label class="mb-1 block text-xs text-slate-500">类型</label>
+            <SelectField v-model="form.coupon_type" class="w-full">
+              <option value="cash">满减券</option>
+              <option value="discount">折扣券</option>
             </SelectField>
           </div>
-          <div v-if="editError" class="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">{{ editError }}</div>
+          <div v-if="form.coupon_type === 'cash'">
+            <label class="mb-1 block text-xs text-slate-500">减免金额(¥)</label>
+            <input v-model.number="form.amount" type="number" class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-teal-500" />
+          </div>
+          <div v-else>
+            <label class="mb-1 block text-xs text-slate-500">折扣(如9=9折)</label>
+            <input v-model.number="form.discount" type="number" step="0.1" class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-teal-500" />
+          </div>
         </div>
-        <div class="mt-5 flex justify-end gap-3">
-          <button @click="showEdit = false" class="rounded-lg border border-gray-200 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50">取消</button>
-          <button @click="handleEdit" :disabled="editing" class="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-50">
-            {{ editing ? '保存中...' : '保存' }}
-          </button>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="mb-1 block text-xs text-slate-500">最低消费(¥)</label>
+            <input v-model.number="form.min_amount" type="number" class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-teal-500" />
+          </div>
+          <div>
+            <label class="mb-1 block text-xs text-slate-500">发行数量</label>
+            <input v-model.number="form.total_count" type="number" class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-teal-500" />
+          </div>
         </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="mb-1 block text-xs text-slate-500">积分成本(0=免费)</label>
+            <input v-model.number="form.points_cost" type="number" class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-teal-500" />
+          </div>
+          <div>
+            <label class="mb-1 block text-xs text-slate-500">会员等级要求</label>
+            <SelectField v-model="form.required_level" class="w-full">
+              <option value="">不限</option>
+              <option value="silver">银卡会员</option>
+              <option value="gold">金卡会员</option>
+              <option value="platinum">铂金会员</option>
+              <option value="diamond">钻石会员</option>
+            </SelectField>
+          </div>
+        </div>
+        <div class="grid grid-cols-3 gap-3">
+          <div>
+            <label class="mb-1 block text-xs text-slate-500">有效天数</label>
+            <input v-model.number="form.valid_days" type="number" class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-teal-500" />
+          </div>
+          <div>
+            <label class="mb-1 block text-xs text-slate-500">活动开始</label>
+            <input v-model="form.valid_start" type="date" class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-teal-500" />
+          </div>
+          <div>
+            <label class="mb-1 block text-xs text-slate-500">活动结束</label>
+            <input v-model="form.valid_end" type="date" class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-teal-500" />
+          </div>
+        </div>
+        <div v-if="createError" class="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">{{ createError }}</div>
       </div>
-    </div>
+      <template #footer>
+        <button @click="showCreate = false" class="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50">取消</button>
+        <button @click="handleCreate" :disabled="creating" class="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50">
+          {{ creating ? '创建中...' : '创建' }}
+        </button>
+      </template>
+    </ModalDialog>
+
+    <!-- Edit Modal -->
+    <ModalDialog :visible="showEdit" title="编辑优惠券" size="lg" @close="showEdit = false">
+      <div class="space-y-3">
+        <div>
+          <label class="mb-1 block text-xs text-slate-500">券名称</label>
+          <input v-model="editFormData.name" class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-teal-500" />
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="mb-1 block text-xs text-slate-500">类型</label>
+            <SelectField v-model="editFormData.coupon_type" class="w-full">
+              <option value="cash">满减券</option>
+              <option value="discount">折扣券</option>
+            </SelectField>
+          </div>
+          <div v-if="editFormData.coupon_type === 'cash'">
+            <label class="mb-1 block text-xs text-slate-500">减免金额(¥)</label>
+            <input v-model.number="editFormData.amount" type="number" class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-teal-500" />
+          </div>
+          <div v-else>
+            <label class="mb-1 block text-xs text-slate-500">折扣(如9=9折)</label>
+            <input v-model.number="editFormData.discount" type="number" step="0.1" class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-teal-500" />
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="mb-1 block text-xs text-slate-500">最低消费(¥)</label>
+            <input v-model.number="editFormData.min_amount" type="number" class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-teal-500" />
+          </div>
+          <div>
+            <label class="mb-1 block text-xs text-slate-500">发行数量</label>
+            <input v-model.number="editFormData.total_count" type="number" class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-teal-500" />
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="mb-1 block text-xs text-slate-500">积分成本(0=免费)</label>
+            <input v-model.number="editFormData.points_cost" type="number" class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-teal-500" />
+          </div>
+          <div>
+            <label class="mb-1 block text-xs text-slate-500">会员等级要求</label>
+            <SelectField v-model="editFormData.required_level" class="w-full">
+              <option value="">不限</option>
+              <option value="silver">银卡会员</option>
+              <option value="gold">金卡会员</option>
+              <option value="platinum">铂金会员</option>
+              <option value="diamond">钻石会员</option>
+            </SelectField>
+          </div>
+        </div>
+        <div class="grid grid-cols-3 gap-3">
+          <div>
+            <label class="mb-1 block text-xs text-slate-500">有效天数</label>
+            <input v-model.number="editFormData.valid_days" type="number" class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-teal-500" />
+          </div>
+          <div>
+            <label class="mb-1 block text-xs text-slate-500">活动开始</label>
+            <input v-model="editFormData.valid_start" type="date" class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-teal-500" />
+          </div>
+          <div>
+            <label class="mb-1 block text-xs text-slate-500">活动结束</label>
+            <input v-model="editFormData.valid_end" type="date" class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-teal-500" />
+          </div>
+        </div>
+        <div>
+          <label class="mb-1 block text-xs text-slate-500">状态</label>
+          <SelectField v-model="editFormData.status" class="w-full">
+            <option value="active">有效</option>
+            <option value="inactive">下架</option>
+          </SelectField>
+        </div>
+        <div v-if="editError" class="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">{{ editError }}</div>
+      </div>
+      <template #footer>
+        <button @click="showEdit = false" class="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50">取消</button>
+        <button @click="handleEdit" :disabled="editing" class="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50">
+          {{ editing ? '保存中...' : '保存' }}
+        </button>
+      </template>
+    </ModalDialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { adminCouponApi } from '@hotelink/api'
-import { SelectField, useToast, useConfirm } from '@hotelink/ui'
+import { PageHeader, SelectField, ModalDialog, useToast, useConfirm } from '@hotelink/ui'
 
 const { showToast } = useToast()
 const { confirm: confirmDialog } = useConfirm()
 
+const loading = ref(true)
 const templates = ref<any[]>([])
 const showCreate = ref(false)
 const creating = ref(false)
@@ -303,6 +305,8 @@ async function loadData() {
     }
   } catch {
     showToast('优惠券模板加载失败，请检查网络后重试', 'error')
+  } finally {
+    loading.value = false
   }
 }
 
@@ -310,6 +314,9 @@ async function handleCreate() {
   createError.value = ''
   if (!form.value.name.trim()) { createError.value = '请输入券名称'; return }
   if (!form.value.valid_start || !form.value.valid_end) { createError.value = '请设置活动日期'; return }
+  if (form.value.coupon_type === 'cash' && (!form.value.amount || form.value.amount <= 0)) { createError.value = '减免金额必须大于 0'; return }
+  if (form.value.coupon_type === 'discount' && (!form.value.discount || form.value.discount <= 0)) { createError.value = '折扣必须大于 0'; return }
+  if (!form.value.total_count || form.value.total_count <= 0 || !Number.isInteger(form.value.total_count)) { createError.value = '发行数量必须是大于 0 的整数'; return }
   creating.value = true
   try {
     const res = await adminCouponApi.create(form.value as any)
@@ -335,6 +342,8 @@ async function handleCreate() {
 }
 
 async function toggleStatus(tpl: any, status: string) {
+  const action = status === 'active' ? '上架' : '下架'
+  if (!await confirmDialog(`确定${action}优惠券「${tpl.name}」？`)) return
   try {
     const res = await adminCouponApi.update({ template_id: tpl.id, status })
     if (res.code === 0) {

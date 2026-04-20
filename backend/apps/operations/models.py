@@ -128,6 +128,10 @@ class AICallLog(models.Model):
         verbose_name = "AI Call Log"
         verbose_name_plural = "AI Call Logs"
         ordering = ["-id"]
+        indexes = [
+            models.Index(fields=["scene", "-created_at"], name="idx_aicalllog_scene_created"),
+            models.Index(fields=["status", "-created_at"], name="idx_aicalllog_status_created"),
+        ]
 
     def __str__(self) -> str:
         return f"{self.scene} / {self.provider} / {self.status}"

@@ -121,19 +121,19 @@
                   <button
                     v-if="row.status === 'paid'"
                     class="inline-flex h-7 flex-1 items-center justify-center rounded-md border border-indigo-200 bg-indigo-50 text-[12px] font-medium text-indigo-700 transition hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-60"
-                    :disabled="actionLoading"
+                    :disabled="actionOrderId === row.id"
                     @click="handleMenuConfirm(row)"
                   >确认</button>
                   <button
                     v-if="row.status === 'confirmed' || row.status === 'paid'"
                     class="inline-flex h-7 flex-1 items-center justify-center rounded-md border border-teal-200 bg-teal-50 text-[12px] font-medium text-teal-700 transition hover:bg-teal-100 disabled:cursor-not-allowed disabled:opacity-60"
-                    :disabled="actionLoading"
+                    :disabled="actionOrderId === row.id"
                     @click="handleMenuOpenCheckIn(row)"
                   >入住</button>
                   <button
                     v-if="row.status === 'checked_in'"
                     class="inline-flex h-7 flex-1 items-center justify-center rounded-md border border-slate-200 bg-slate-100 text-[12px] font-medium text-slate-700 transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-60"
-                    :disabled="actionLoading"
+                    :disabled="actionOrderId === row.id"
                     @click="handleMenuOpenCheckOut(row)"
                   >退房</button>
                 </div>
@@ -154,7 +154,7 @@
         </div>
         <div>
           <label class="mb-1 block text-sm font-medium">分配房间号</label>
-          <input v-model="checkInForm.room_no" required class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-teal-500" placeholder="例如：1808" />
+          <RoomSuggestInput v-model="checkInForm.room_no" :available="roomSuggestions" :occupied="occupiedRooms" />
         </div>
         <div>
           <label class="mb-1 block text-sm font-medium">备注</label>
@@ -163,7 +163,7 @@
       </form>
       <template #footer>
         <button class="rounded-lg border border-slate-200 px-4 py-2 text-sm hover:bg-slate-50" @click="showCheckIn = false">取消</button>
-        <button class="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60" :disabled="actionLoading" @click="handleCheckIn">{{ actionLoading ? '处理中…' : '确认入住' }}</button>
+        <button class="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60" :disabled="actionOrderId !== null" @click="handleCheckIn">{{ actionOrderId !== null ? '处理中…' : '确认入住' }}</button>
       </template>
     </ModalDialog>
 
@@ -185,7 +185,7 @@
       </form>
       <template #footer>
         <button class="rounded-lg border border-slate-200 px-4 py-2 text-sm hover:bg-slate-50" @click="showCheckOut = false">取消</button>
-        <button class="rounded-lg bg-orange-600 px-4 py-2 text-sm font-medium text-white hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-60" :disabled="actionLoading" @click="handleCheckOut">{{ actionLoading ? '处理中…' : '确认退房' }}</button>
+        <button class="rounded-lg bg-orange-600 px-4 py-2 text-sm font-medium text-white hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-60" :disabled="actionOrderId !== null" @click="handleCheckOut">{{ actionOrderId !== null ? '处理中…' : '确认退房' }}</button>
       </template>
     </ModalDialog>
 
@@ -197,7 +197,7 @@ import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute } from 'vue-router'
 import { orderApi } from '@hotelink/api'
 import { formatMoney, ORDER_STATUS_MAP, PAYMENT_STATUS_MAP, extractApiError } from '@hotelink/utils'
-import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, useToast, useConfirm, SelectField } from '@hotelink/ui'
+import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, RoomSuggestInput, useToast, useConfirm, SelectField } from '@hotelink/ui'
 import { emitOrderSync, onOrderSync } from '../utils/order-sync'
 
 const { showToast } = useToast()
@@ -226,10 +226,12 @@ const filters = reactive({ keyword: '', status: '', ordering: '-id' })
 
 const showCheckIn = ref(false)
 const checkInForm = reactive({ order_id: 0, order_no: '', room_no: '', operator_remark: '' })
+const roomSuggestions = ref<string[]>([])
+const occupiedRooms = ref<string[]>([])
 
 const showCheckOut = ref(false)
 const checkOutForm = reactive({ order_id: 0, order_no: '', consume_amount: 0, operator_remark: '' })
-const actionLoading = ref(false)
+const actionOrderId = ref<number | null>(null)
 const activeActionMenuId = ref<number | null>(null)
 let stopOrderSync: (() => void) | null = null
 
@@ -313,9 +315,9 @@ async function loadList() {
 
 // 处理 confirmOrder 业务流程。
 async function confirmOrder(row: Record<string, unknown>) {
-  if (actionLoading.value) return
+  if (actionOrderId.value !== null) return
   if (!await confirmDialog('确认此订单？')) return
-  actionLoading.value = true
+  actionOrderId.value = row.id as number
   try {
     const res = await orderApi.changeStatus({ order_id: row.id as number, target_status: 'confirmed' })
     if (res.code === 0) {
@@ -328,7 +330,7 @@ async function confirmOrder(row: Record<string, unknown>) {
   } catch {
     showToast('确认订单失败，请重试', 'error')
   } finally {
-    actionLoading.value = false
+    actionOrderId.value = null
   }
 }
 
@@ -339,16 +341,36 @@ function openCheckIn(row: Record<string, unknown>) {
   checkInForm.room_no = ''
   checkInForm.operator_remark = ''
   showCheckIn.value = true
+  fetchRoomSuggestions(row)
+}
+
+async function fetchRoomSuggestions(row: Record<string, unknown>) {
+  const hotelId = Number(row.hotel_id || row.hotel || 0)
+  if (!hotelId) return
+  try {
+    const res = await orderApi.roomSuggestions({
+      hotel_id: hotelId,
+      check_in: String(row.check_in_date || ''),
+      check_out: String(row.check_out_date || ''),
+    })
+    if (res.code === 0 && res.data) {
+      roomSuggestions.value = res.data.available || []
+      occupiedRooms.value = res.data.occupied || []
+    }
+  } catch {
+    roomSuggestions.value = []
+    occupiedRooms.value = []
+  }
 }
 
 // 处理 CheckIn 交互逻辑。
 async function handleCheckIn() {
-  if (actionLoading.value) return
+  if (actionOrderId.value !== null) return
   if (!checkInForm.room_no.trim()) {
     showToast('请填写房间号', 'error')
     return
   }
-  actionLoading.value = true
+  actionOrderId.value = checkInForm.order_id
   try {
     const res = await orderApi.checkIn({
       order_id: checkInForm.order_id,
@@ -366,7 +388,7 @@ async function handleCheckIn() {
   } catch {
     showToast('入住办理失败，请重试', 'error')
   } finally {
-    actionLoading.value = false
+    actionOrderId.value = null
   }
 }
 
@@ -381,8 +403,8 @@ function openCheckOut(row: Record<string, unknown>) {
 
 // 处理 CheckOut 交互逻辑。
 async function handleCheckOut() {
-  if (actionLoading.value) return
-  actionLoading.value = true
+  if (actionOrderId.value !== null) return
+  actionOrderId.value = checkOutForm.order_id
   try {
     const res = await orderApi.checkOut({
       order_id: checkOutForm.order_id,
@@ -400,7 +422,7 @@ async function handleCheckOut() {
   } catch {
     showToast('退房办理失败，请重试', 'error')
   } finally {
-    actionLoading.value = false
+    actionOrderId.value = null
   }
 }
 

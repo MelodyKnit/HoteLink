@@ -166,7 +166,7 @@ async function addHotelById(idLike: unknown) {
       addHotel(res.data)
     }
   } catch {
-    /* ignore */
+    compareError.value = '加载酒店信息失败，请重试'
   }
 }
 
@@ -187,6 +187,7 @@ async function searchHotels() {
     }
   } catch {
     searchResults.value = []
+    compareError.value = '搜索失败，请检查网络'
   } finally {
     searching.value = false
   }

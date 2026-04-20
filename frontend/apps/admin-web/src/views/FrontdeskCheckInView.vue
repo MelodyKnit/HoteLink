@@ -64,12 +64,7 @@
           </div>
           <div>
             <label class="mb-1 block text-sm font-medium">分配房间号</label>
-            <input
-              v-model="roomNo"
-              required
-              class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-teal-500"
-              placeholder="例如：1808"
-            />
+            <RoomSuggestInput v-model="roomNo" :available="roomSuggestions" :occupied="occupiedRooms" />
           </div>
           <div>
             <label class="mb-1 block text-sm font-medium">押金记录（前端登记）</label>
@@ -106,7 +101,7 @@ import { onBeforeUnmount, onMounted, ref, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { orderApi } from '@hotelink/api'
 import { extractApiError, ORDER_STATUS_MAP } from '@hotelink/utils'
-import { DataTable, PageHeader, Pagination, SelectField, StatusBadge, useToast } from '@hotelink/ui'
+import { DataTable, PageHeader, Pagination, SelectField, StatusBadge, RoomSuggestInput, useToast } from '@hotelink/ui'
 import { emitOrderSync, onOrderSync } from '../utils/order-sync'
 
 type OrderRow = Record<string, unknown>
@@ -138,6 +133,8 @@ const selectedOrder = ref<OrderRow | null>(null)
 const roomNo = ref('')
 const depositAmount = ref<number>(0)
 const remark = ref('')
+const roomSuggestions = ref<string[]>([])
+const occupiedRooms = ref<string[]>([])
 
 const allowedStatuses = new Set(['pending_payment', 'paid', 'confirmed', 'checked_in', 'completed', 'cancelled'])
 const checkInEligible = new Set(['paid', 'confirmed'])
@@ -162,6 +159,26 @@ function selectOrder(row: OrderRow) {
   roomNo.value = String(row.room_no || '')
   depositAmount.value = 0
   remark.value = ''
+  fetchRoomSuggestions(row)
+}
+
+async function fetchRoomSuggestions(row: OrderRow) {
+  const hotelId = Number(row.hotel_id || row.hotel || 0)
+  if (!hotelId) return
+  try {
+    const res = await orderApi.roomSuggestions({
+      hotel_id: hotelId,
+      check_in: String(row.check_in_date || ''),
+      check_out: String(row.check_out_date || ''),
+    })
+    if (res.code === 0 && res.data) {
+      roomSuggestions.value = res.data.available || []
+      occupiedRooms.value = res.data.occupied || []
+    }
+  } catch {
+    roomSuggestions.value = []
+    occupiedRooms.value = []
+  }
 }
 
 function syncSelectedOrderVisible() {

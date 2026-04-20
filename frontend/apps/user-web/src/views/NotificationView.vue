@@ -176,7 +176,7 @@
             <!-- Single delete (non-select mode) -->
             <button v-if="!selectMode"
               @click.stop="deleteNotice(notice)"
-              class="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-gray-300 hover:bg-red-50 hover:text-red-400"
+              class="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-gray-300 hover:bg-red-50 hover:text-red-400"
               title="删除">
               <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -217,9 +217,10 @@
 import { ref, computed, onMounted, onBeforeUnmount, inject } from 'vue'
 import { useRouter } from 'vue-router'
 import { userNoticeApi } from '@hotelink/api'
-import { useConfirm } from '@hotelink/ui'
+import { useConfirm, useToast } from '@hotelink/ui'
 
 const { confirm: confirmDialog } = useConfirm()
+const { showToast } = useToast()
 
 interface Notice {
   id: number
@@ -397,14 +398,20 @@ async function fetchNotices(reset = false) {
     page.value = 1
     notices.value = []
   }
-  const res = await userNoticeApi.list({ page: page.value, page_size: pageSize })
-  if (res.data) {
-    notices.value = reset
-      ? (res.data as any).items
-      : [...notices.value, ...(res.data as any).items]
-    total.value = (res.data as any).total
-    const serverCount = (res.data as any).unread_count ?? 0
-    syncParent(serverCount)
+  try {
+    const res = await userNoticeApi.list({ page: page.value, page_size: pageSize })
+    if (res.code === 0 && res.data) {
+      notices.value = reset
+        ? (res.data as any).items
+        : [...notices.value, ...(res.data as any).items]
+      total.value = (res.data as any).total
+      const serverCount = (res.data as any).unread_count ?? 0
+      syncParent(serverCount)
+    } else {
+      showToast(res.message || '通知加载失败', 'error')
+    }
+  } catch {
+    showToast('通知加载失败，请检查网络', 'error')
   }
 }
 
@@ -419,21 +426,40 @@ async function loadMore() {
 async function markRead(notice: Notice) {
   if (notice.is_read) return
   notice.is_read = true
-  const res = await userNoticeApi.markRead([notice.id])
-  if (res.data) syncParent(res.data.unread_count)
+  try {
+    const res = await userNoticeApi.markRead([notice.id])
+    if (res.data) syncParent(res.data.unread_count)
+  } catch {
+    notice.is_read = false
+  }
 }
 
 async function markAllRead() {
+  const prev = notices.value.map(n => n.is_read)
   notices.value.forEach(n => (n.is_read = true))
-  const res = await userNoticeApi.markRead()
-  if (res.data) syncParent(res.data.unread_count)
+  try {
+    const res = await userNoticeApi.markRead()
+    if (res.data) syncParent(res.data.unread_count)
+  } catch {
+    notices.value.forEach((n, i) => (n.is_read = prev[i]))
+    showToast('操作失败，请重试', 'error')
+  }
 }
 
 async function deleteNotice(notice: Notice) {
+  if (!await confirmDialog('确定删除这条通知？')) return
+  const backup = [...notices.value]
+  const prevTotal = total.value
   notices.value = notices.value.filter(n => n.id !== notice.id)
   total.value = Math.max(0, total.value - 1)
-  const res = await userNoticeApi.deleteNotices([notice.id])
-  if (res.data) syncParent(res.data.unread_count)
+  try {
+    const res = await userNoticeApi.deleteNotices([notice.id])
+    if (res.data) syncParent(res.data.unread_count)
+  } catch {
+    notices.value = backup
+    total.value = prevTotal
+    showToast('删除失败，请重试', 'error')
+  }
 }
 
 // ── Batch operations ──
@@ -444,9 +470,17 @@ async function batchMarkRead() {
     const n = notices.value.find(x => x.id === id)
     if (n) n.is_read = true
   })
-  const res = await userNoticeApi.markRead(ids)
-  if (res.data) syncParent(res.data.unread_count)
-  selected.value = new Set()
+  try {
+    const res = await userNoticeApi.markRead(ids)
+    if (res.data) syncParent(res.data.unread_count)
+    selected.value = new Set()
+  } catch {
+    ids.forEach(id => {
+      const n = notices.value.find(x => x.id === id)
+      if (n) n.is_read = false
+    })
+    showToast('操作失败，请重试', 'error')
+  }
 }
 
 async function batchMarkUnread() {
@@ -456,30 +490,54 @@ async function batchMarkUnread() {
     const n = notices.value.find(x => x.id === id)
     if (n) n.is_read = false
   })
-  const res = await userNoticeApi.markUnread(ids)
-  if (res.data) syncParent(res.data.unread_count)
-  selected.value = new Set()
+  try {
+    const res = await userNoticeApi.markUnread(ids)
+    if (res.data) syncParent(res.data.unread_count)
+    selected.value = new Set()
+  } catch {
+    ids.forEach(id => {
+      const n = notices.value.find(x => x.id === id)
+      if (n) n.is_read = true
+    })
+    showToast('操作失败，请重试', 'error')
+  }
 }
 
 async function batchDelete() {
   const ids = [...selected.value]
   if (!ids.length) return
   if (!await confirmDialog(`确定删除选中的 ${ids.length} 条通知？`, { type: 'danger' })) return
+  const backup = [...notices.value]
+  const prevTotal = total.value
   notices.value = notices.value.filter(n => !ids.includes(n.id))
   total.value = Math.max(0, total.value - ids.length)
-  const res = await userNoticeApi.deleteNotices(ids)
-  if (res.data) syncParent(res.data.unread_count)
-  selected.value = new Set()
+  try {
+    const res = await userNoticeApi.deleteNotices(ids)
+    if (res.data) syncParent(res.data.unread_count)
+    selected.value = new Set()
+  } catch {
+    notices.value = backup
+    total.value = prevTotal
+    showToast('删除失败，请重试', 'error')
+  }
 }
 
 async function deleteAll() {
   if (!await confirmDialog('确定删除所有通知？该操作不可恢复。', { type: 'danger' })) return
+  const backup = [...notices.value]
+  const prevTotal = total.value
   notices.value = []
   total.value = 0
   selected.value = new Set()
-  const res = await userNoticeApi.deleteNotices()
-  if (res.data) syncParent(0)
-  selectMode.value = false
+  try {
+    const res = await userNoticeApi.deleteNotices()
+    if (res.data) syncParent(0)
+    selectMode.value = false
+  } catch {
+    notices.value = backup
+    total.value = prevTotal
+    showToast('清空失败，请重试', 'error')
+  }
 }
 
 function refreshNoticeFeedIfVisible() {
@@ -491,13 +549,11 @@ function refreshNoticeFeedIfVisible() {
 onMounted(async () => {
   await fetchNotices(true)
   loading.value = false
-  window.addEventListener('focus', refreshNoticeFeedIfVisible)
   document.addEventListener('visibilitychange', refreshNoticeFeedIfVisible)
   refreshTimer = window.setInterval(refreshNoticeFeedIfVisible, 60000)
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('focus', refreshNoticeFeedIfVisible)
   document.removeEventListener('visibilitychange', refreshNoticeFeedIfVisible)
   if (refreshTimer !== null) {
     window.clearInterval(refreshTimer)

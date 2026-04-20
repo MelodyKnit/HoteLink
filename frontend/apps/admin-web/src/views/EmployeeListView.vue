@@ -115,7 +115,7 @@
       </form>
       <template #footer>
         <button class="rounded-lg border border-slate-200 px-4 py-2 text-sm hover:bg-slate-50" @click="showCreate = false">取消</button>
-        <button class="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700" @click="handleCreate">创建</button>
+        <button class="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-60" :disabled="creating" @click="handleCreate">{{ creating ? '创建中…' : '创建' }}</button>
       </template>
     </ModalDialog>
 
@@ -139,7 +139,7 @@
       </div>
       <template #footer>
         <button class="rounded-lg border border-slate-200 px-4 py-2 text-sm hover:bg-slate-50" @click="showEdit = false">取消</button>
-        <button class="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700" @click="handleEdit">保存</button>
+        <button class="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-60" :disabled="editSaving" @click="handleEdit">{{ editSaving ? '保存中…' : '保存' }}</button>
       </template>
     </ModalDialog>
   </section>
@@ -173,6 +173,7 @@ const total = ref(0)
 const ordering = ref('-id')
 
 const showCreate = ref(false)
+const creating = ref(false)
 const form = reactive({ username: '', password: '', name: '', mobile: '', role: 'hotel_admin' })
 const formErrors = ref<Partial<Record<EmployeeField, string>>>({})
 
@@ -308,6 +309,7 @@ async function handleCreate() {
     return
   }
 
+  creating.value = true
   try {
     const res = await employeeApi.create(form)
     if (res.code === 0) {
@@ -334,10 +336,13 @@ async function handleCreate() {
     }
   } catch {
     showToast('创建失败，请重试', 'error')
+  } finally {
+    creating.value = false
   }
 }
 
 const showEdit = ref(false)
+const editSaving = ref(false)
 const editForm = reactive({ user_id: 0, nickname: '', mobile: '', role: 'hotel_admin' })
 
 function openEdit(row: Record<string, unknown>) {
@@ -349,6 +354,7 @@ function openEdit(row: Record<string, unknown>) {
 }
 
 async function handleEdit() {
+  editSaving.value = true
   try {
     const res = await employeeApi.update(editForm)
     if (res.code === 0) {
@@ -364,6 +370,8 @@ async function handleEdit() {
     }
   } catch {
     showToast('更新失败，请重试', 'error')
+  } finally {
+    editSaving.value = false
   }
 }
 

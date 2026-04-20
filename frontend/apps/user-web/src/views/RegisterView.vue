@@ -44,16 +44,22 @@
 
           <div>
             <label class="mb-1 block text-xs font-medium text-gray-500">密码 *</label>
+            <div class="relative">
             <input
               v-model="form.password"
-              type="password"
+              :type="showPassword ? 'text' : 'password'"
               autocomplete="new-password"
               placeholder="至少8位"
-              class="w-full rounded-xl border px-4 py-3 text-sm outline-none transition"
+              class="w-full rounded-xl border px-4 py-3 pr-10 text-sm outline-none transition"
               :class="fieldErrors.password ? 'border-red-300 bg-red-50/70 focus:border-red-400 focus:ring-1 focus:ring-red-200' : 'border-gray-200 focus:border-brand focus:ring-1 focus:ring-brand'"
               @input="clearFieldError('password')"
               @blur="validateField('password')"
             />
+            <button type="button" @click="showPassword = !showPassword" class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600" tabindex="-1">
+              <span v-if="showPassword" class="text-sm">🙈</span>
+              <span v-else class="text-sm">👁</span>
+            </button>
+            </div>
             <div class="mt-2">
               <div class="h-2 overflow-hidden rounded-full bg-gray-100">
                 <div
@@ -71,16 +77,22 @@
 
           <div>
             <label class="mb-1 block text-xs font-medium text-gray-500">确认密码 *</label>
+            <div class="relative">
             <input
               v-model="form.confirm_password"
-              type="password"
+              :type="showConfirmPassword ? 'text' : 'password'"
               autocomplete="new-password"
               placeholder="再次输入密码"
-              class="w-full rounded-xl border px-4 py-3 text-sm outline-none transition"
+              class="w-full rounded-xl border px-4 py-3 pr-10 text-sm outline-none transition"
               :class="fieldErrors.confirm_password ? 'border-red-300 bg-red-50/70 focus:border-red-400 focus:ring-1 focus:ring-red-200' : 'border-gray-200 focus:border-brand focus:ring-1 focus:ring-brand'"
               @input="clearFieldError('confirm_password')"
               @blur="validateField('confirm_password')"
             />
+            <button type="button" @click="showConfirmPassword = !showConfirmPassword" class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600" tabindex="-1">
+              <span v-if="showConfirmPassword" class="text-sm">🙈</span>
+              <span v-else class="text-sm">👁</span>
+            </button>
+            </div>
             <p v-if="fieldErrors.confirm_password" class="mt-1 text-xs text-red-500">{{ fieldErrors.confirm_password }}</p>
           </div>
 
@@ -138,6 +150,8 @@ const router = useRouter()
 const auth = useUserAuthStore()
 const loading = ref(false)
 const error = ref('')
+const showPassword = ref(false)
+const showConfirmPassword = ref(false)
 
 const form = ref({
   username: '',

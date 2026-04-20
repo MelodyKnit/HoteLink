@@ -1,11 +1,15 @@
 <template>
   <div class="min-h-screen bg-gray-50">
     <header class="sticky top-0 z-40 flex h-14 items-center border-b border-gray-100 bg-white/95 px-4 backdrop-blur">
-      <button @click="$router.back()" class="mr-3 rounded-lg p-1 text-gray-600 hover:bg-gray-100">← 返回</button>
+      <button @click="goBack()" class="mr-3 rounded-lg p-1 text-gray-600 hover:bg-gray-100">← 返回</button>
       <h1 class="text-sm font-semibold text-gray-800">发票管理</h1>
     </header>
 
-    <div class="mx-auto max-w-2xl px-4 py-4 pb-24 md:pb-4">
+    <div v-if="pageLoading" class="flex justify-center py-20">
+      <div class="h-8 w-8 animate-spin rounded-full border-4 border-brand border-t-transparent"></div>
+    </div>
+
+    <div v-else class="mx-auto max-w-2xl px-4 py-4 pb-24 md:pb-4">
       <div class="rounded-2xl bg-white p-4 shadow-sm">
         <div class="flex items-center justify-between">
           <h3 class="font-semibold text-gray-800">发票抬头</h3>
@@ -147,13 +151,38 @@
               <label class="flex items-center gap-1 text-sm"><input type="radio" v-model="editTitleForm.invoice_type" value="company" class="accent-brand" /> 企业</label>
             </div>
             <div>
-              <input v-model="editTitleForm.title" placeholder="抬头名称" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
+              <input
+                v-model="editTitleForm.title"
+                placeholder="抬头名称"
+                class="w-full rounded-lg border px-3 py-2 text-sm outline-none transition"
+                :class="editTitleErrors.title ? 'border-red-300 bg-red-50/70 focus:border-red-400' : 'border-gray-200 focus:border-brand'"
+                @input="clearEditTitleError('title')"
+                @blur="validateEditTitleField('title')"
+              />
+              <p v-if="editTitleErrors.title" class="mt-1 text-xs text-red-500">{{ editTitleErrors.title }}</p>
             </div>
             <div v-if="editTitleForm.invoice_type === 'company'">
-              <input v-model="editTitleForm.tax_no" placeholder="税号" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
+              <input
+                v-model="editTitleForm.tax_no"
+                placeholder="税号"
+                class="w-full rounded-lg border px-3 py-2 text-sm outline-none transition"
+                :class="editTitleErrors.tax_no ? 'border-red-300 bg-red-50/70 focus:border-red-400' : 'border-gray-200 focus:border-brand'"
+                @input="handleEditTaxNoInput"
+                @blur="validateEditTitleField('tax_no')"
+              />
+              <p v-if="editTitleErrors.tax_no" class="mt-1 text-xs text-red-500">{{ editTitleErrors.tax_no }}</p>
             </div>
             <div>
-              <input v-model="editTitleForm.email" placeholder="接收邮箱" type="email" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand" />
+              <input
+                v-model="editTitleForm.email"
+                placeholder="接收邮箱"
+                type="email"
+                class="w-full rounded-lg border px-3 py-2 text-sm outline-none transition"
+                :class="editTitleErrors.email ? 'border-red-300 bg-red-50/70 focus:border-red-400' : 'border-gray-200 focus:border-brand'"
+                @input="clearEditTitleError('email')"
+                @blur="validateEditTitleField('email')"
+              />
+              <p v-if="editTitleErrors.email" class="mt-1 text-xs text-red-500">{{ editTitleErrors.email }}</p>
             </div>
           </div>
           <div class="mt-4 flex gap-3">
@@ -171,18 +200,26 @@ import { ref, reactive, onMounted } from 'vue'
 import { userInvoiceApi } from '@hotelink/api'
 import { SelectField, useToast, useConfirm } from '@hotelink/ui'
 import { extractApiError, extractApiFieldErrors, isValidEmailAddress, isValidTaxNumber } from '@hotelink/utils'
+import { useRouter } from 'vue-router'
 
 type TitleField = 'title' | 'tax_no' | 'email'
 type ApplyField = 'order_id' | 'invoice_title_id'
 
 const { showToast } = useToast()
 const { confirm: confirmDialog } = useConfirm()
+const router = useRouter()
+
+function goBack() {
+  if (window.history.length > 1) router.back()
+  else router.push('/my')
+}
 
 const titles = ref<any[]>([])
 const invoices = ref<any[]>([])
 const showAddModal = ref(false)
 const addingTitle = ref(false)
 const applying = ref(false)
+const pageLoading = ref(true)
 
 const titleForm = ref({ invoice_type: 'personal', title: '', tax_no: '', email: '' })
 const applyForm = ref({ order_id: 0, invoice_title_id: 0 })
@@ -351,6 +388,59 @@ async function handleApply() {
 const showEditModal = ref(false)
 const editingTitle = ref(false)
 const editTitleForm = reactive({ title_id: 0, invoice_type: 'personal', title: '', tax_no: '', email: '' })
+const editTitleErrors = ref<Partial<Record<TitleField, string>>>({})
+
+function clearEditTitleError(field: TitleField) {
+  if (editTitleErrors.value[field]) {
+    editTitleErrors.value = { ...editTitleErrors.value, [field]: undefined }
+  }
+}
+
+function handleEditTaxNoInput() {
+  editTitleForm.tax_no = editTitleForm.tax_no.replace(/\s/g, '').toUpperCase()
+  clearEditTitleError('tax_no')
+}
+
+function getEditTitleFieldError(field: TitleField): string {
+  switch (field) {
+    case 'title':
+      if (!editTitleForm.title.trim()) return '请输入抬头名称'
+      return editTitleForm.title.trim().length > 100 ? '抬头名称不能超过 100 个字符' : ''
+    case 'tax_no':
+      if (editTitleForm.invoice_type !== 'company') return ''
+      if (!editTitleForm.tax_no.trim()) return '企业抬头请填写税号'
+      return isValidTaxNumber(editTitleForm.tax_no) ? '' : '税号格式不正确，请检查后重试'
+    case 'email':
+      if (!editTitleForm.email.trim()) return '请输入接收邮箱'
+      return isValidEmailAddress(editTitleForm.email) ? '' : '邮箱格式不正确'
+    default:
+      return ''
+  }
+}
+
+function validateEditTitleField(field: TitleField) {
+  editTitleErrors.value = {
+    ...editTitleErrors.value,
+    [field]: getEditTitleFieldError(field) || undefined,
+  }
+}
+
+function validateEditTitleForm(): boolean {
+  const nextErrors: Partial<Record<TitleField, string>> = {}
+  editTitleForm.title = editTitleForm.title.trim()
+  editTitleForm.email = editTitleForm.email.trim()
+  editTitleForm.tax_no = editTitleForm.tax_no.trim().toUpperCase()
+
+  ;(['title', 'tax_no', 'email'] as TitleField[]).forEach((field) => {
+    const message = getEditTitleFieldError(field)
+    if (message) {
+      nextErrors[field] = message
+    }
+  })
+
+  editTitleErrors.value = nextErrors
+  return Object.keys(nextErrors).length === 0
+}
 
 function openEditTitle(t: any) {
   editTitleForm.title_id = t.id
@@ -358,10 +448,15 @@ function openEditTitle(t: any) {
   editTitleForm.title = t.title || ''
   editTitleForm.tax_no = t.tax_no || ''
   editTitleForm.email = t.email || ''
+  editTitleErrors.value = {}
   showEditModal.value = true
 }
 
 async function handleEditTitle() {
+  if (!validateEditTitleForm()) {
+    showToast(Object.values(editTitleErrors.value).find(Boolean) || '请检查抬头信息', 'warning')
+    return
+  }
   editingTitle.value = true
   try {
     const res = await userInvoiceApi.updateTitle(editTitleForm)
@@ -412,6 +507,8 @@ onMounted(async () => {
     invoices.value = [
       { id: 1, amount: '688.00', title: '个人', status: 'completed', created_at: '2026-03-25' },
     ]
+  } finally {
+    pageLoading.value = false
   }
 })
 </script>

@@ -1,12 +1,20 @@
 <template>
   <div class="space-y-6">
-    <h2 class="text-lg font-bold text-gray-800">会员管理</h2>
+    <div class="flex items-center justify-between">
+      <div>
+        <h2 class="text-lg font-bold text-slate-800">会员管理</h2>
+        <p class="text-xs text-slate-400">共 {{ totalUsers }} 位会员</p>
+      </div>
+      <button @click="loadData" class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-50">🔄 刷新</button>
+    </div>
+
+    <div v-if="loading && !levels.length" class="py-20 text-center text-sm text-slate-400">加载中…</div>
 
     <!-- Level Overview -->
     <div class="grid grid-cols-5 gap-4">
       <div v-for="lv in levels" :key="lv.level"
         class="rounded-xl p-4 text-white shadow-sm"
-        :class="levelGradients[lv.level] || 'bg-gray-500'">
+        :class="levelGradients[lv.level] || 'bg-slate-500'">
         <p class="text-xs opacity-80">{{ lv.label }}</p>
         <p class="mt-1 text-2xl font-bold">{{ lv.count }}</p>
         <p class="mt-2 text-xs opacity-80">≥ {{ lv.threshold.toLocaleString() }} 积分</p>
@@ -15,9 +23,9 @@
 
     <!-- Rules -->
     <div class="rounded-xl bg-white p-6 shadow-sm">
-      <h3 class="mb-4 font-semibold text-gray-800">会员权益体系</h3>
+      <h3 class="mb-4 font-semibold text-slate-800">会员权益体系</h3>
       <table class="w-full text-sm">
-        <thead class="bg-gray-50 text-xs text-gray-500">
+        <thead class="bg-slate-50 text-xs text-slate-500">
           <tr>
             <th class="px-4 py-3 text-left">等级</th>
             <th class="px-4 py-3 text-left">积分门槛</th>
@@ -26,22 +34,22 @@
             <th class="px-4 py-3 text-left">当前人数</th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-gray-50">
-          <tr v-for="lv in levels" :key="lv.level" class="hover:bg-gray-50">
+        <tbody class="divide-y divide-slate-50">
+          <tr v-for="lv in levels" :key="lv.level" class="hover:bg-slate-50">
             <td class="px-4 py-3">
-              <span class="font-medium text-gray-800">{{ levelIcons[lv.level] }} {{ lv.label }}</span>
+              <span class="font-medium text-slate-800">{{ levelIcons[lv.level] }} {{ lv.label }}</span>
             </td>
-            <td class="px-4 py-3 text-gray-600">{{ lv.threshold.toLocaleString() }}</td>
+            <td class="px-4 py-3 text-slate-600">{{ lv.threshold.toLocaleString() }}</td>
             <td class="px-4 py-3">
               <span v-if="lv.discount_rate < 1" class="rounded-full bg-red-50 px-2 py-0.5 text-xs text-red-600">
                 {{ (lv.discount_rate * 100).toFixed(0) }}折
               </span>
-              <span v-else class="text-gray-400">无</span>
+              <span v-else class="text-slate-400">无</span>
             </td>
             <td class="px-4 py-3">
               <span class="rounded-full bg-brand/10 px-2 py-0.5 text-xs text-brand">{{ lv.points_multiplier }}x</span>
             </td>
-            <td class="px-4 py-3 font-medium text-gray-800">{{ lv.count }}</td>
+            <td class="px-4 py-3 font-medium text-slate-800">{{ lv.count }}</td>
           </tr>
         </tbody>
       </table>
@@ -49,8 +57,8 @@
 
     <!-- Rules description -->
     <div class="rounded-xl bg-white p-6 shadow-sm">
-      <h3 class="mb-3 font-semibold text-gray-800">积分规则</h3>
-      <div class="space-y-2 text-sm text-gray-600">
+      <h3 class="mb-3 font-semibold text-slate-800">积分规则</h3>
+      <div class="space-y-2 text-sm text-slate-600">
         <p>📌 每消费 <strong>10元</strong> 获得 <strong>1积分</strong>（支付成功后自动到账）</p>
         <p>📌 积分获取受会员倍率加成，高等级会员获得更多积分</p>
         <p>📌 评价订单可额外获得 <strong>10积分</strong></p>
@@ -68,12 +76,13 @@ import { useToast } from '@hotelink/ui'
 
 const { showToast } = useToast()
 
+const loading = ref(false)
 const levels = ref<any[]>([])
 const totalUsers = ref(0)
 
 const levelGradients: Record<string, string> = {
-  normal: 'bg-gradient-to-r from-gray-500 to-gray-600',
-  silver: 'bg-gradient-to-r from-gray-400 to-gray-500',
+  normal: 'bg-gradient-to-r from-slate-500 to-slate-600',
+  silver: 'bg-gradient-to-r from-slate-400 to-slate-500',
   gold: 'bg-gradient-to-r from-yellow-600 to-amber-500',
   platinum: 'bg-gradient-to-r from-purple-600 to-indigo-500',
   diamond: 'bg-gradient-to-r from-amber-500 to-yellow-400',
@@ -88,6 +97,7 @@ const levelIcons: Record<string, string> = {
 }
 
 async function loadData() {
+  loading.value = true
   try {
     const res = await adminMemberApi.overview()
     if (res.code === 0 && res.data) {
@@ -98,6 +108,8 @@ async function loadData() {
     }
   } catch {
     showToast('加载会员数据失败，请检查网络', 'error')
+  } finally {
+    loading.value = false
   }
 }
 

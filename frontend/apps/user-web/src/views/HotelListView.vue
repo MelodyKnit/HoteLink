@@ -239,7 +239,10 @@
     </div>
 
     <div v-if="!loading && hotels.length > 0" class="mt-4">
-      <div v-if="hasMore" class="flex justify-center py-2 text-xs text-gray-400">
+      <div v-if="loadFailed" class="py-4 text-center">
+        <button @click="loadFailed = false; loadMore()" class="text-sm text-brand hover:underline">加载失败，点击重试</button>
+      </div>
+      <div v-else-if="hasMore" class="flex justify-center py-2 text-xs text-gray-400">
         {{ loadingMore ? '正在加载更多酒店...' : '向下滑动加载更多' }}
       </div>
       <div v-else class="flex justify-center py-2 text-xs text-gray-300">已经到底了</div>
@@ -281,6 +284,7 @@ const route = useRoute()
 const router = useRouter()
 const loading = ref(true)
 const loadingMore = ref(false)
+const loadFailed = ref(false)
 const hotels = ref<any[]>([])
 const error = ref('')
 const page = ref(1)
@@ -421,6 +425,7 @@ async function fetchList(options: { append?: boolean } = {}) {
       total.value = 0
     } else {
       page.value = Math.max(1, page.value - 1)
+      loadFailed.value = true
     }
     error.value = '酒店列表加载失败，请稍后重试'
   } finally {
@@ -434,6 +439,7 @@ async function fetchList(options: { append?: boolean } = {}) {
 
 async function loadMore() {
   if (!hasMore.value || loading.value || loadingMore.value) return
+  loadFailed.value = false
   page.value += 1
   await fetchList({ append: true })
 }

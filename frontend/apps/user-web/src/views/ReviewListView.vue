@@ -1,7 +1,7 @@
 <template>
   <div class="min-h-screen bg-gray-50">
     <header class="sticky top-0 z-40 flex h-14 items-center border-b border-gray-100 bg-white/95 px-4 backdrop-blur">
-      <button @click="$router.back()" class="mr-3 rounded-lg p-1 text-gray-600 hover:bg-gray-100">← 返回</button>
+      <button @click="goBack()" class="mr-3 rounded-lg p-1 text-gray-600 hover:bg-gray-100">← 返回</button>
       <h1 class="text-sm font-semibold text-gray-800">我的评价</h1>
     </header>
 
@@ -45,18 +45,18 @@
           </div>
           <div class="mt-2 flex items-center justify-between text-xs text-gray-400">
             <span>{{ r.created_at }}</span>
-            <span v-if="r.reply" class="text-brand">商家已回复</span>
+            <span v-if="r.reply_content" class="text-brand">商家已回复</span>
           </div>
-          <div v-if="r.reply" class="mt-2 rounded-xl bg-gray-50 p-3 text-xs text-gray-500">
+          <div v-if="r.reply_content" class="mt-2 rounded-xl bg-gray-50 p-3 text-xs text-gray-500">
             <p class="font-medium text-gray-700">商家回复：</p>
             <p
               class="mt-1 whitespace-pre-wrap break-words leading-relaxed [overflow-wrap:anywhere]"
               :class="isReplyExpanded(r.id) ? '' : 'line-clamp-3'"
             >
-              {{ r.reply }}
+              {{ r.reply_content }}
             </p>
             <button
-              v-if="shouldShowExpand(r.reply, 90, 3)"
+              v-if="shouldShowExpand(r.reply_content, 90, 3)"
               type="button"
               class="mt-1 text-[11px] text-brand transition hover:text-brand-dark"
               @click="toggleReplyExpanded(r.id)"
@@ -74,12 +74,20 @@
 import { ref, onMounted } from 'vue'
 import { userReviewApi } from '@hotelink/api'
 import { buildImageThumbUrl } from '@hotelink/utils'
+import { useRouter } from 'vue-router'
+
+const router = useRouter()
+
+function goBack() {
+  if (window.history.length > 1) router.back()
+  else router.push('/my')
+}
 
 const loading = ref(true)
 const reviews = ref<any[]>([])
 const error = ref('')
-const expandedContentId = ref<number | null>(null)
-const expandedReplyId = ref<number | null>(null)
+const expandedContentIds = ref(new Set<number>())
+const expandedReplyIds = ref(new Set<number>())
 
 function shouldShowExpand(value: unknown, charLimit = 140, lineLimit = 4): boolean {
   const text = String(value || '')
@@ -89,21 +97,25 @@ function shouldShowExpand(value: unknown, charLimit = 140, lineLimit = 4): boole
 }
 
 function isContentExpanded(id: number): boolean {
-  return expandedContentId.value === Number(id)
+  return expandedContentIds.value.has(Number(id))
 }
 
 function isReplyExpanded(id: number): boolean {
-  return expandedReplyId.value === Number(id)
+  return expandedReplyIds.value.has(Number(id))
 }
 
 function toggleContentExpanded(id: number) {
   const normalizedId = Number(id)
-  expandedContentId.value = expandedContentId.value === normalizedId ? null : normalizedId
+  const s = new Set(expandedContentIds.value)
+  if (s.has(normalizedId)) s.delete(normalizedId); else s.add(normalizedId)
+  expandedContentIds.value = s
 }
 
 function toggleReplyExpanded(id: number) {
   const normalizedId = Number(id)
-  expandedReplyId.value = expandedReplyId.value === normalizedId ? null : normalizedId
+  const s = new Set(expandedReplyIds.value)
+  if (s.has(normalizedId)) s.delete(normalizedId); else s.add(normalizedId)
+  expandedReplyIds.value = s
 }
 
 onMounted(async () => {
@@ -117,7 +129,10 @@ onMounted(async () => {
           image_thumbs: (Array.isArray(item?.images) ? item.images : []).map((url: string) => buildImageThumbUrl(url, 160, 160)),
         }))
         : []
-    } else reviews.value = []
+    } else {
+      reviews.value = []
+      error.value = res.message || '评价加载失败'
+    }
   } catch {
     reviews.value = []
     error.value = '评价数据加载失败，请稍后重试'

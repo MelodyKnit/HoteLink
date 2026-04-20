@@ -1,11 +1,16 @@
 <template>
   <div class="min-h-screen bg-gray-50">
     <header class="sticky top-0 z-40 flex h-14 items-center border-b border-gray-100 bg-white/95 px-4 backdrop-blur">
-      <button @click="$router.back()" class="mr-3 rounded-lg p-1 text-gray-600 hover:bg-gray-100">← 返回</button>
+      <button @click="goBack()" class="mr-3 rounded-lg p-1 text-gray-600 hover:bg-gray-100">← 返回</button>
       <h1 class="text-sm font-semibold text-gray-800">会员中心</h1>
     </header>
 
-    <div class="mx-auto max-w-2xl px-4 py-6 pb-24 md:pb-6">
+    <div v-if="pageLoading" class="mx-auto max-w-2xl px-4 py-6 space-y-4">
+      <div class="h-40 animate-pulse rounded-2xl bg-gray-200"></div>
+      <div v-for="i in 3" :key="i" class="h-24 animate-pulse rounded-2xl bg-gray-200"></div>
+    </div>
+
+    <div v-else class="mx-auto max-w-2xl px-4 py-6 pb-24 md:pb-6">
       <p v-if="error" class="mb-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-600">{{ error }}</p>
 
       <!-- Member Card -->
@@ -174,15 +179,25 @@
 import { ref, computed, onMounted } from 'vue'
 import { useUserAuthStore } from '@hotelink/store'
 import { userPointsApi, userCouponApi } from '@hotelink/api'
-import { useToast } from '@hotelink/ui'
+import { useToast, useConfirm } from '@hotelink/ui'
+import { useRouter } from 'vue-router'
 
 const authStore = useUserAuthStore()
 const { showToast } = useToast()
+const { confirm: confirmDialog } = useConfirm()
+const router = useRouter()
+
+function goBack() {
+  if (window.history.length > 1) router.back()
+  else router.push('/my')
+}
+
 const points = ref(0)
 const memberLevel = ref('normal')
 const pointLogs = ref<any[]>([])
 const error = ref('')
 const avatarError = ref(false)
+const pageLoading = ref(true)
 const previewLevel = ref<(typeof levels)[number] | null>(null)
 const exchangeTemplates = ref<any[]>([])
 const exchangingTemplateId = ref<number | null>(null)
@@ -191,6 +206,7 @@ const userInitial = computed(() =>
   (authStore.user?.nickname || authStore.user?.username || 'U').charAt(0).toUpperCase()
 )
 
+// 会员等级配置，需与后端 UserProfile.MEMBER_THRESHOLDS / MEMBER_DISCOUNT_RATE / MEMBER_POINTS_MULTIPLIER 保持一致
 const levels = [
   { key: 'normal', name: '普通会员', threshold: 0, icon: '🌱', bg: 'bg-gray-100', gradient: 'bg-gradient-to-r from-gray-500 to-gray-600', discountRate: 1.00, discountText: '无折扣', multiplier: 1.0 },
   { key: 'silver', name: '银卡会员', threshold: 1000, icon: '🥈', bg: 'bg-gray-200', gradient: 'bg-gradient-to-r from-gray-400 to-gray-500', discountRate: 0.98, discountText: '98折', multiplier: 1.2 },
@@ -281,6 +297,7 @@ async function exchangeCoupon(tpl: any) {
     showToast(`积分不足，需要 ${tpl.points_cost} 积分`, 'warning')
     return
   }
+  if (!await confirmDialog(`确定用 ${tpl.points_cost} 积分兑换「${tpl.name}」？`)) return
   exchangingTemplateId.value = tpl.id
   try {
     const res = await userCouponApi.claim(tpl.id)
@@ -312,5 +329,6 @@ onMounted(async () => {
     error.value = '积分记录加载失败，请稍后重试'
   }
   await loadExchangeTemplates()
+  pageLoading.value = false
 })
 </script>

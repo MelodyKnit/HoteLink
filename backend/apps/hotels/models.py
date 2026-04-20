@@ -38,7 +38,7 @@ class Hotel(models.Model):
     tags = models.JSONField(default=list, blank=True, help_text="自定义标签，如 ['免费取消','含早','近地铁']")
     latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
-    is_recommended = models.BooleanField(default=False)
+    is_recommended = models.BooleanField(default=False, db_index=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_DRAFT, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -94,6 +94,9 @@ class RoomType(models.Model):
         ordering = ["-id"]
         constraints = [
             models.UniqueConstraint(fields=["hotel", "name"], name="uniq_room_type_name_per_hotel"),
+        ]
+        indexes = [
+            models.Index(fields=["hotel", "status"], name="idx_roomtype_hotel_status"),
         ]
 
     def __str__(self) -> str:

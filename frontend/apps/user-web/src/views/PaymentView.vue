@@ -55,6 +55,9 @@
         <p v-else-if="countdown <= 0 && !isPaid && !loading" class="mt-3 text-center text-xs text-red-500">
           支付时间已过期，订单可能已被自动取消，请返回订单列表查看
         </p>
+        <div v-if="countdown <= 0 && !isPaid && !loading" class="mt-3 text-center">
+          <router-link to="/my/orders" class="inline-block rounded-full bg-brand px-5 py-2 text-sm text-white hover:bg-brand-dark">返回订单列表</router-link>
+        </div>
 
         <!-- Pay button -->
         <div class="sticky bottom-16 mt-6 md:bottom-0">

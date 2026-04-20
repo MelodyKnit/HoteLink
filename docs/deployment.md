@@ -1,6 +1,6 @@
 # HoteLink 部署说明（源码对齐版）
 
-> 更新时间：2026-04-16  
+> 更新时间：2026-04-20  
 > 仅记录仓库中已存在且可执行的部署能力
 
 ## 1. 相关文件
@@ -128,6 +128,8 @@ python manage.py runserver
 python manage.py test apps.api.tests
 ```
 
+> 当前测试覆盖：7 个测试类，共 85 个测试用例。
+
 ### 6.2 前端
 
 ```bash
@@ -174,6 +176,7 @@ python scripts/generate/import_hotels_from_dist_images.py --count 200 --images-d
 - 默认启用 HSTS、`Referrer-Policy`、`X-Frame-Options`、`nosniff`
 - JWT 刷新默认开启轮换与黑名单，部署后需执行迁移以创建 `token_blacklist` 表
 - DRF 已启用全局限流，并对登录、刷新、上传、AI 接口配置更严格速率
+- 当前限流速率（可通过 `API_THROTTLE_*` 环境变量覆盖）：`anon` 600/min、`user` 1500/min、`auth_login` 15/min、`auth_register` 9/min、`auth_refresh` 100/min、`auth_logout` 150/min、`system_init` 15/hour、`upload` 100/hour、`ai_user` 150/hour、`ai_admin` 300/hour
 
 ### 9.2 网关
 

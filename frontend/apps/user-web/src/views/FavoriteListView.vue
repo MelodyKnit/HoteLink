@@ -1,7 +1,7 @@
 <template>
   <div class="min-h-screen bg-gray-50">
     <header class="sticky top-0 z-40 flex h-14 items-center border-b border-gray-100 bg-white/95 px-4 backdrop-blur">
-      <button @click="$router.back()" class="mr-3 rounded-lg p-1 text-gray-600 hover:bg-gray-100">← 返回</button>
+      <button @click="goBack()" class="mr-3 rounded-lg p-1 text-gray-600 hover:bg-gray-100">← 返回</button>
       <h1 class="text-sm font-semibold text-gray-800">我的收藏</h1>
     </header>
 
@@ -22,7 +22,8 @@
         <div v-for="hotel in hotels" :key="hotel.id"
           class="flex gap-3 overflow-hidden rounded-2xl bg-white p-3 shadow-sm">
           <router-link :to="`/hotels/${hotel.id}`" class="h-24 w-28 flex-shrink-0 overflow-hidden rounded-xl">
-            <img :src="hotel.cover_thumb || hotel.cover || 'https://placehold.co/280x240/0f766e/white?text=Hotel'" class="h-full w-full object-cover" loading="lazy" decoding="async" />
+            <img v-if="hotel.cover_thumb || hotel.cover" :src="hotel.cover_thumb || hotel.cover" class="h-full w-full object-cover" loading="lazy" decoding="async" />
+            <div v-else class="flex h-full w-full items-center justify-center bg-gray-100 text-3xl">🏨</div>
           </router-link>
           <div class="flex flex-1 flex-col justify-between">
             <div>
@@ -52,9 +53,16 @@ import { ref, onMounted } from 'vue'
 import { userFavoriteApi } from '@hotelink/api'
 import { buildImageThumbUrl } from '@hotelink/utils'
 import { useToast, useConfirm } from '@hotelink/ui'
+import { useRouter } from 'vue-router'
 
 const { showToast } = useToast()
 const { confirm: confirmDialog } = useConfirm()
+const router = useRouter()
+
+function goBack() {
+  if (window.history.length > 1) router.back()
+  else router.push('/my')
+}
 
 const loading = ref(true)
 const hotels = ref<any[]>([])

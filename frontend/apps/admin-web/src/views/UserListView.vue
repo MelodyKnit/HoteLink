@@ -81,7 +81,7 @@
       </div>
       <template #footer>
         <button class="rounded-lg border border-slate-200 px-4 py-2 text-sm hover:bg-slate-50" @click="showEdit = false">取消</button>
-        <button class="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700" @click="handleEdit">保存</button>
+        <button class="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-60" :disabled="editSaving" @click="handleEdit">{{ editSaving ? '保存中…' : '保存' }}</button>
       </template>
     </ModalDialog>
   </section>
@@ -137,15 +137,22 @@ function onTableSortChange(nextOrdering: string) {
 // 加载 List 相关数据。
 async function loadList() {
   loading.value = true
-  const params: Record<string, unknown> = { page: page.value, page_size: pageSize.value, ordering: ordering.value }
-  if (keyword.value) params.keyword = keyword.value
-  const res = await userApi.list(params)
-  if (res.code === 0 && res.data) {
-    const d = res.data as unknown as { items: Record<string, unknown>[]; total: number }
-    list.value = d.items || []
-    total.value = d.total || 0
+  try {
+    const params: Record<string, unknown> = { page: page.value, page_size: pageSize.value, ordering: ordering.value }
+    if (keyword.value) params.keyword = keyword.value
+    const res = await userApi.list(params)
+    if (res.code === 0 && res.data) {
+      const d = res.data as unknown as { items: Record<string, unknown>[]; total: number }
+      list.value = d.items || []
+      total.value = d.total || 0
+    } else {
+      showToast(res.message || '用户列表加载失败', 'error')
+    }
+  } catch {
+    showToast('用户列表加载失败', 'error')
+  } finally {
+    loading.value = false
   }
-  loading.value = false
 }
 
 // 处理 changeStatus 业务流程。
@@ -166,6 +173,7 @@ async function changeStatus(row: Record<string, unknown>, status: string) {
 }
 
 const showEdit = ref(false)
+const editSaving = ref(false)
 const editForm = reactive({ user_id: 0, nickname: '', mobile: '', member_level: 'normal' })
 
 function openEdit(row: Record<string, unknown>) {
@@ -177,6 +185,11 @@ function openEdit(row: Record<string, unknown>) {
 }
 
 async function handleEdit() {
+  if (editForm.mobile && !/^\d{11}$/.test(editForm.mobile)) {
+    showToast('请输入有效的 11 位手机号', 'warning')
+    return
+  }
+  editSaving.value = true
   try {
     const res = await userApi.update(editForm)
     if (res.code === 0) {
@@ -192,6 +205,8 @@ async function handleEdit() {
     }
   } catch {
     showToast('更新失败，请重试', 'error')
+  } finally {
+    editSaving.value = false
   }
 }
 

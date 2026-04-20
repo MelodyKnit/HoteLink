@@ -66,10 +66,12 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserAuthStore } from '@hotelink/store'
+import { useConfirm } from '@hotelink/ui'
 
 const auth = useUserAuthStore()
 const router = useRouter()
 const avatarError = ref(false)
+const { confirm: confirmDialog } = useConfirm()
 
 const memberLevelMap: Record<string, string> = {
   normal: '普通会员',
@@ -93,7 +95,8 @@ const menuItems = [
 ]
 
 // 处理 Logout 交互逻辑。
-function handleLogout() {
+async function handleLogout() {
+  if (!await confirmDialog('确定退出登录？')) return
   auth.logout()
   router.replace('/login')
 }

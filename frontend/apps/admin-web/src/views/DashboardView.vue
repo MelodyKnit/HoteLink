@@ -2,20 +2,30 @@
   <section class="space-y-6">
     <PageHeader title="工作台" subtitle="今日运营概览" />
 
-    <!-- Stats Cards -->
-    <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      <StatCard title="今日订单" :value="overview.today_order_count" icon="📋" />
-      <StatCard title="今日入住" :value="overview.today_check_in_count" icon="🛎️" />
-      <StatCard title="今日退房" :value="overview.today_check_out_count" icon="🚪" />
-      <StatCard title="当前入住率" :value="`${overview.occupancy_rate}%`" icon="📊" />
-    </div>
+    <template v-if="dashLoading">
+      <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div v-for="i in 4" :key="i" class="h-24 animate-pulse rounded-xl bg-slate-100"></div>
+      </div>
+      <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div v-for="i in 4" :key="i" class="h-24 animate-pulse rounded-xl bg-slate-100"></div>
+      </div>
+    </template>
+    <template v-else>
+      <!-- Stats Cards -->
+      <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard title="今日订单" :value="overview.today_order_count" icon="📋" />
+        <StatCard title="今日入住" :value="overview.today_check_in_count" icon="🛎️" />
+        <StatCard title="今日退房" :value="overview.today_check_out_count" icon="🚪" />
+        <StatCard title="当前入住率" :value="`${overview.occupancy_rate}%`" icon="📊" />
+      </div>
 
-    <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      <StatCard title="今日营收" :value="`¥${formatMoney(overview.today_revenue)}`" icon="💰" />
-      <StatCard title="本月营收" :value="`¥${formatMoney(overview.month_revenue)}`" icon="📈" />
-      <StatCard title="待回复评价" :value="overview.pending_review_count" icon="⭐" />
-      <StatCard title="待处理报表" :value="overview.pending_report_task_count" icon="📄" />
-    </div>
+      <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard title="今日营收" :value="`¥${formatMoney(overview.today_revenue)}`" icon="💰" />
+        <StatCard title="本月营收" :value="`¥${formatMoney(overview.month_revenue)}`" icon="📈" />
+        <StatCard title="待回复评价" :value="overview.pending_review_count" icon="⭐" />
+        <StatCard title="待处理报表" :value="overview.pending_report_task_count" icon="📄" />
+      </div>
+    </template>
 
     <!-- Charts -->
     <div class="flex items-center justify-between">
@@ -57,7 +67,9 @@ import { ref, reactive, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import * as echarts from 'echarts'
 import { dashboardApi } from '@hotelink/api'
 import { formatMoney, formatDate } from '@hotelink/utils'
-import { StatCard, PageHeader, SelectField } from '@hotelink/ui'
+import { StatCard, PageHeader, SelectField, useToast } from '@hotelink/ui'
+
+const { showToast } = useToast()
 
 const overview = reactive({
   today_order_count: 0,
@@ -70,6 +82,7 @@ const overview = reactive({
   pending_report_task_count: 0,
 })
 
+const dashLoading = ref(true)
 const dateRange = ref('7')
 const revenueChartRef = ref<HTMLElement>()
 const orderChartRef = ref<HTMLElement>()
@@ -79,12 +92,17 @@ let orderChart: echarts.ECharts | null = null
 
 // 加载 Overview 相关数据。
 async function loadOverview() {
-  const res = await dashboardApi.overview()
-  if (res.code === 0 && res.data) Object.assign(overview, res.data)
+  try {
+    const res = await dashboardApi.overview()
+    if (res.code === 0 && res.data) Object.assign(overview, res.data)
+  } catch {
+    showToast('仪表盘数据加载失败', 'error')
+  }
 }
 
 // 加载 Charts 相关数据。
 async function loadCharts() {
+  try {
   const end = new Date()
   const start = new Date()
   start.setDate(end.getDate() - parseInt(dateRange.value) + 1)
@@ -122,17 +140,21 @@ async function loadCharts() {
       yAxis: { type: 'value', minInterval: 1 },
       series: [{ name: '订单量', type: 'bar', data: orders, itemStyle: { color: '#14b8a6', borderRadius: [4, 4, 0, 0] } }],
     })
-  }
-}
+  }  } catch {
+    showToast('图表数据加载失败', 'error')
+  }}
 
 function handleResize() {
   revenueChart?.resize()
   orderChart?.resize()
 }
 
-onMounted(() => {
-  loadOverview()
-  loadCharts()
+onMounted(async () => {
+  try {
+    await Promise.all([loadOverview(), loadCharts()])
+  } finally {
+    dashLoading.value = false
+  }
   window.addEventListener('resize', handleResize)
 })
 

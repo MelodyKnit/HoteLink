@@ -297,10 +297,12 @@
 import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { userOrderApi } from '@hotelink/api'
+import { useToast } from '@hotelink/ui'
 import { ORDER_STATUS_MAP, PAYMENT_STATUS_MAP, formatMoney } from '@hotelink/utils'
 
 const route = useRoute()
 const router = useRouter()
+const { showToast } = useToast()
 const loading = ref(true)
 const orders = ref<any[]>([])
 const page = ref(1)
@@ -532,10 +534,15 @@ async function fetchOrders(syncQuery = false) {
     if (res.code === 0 && res.data) {
       orders.value = (res.data as any).items || []
       total.value = (res.data as any).total || 0
+    } else {
+      orders.value = []
+      total.value = 0
+      showToast(res.message || '订单加载失败', 'error')
     }
   } catch {
     orders.value = []
     total.value = 0
+    showToast('订单加载失败，请检查网络', 'error')
   } finally {
     loading.value = false
   }

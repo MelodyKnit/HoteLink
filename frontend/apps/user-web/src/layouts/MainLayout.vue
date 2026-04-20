@@ -42,7 +42,7 @@
     </main>
 
     <!-- Bottom tab bar (mobile only) -->
-    <nav class="mobile-tabbar fixed inset-x-0 bottom-0 z-40 md:hidden">
+    <nav class="mobile-tabbar fixed inset-x-0 bottom-0 z-40 md:hidden" role="navigation" aria-label="主导航">
       <div class="relative flex h-16 items-stretch">
         <!-- Active indicator pill -->
         <div

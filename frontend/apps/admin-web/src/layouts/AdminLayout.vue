@@ -74,12 +74,15 @@
 import { ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@hotelink/store'
+import { useConfirm } from '@hotelink/ui'
 
 const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
 const sidebarOpen = ref(false)
 const sidebarAvatarError = ref(false)
+
+const { confirm: confirmDialog } = useConfirm()
 
 const isSystemAdmin = computed(() => auth.user?.role === 'system_admin')
 
@@ -97,7 +100,8 @@ function isActive(path: string): boolean {
 }
 
 // 处理 Logout 交互逻辑。
-function handleLogout() {
+async function handleLogout() {
+  if (!await confirmDialog('确定退出登录？')) return
   auth.logout()
   router.push('/admin/login')
 }

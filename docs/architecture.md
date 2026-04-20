@@ -1,6 +1,6 @@
 # HoteLink 技术架构（源码对齐版）
 
-> 更新时间：2026-04-17  
+> 更新时间：2026-04-20  
 > 若与其他文档冲突，请优先参考 [`source-of-truth.md`](./source-of-truth.md)
 
 ## 1. 总体架构
@@ -50,7 +50,7 @@
 
 - 路由总数：`114`（含 `/api/v1/` 根路由）
 - View 类：`98`
-- Serializer 类：`73`
+- Serializer 类：`74`（新增 `UserBookingOrderSerializer`）
 - 业务模型：`22`
 
 ### 3.2 前端
@@ -74,13 +74,13 @@
 
 ### 4.2 hotels
 
-- `Hotel`（含 `type` 字段区分酒店/民宿/短租，`facilities` JSON 设施列表，`tags` JSON 标签列表）
-- `RoomType`
+- `Hotel`（含 `type` 字段区分酒店/民宿/短租，`facilities` JSON 设施列表，`tags` JSON 标签列表；`is_recommended` 字段已加 `db_index`）
+- `RoomType`（已添加 `hotel` + `name` 复合索引）
 - `RoomInventory`
 
 ### 4.3 bookings
 
-- `BookingOrder`
+- `BookingOrder`（新增 `PAYMENT_REFUNDING` 退款中状态；`created_at` 已加 `db_index`）
 
 ### 4.4 payments
 
@@ -90,7 +90,7 @@
 
 - `CustomerProfile`
 - `FavoriteHotel`
-- `Review`
+- `Review`（新增 `is_visible` 字段，管理端可控制评价可见性）
 - `PointsLog`
 - `CouponTemplate`
 - `UserCoupon`
@@ -141,6 +141,16 @@ Celery 不仅“框架就绪”，而且已有任务落地：
 - 单订单超时取消
 - 批量超时订单巡检
 - 订单生命周期异常巡检（自动完结/标记异常）
+- `sweep_expired_coupons`（每 6 小时巡检过期优惠券，自动标记为 expired）
+
+### 5.5 缓存与性能优化
+
+- `AdminDashboardOverview`：30 s Django cache
+- `CommonCitiesView`：10 min Django cache
+- `PublicHomeView`：2 min Django cache
+- 订单列表视图使用 `_has_review=Count("review")` annotation 避免 N+1
+- 通知列表使用 `select_related("related_order")` 避免额外查询
+- 库存批量更新使用 `bulk_update` 减少数据库写入次数
 
 ---
 

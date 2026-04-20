@@ -290,6 +290,10 @@ class UserApiTests(ApiBaseTestCase):
         self.assertEqual(coupons_response.status_code, 200)
         self.assertGreaterEqual(coupons_response.json()["data"]["total"], 1)
 
+        BookingOrder.objects.filter(id=self.order.id).update(
+            status=BookingOrder.STATUS_PAID,
+            payment_status=BookingOrder.PAYMENT_PAID,
+        )
         invoice_apply = self.client.post(
             "/api/v1/user/invoices/apply",
             {"order_id": self.order.id, "invoice_title_id": self.invoice_title.id},
@@ -1397,3 +1401,623 @@ class AdminApiTests(ApiBaseTestCase):
         self.assertEqual(log.status, AICallLog.STATUS_SUCCESS)
         self.assertEqual(log.provider, "testprovider")
         self.assertEqual(log.model, "test-chat-model")
+
+
+class PublicApiExtendedTests(ApiBaseTestCase):
+    """公共接口扩展测试集合。"""
+
+    def test_hotel_detail_should_return_online_room_types(self):
+        """验证酒店详情返回在线房型信息。"""
+        response = self.client.get("/api/v1/public/hotels/detail", {"hotel_id": self.hotel.id})
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertEqual(data["id"], self.hotel.id)
+        self.assertEqual(data["name"], self.hotel.name)
+        self.assertTrue(len(data["room_types"]) >= 1)
+
+    def test_hotel_detail_should_reject_missing_id(self):
+        """验证缺少 hotel_id 参数返回 400。"""
+        response = self.client.get("/api/v1/public/hotels/detail")
+        self.assertEqual(response.status_code, 400)
+
+    def test_hotel_detail_should_reject_offline_hotel(self):
+        """验证非上线状态酒店返回 404。"""
+        offline_hotel = Hotel.objects.create(
+            name="下线酒店", city="测试", address="测试地址", star=3,
+            phone="010-00000000", description="已下线", rating=Decimal("3.0"),
+            min_price=Decimal("100.00"), status=Hotel.STATUS_DRAFT,
+        )
+        response = self.client.get("/api/v1/public/hotels/detail", {"hotel_id": offline_hotel.id})
+        self.assertEqual(response.status_code, 404)
+
+    def test_hotel_reviews_should_return_visible_only(self):
+        """验证公开评价列表只返回可见评价。"""
+        completed_order = BookingOrder.objects.create(
+            user=self.user, hotel=self.hotel, room_type=self.room_type,
+            order_no="HTREV0001", status=BookingOrder.STATUS_COMPLETED,
+            payment_status=BookingOrder.PAYMENT_PAID,
+            check_in_date=timezone.localdate() - timedelta(days=3),
+            check_out_date=timezone.localdate() - timedelta(days=1),
+            guest_name="张三", guest_mobile="13800138000", guest_count=2,
+            original_amount=Decimal("798.00"), discount_amount=Decimal("0.00"),
+            pay_amount=Decimal("798.00"),
+        )
+        Review.objects.create(
+            user=self.user, order=completed_order, hotel=self.hotel,
+            score=5, content="非常好", is_visible=True,
+        )
+        hidden_order = BookingOrder.objects.create(
+            user=self.user, hotel=self.hotel, room_type=self.room_type,
+            order_no="HTREV0002", status=BookingOrder.STATUS_COMPLETED,
+            payment_status=BookingOrder.PAYMENT_PAID,
+            check_in_date=timezone.localdate() - timedelta(days=6),
+            check_out_date=timezone.localdate() - timedelta(days=4),
+            guest_name="张三", guest_mobile="13800138000", guest_count=2,
+            original_amount=Decimal("798.00"), discount_amount=Decimal("0.00"),
+            pay_amount=Decimal("798.00"),
+        )
+        Review.objects.create(
+            user=self.user, order=hidden_order, hotel=self.hotel,
+            score=1, content="已隐藏", is_visible=False,
+        )
+        response = self.client.get("/api/v1/public/hotels/reviews", {"hotel_id": self.hotel.id})
+        self.assertEqual(response.status_code, 200)
+        items = response.json()["data"]["items"]
+        self.assertTrue(all(item["content"] != "已隐藏" for item in items))
+
+    def test_room_type_calendar_should_return_inventory(self):
+        """验证房型日历接口返回库存与价格信息。"""
+        start = timezone.localdate() + timedelta(days=1)
+        end = timezone.localdate() + timedelta(days=5)
+        response = self.client.get("/api/v1/public/room-types/calendar", {
+            "room_type_id": self.room_type.id,
+            "start_date": str(start),
+            "end_date": str(end),
+        })
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertEqual(data["room_type_id"], self.room_type.id)
+        self.assertTrue(len(data["calendar"]) > 0)
+
+    def test_room_type_calendar_should_reject_over_90_days(self):
+        """验证日历范围超 90 天返回 400。"""
+        start = timezone.localdate()
+        end = start + timedelta(days=100)
+        response = self.client.get("/api/v1/public/room-types/calendar", {
+            "room_type_id": self.room_type.id,
+            "start_date": str(start),
+            "end_date": str(end),
+        })
+        self.assertEqual(response.status_code, 400)
+
+    def test_register_and_login_flow(self):
+        """验证用户注册与登录流程。"""
+        reg = self.client.post("/api/v1/public/auth/register", {
+            "username": "newuser", "password": "HoteLink#Reg123",
+            "confirm_password": "HoteLink#Reg123", "mobile": "13900130001",
+        }, format="json")
+        self.assertEqual(reg.status_code, 200)
+
+        login = self.client.post("/api/v1/public/auth/login", {
+            "username": "newuser", "password": "HoteLink#Reg123",
+        }, format="json")
+        self.assertEqual(login.status_code, 200)
+        self.assertIn("access_token", login.json()["data"])
+
+    def test_register_duplicate_username_should_fail(self):
+        """验证重复用户名注册返回冲突。"""
+        reg = self.client.post("/api/v1/public/auth/register", {
+            "username": "zhangsan", "password": "HoteLink#Dup123", "mobile": "13900130002",
+        }, format="json")
+        self.assertIn(reg.status_code, [400, 409])
+
+
+class UserApiExtendedTests(ApiBaseTestCase):
+    """用户端接口扩展测试集合。"""
+
+    def test_auth_me_should_return_profile(self):
+        """验证 /user/auth/me 返回当前用户资料。"""
+        self.login_user()
+        response = self.client.get("/api/v1/user/auth/me")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertEqual(data["username"], "zhangsan")
+        self.assertEqual(data["role"], "user")
+        self.assertIn("member_level", data)
+        self.assertIn("points", data)
+
+    def test_profile_get_and_update(self):
+        """验证用户资料读取与更新。"""
+        self.login_user()
+        get_resp = self.client.get("/api/v1/user/profile")
+        self.assertEqual(get_resp.status_code, 200)
+        self.assertEqual(get_resp.json()["data"]["nickname"], "张三")
+
+        update_resp = self.client.post("/api/v1/user/profile/update", {
+            "nickname": "张三改名",
+        }, format="json")
+        self.assertEqual(update_resp.status_code, 200)
+        self.assertEqual(update_resp.json()["data"]["nickname"], "张三改名")
+
+    def test_order_detail_should_return_own_order(self):
+        """验证用户可查看自己的订单详情。"""
+        self.login_user()
+        response = self.client.get("/api/v1/user/orders/detail", {"order_id": self.order.id})
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertEqual(data["id"], self.order.id)
+        self.assertEqual(data["order_no"], "HTTEST0001")
+        self.assertNotIn("operator_remark", data)
+        self.assertNotIn("lifecycle_warning", data)
+
+    def test_order_detail_should_reject_other_user_order(self):
+        """验证用户不能查看他人订单。"""
+        self.login_user()
+        other_user = User.objects.create_user(username="otheruser", password="Password123")
+        other_order = BookingOrder.objects.create(
+            user=other_user, hotel=self.hotel, room_type=self.room_type,
+            order_no="HTOTHER0001", status=BookingOrder.STATUS_PENDING_PAYMENT,
+            payment_status=BookingOrder.PAYMENT_UNPAID,
+            check_in_date=timezone.localdate() + timedelta(days=1),
+            check_out_date=timezone.localdate() + timedelta(days=3),
+            guest_name="他人", guest_mobile="13100131000", guest_count=1,
+            original_amount=Decimal("798.00"), discount_amount=Decimal("0.00"),
+            pay_amount=Decimal("798.00"),
+        )
+        response = self.client.get("/api/v1/user/orders/detail", {"order_id": other_order.id})
+        self.assertEqual(response.status_code, 404)
+
+    def test_order_cancel_should_restore_inventory_and_coupon(self):
+        """验证取消已支付订单会归还库存和优惠券。"""
+        self.login_user()
+        create_resp = self.client.post("/api/v1/user/orders/create", {
+            "hotel_id": self.hotel.id,
+            "room_type_id": self.room_type.id,
+            "check_in_date": str(timezone.localdate() + timedelta(days=2)),
+            "check_out_date": str(timezone.localdate() + timedelta(days=4)),
+            "guest_name": "取消测试", "guest_mobile": "13900139001", "guest_count": 1,
+        }, format="json")
+        self.assertEqual(create_resp.status_code, 200)
+        order_id = create_resp.json()["data"]["order_id"]
+
+        self.client.post("/api/v1/user/orders/pay", {
+            "order_id": order_id, "payment_method": "mock",
+        }, format="json")
+
+        inv_before = RoomInventory.objects.get(
+            room_type=self.room_type,
+            date=timezone.localdate() + timedelta(days=2),
+        )
+        stock_before = inv_before.stock
+
+        cancel_resp = self.client.post("/api/v1/user/orders/cancel", {
+            "order_id": order_id, "reason": "测试取消",
+        }, format="json")
+        self.assertEqual(cancel_resp.status_code, 200)
+        self.assertEqual(cancel_resp.json()["data"]["status"], "cancelled")
+
+        inv_before.refresh_from_db()
+        self.assertEqual(inv_before.stock, stock_before + 1)
+
+    def test_order_cancel_completed_order_should_fail(self):
+        """验证已完成订单不可取消。"""
+        self.login_user()
+        BookingOrder.objects.filter(id=self.order.id).update(
+            status=BookingOrder.STATUS_COMPLETED,
+            payment_status=BookingOrder.PAYMENT_PAID,
+        )
+        cancel_resp = self.client.post("/api/v1/user/orders/cancel", {
+            "order_id": self.order.id, "reason": "试试",
+        }, format="json")
+        self.assertEqual(cancel_resp.status_code, 409)
+
+    def test_favorites_add_list_remove(self):
+        """验证收藏酒店的添加、列表、取消收藏流程。"""
+        self.login_user()
+        add_resp = self.client.post("/api/v1/user/favorites/add", {
+            "hotel_id": self.hotel.id,
+        }, format="json")
+        self.assertEqual(add_resp.status_code, 200)
+
+        list_resp = self.client.get("/api/v1/user/favorites")
+        self.assertEqual(list_resp.status_code, 200)
+        self.assertGreaterEqual(list_resp.json()["data"]["total"], 1)
+
+        remove_resp = self.client.post("/api/v1/user/favorites/remove", {
+            "hotel_id": self.hotel.id,
+        }, format="json")
+        self.assertEqual(remove_resp.status_code, 200)
+
+        list_after = self.client.get("/api/v1/user/favorites")
+        self.assertEqual(list_after.json()["data"]["total"], 0)
+
+    def test_review_create_should_award_points(self):
+        """验证创建评价后会根据内容质量奖励积分。"""
+        self.login_user()
+        completed_order = BookingOrder.objects.create(
+            user=self.user, hotel=self.hotel, room_type=self.room_type,
+            order_no="HTREVIEW0001", status=BookingOrder.STATUS_COMPLETED,
+            payment_status=BookingOrder.PAYMENT_PAID,
+            check_in_date=timezone.localdate() - timedelta(days=3),
+            check_out_date=timezone.localdate() - timedelta(days=1),
+            guest_name="张三", guest_mobile="13800138000", guest_count=2,
+            original_amount=Decimal("798.00"), discount_amount=Decimal("0.00"),
+            pay_amount=Decimal("798.00"),
+        )
+        long_content = "这家酒店环境非常好，服务态度也很棒，" * 5  # > 50 chars
+        response = self.client.post("/api/v1/user/reviews/create", {
+            "order_id": completed_order.id,
+            "score": 5,
+            "content": long_content,
+        }, format="json")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertIn("review_id", data)
+        self.assertGreaterEqual(data.get("points_awarded", 0), 0)
+
+    def test_review_create_on_non_completed_order_should_fail(self):
+        """验证未完成的订单不能评价。"""
+        self.login_user()
+        response = self.client.post("/api/v1/user/reviews/create", {
+            "order_id": self.order.id,
+            "score": 5,
+            "content": "不应该成功",
+        }, format="json")
+        self.assertIn(response.status_code, [403, 409])
+
+    def test_reviews_list_should_return_own_reviews(self):
+        """验证评价列表只返回自己的评价。"""
+        self.login_user()
+        completed_order = BookingOrder.objects.create(
+            user=self.user, hotel=self.hotel, room_type=self.room_type,
+            order_no="HTREVLIST0001", status=BookingOrder.STATUS_COMPLETED,
+            payment_status=BookingOrder.PAYMENT_PAID,
+            check_in_date=timezone.localdate() - timedelta(days=3),
+            check_out_date=timezone.localdate() - timedelta(days=1),
+            guest_name="张三", guest_mobile="13800138000", guest_count=2,
+            original_amount=Decimal("798.00"), discount_amount=Decimal("0.00"),
+            pay_amount=Decimal("798.00"),
+        )
+        Review.objects.create(
+            user=self.user, order=completed_order, hotel=self.hotel,
+            score=4, content="测试评价",
+        )
+        response = self.client.get("/api/v1/user/reviews")
+        self.assertEqual(response.status_code, 200)
+        items = response.json()["data"]["items"]
+        self.assertGreaterEqual(len(items), 1)
+        self.assertIn("reply_content", items[0])
+        self.assertIn("room_type_name", items[0])
+
+    def test_points_logs_should_return_current_points(self):
+        """验证积分日志返回当前积分和会员等级。"""
+        self.login_user()
+        response = self.client.get("/api/v1/user/points/logs")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertIn("current_points", data)
+        self.assertIn("member_level", data)
+
+    def test_notice_unread_count(self):
+        """验证未读通知数量接口。"""
+        self.login_user()
+        SystemNotice.objects.create(
+            user=self.user, notice_type=SystemNotice.TYPE_SYSTEM,
+            title="测试通知", content="内容", is_read=False,
+        )
+        response = self.client.get("/api/v1/user/notices/unread-count")
+        self.assertEqual(response.status_code, 200)
+        self.assertGreaterEqual(response.json()["data"]["unread_count"], 1)
+
+    def test_claim_coupon_flow(self):
+        """验证领取优惠券流程。"""
+        self.login_user()
+        from apps.crm.models import CouponTemplate
+        template = CouponTemplate.objects.create(
+            name="测试满减券", coupon_type="cash", amount=Decimal("30.00"),
+            min_amount=Decimal("200.00"), total_count=100, per_user_limit=2,
+            status="active", valid_start=timezone.localdate(),
+            valid_end=timezone.localdate() + timedelta(days=30),
+        )
+        response = self.client.post("/api/v1/user/coupons/claim", {
+            "template_id": template.id,
+        }, format="json")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["name"], "测试满减券")
+
+    def test_disabled_user_should_be_rejected(self):
+        """验证被禁用的用户无法访问受保护接口。"""
+        self.login_user()
+        UserProfile.objects.filter(user=self.user).update(status=UserProfile.STATUS_DISABLED)
+        response = self.client.get("/api/v1/user/auth/me")
+        self.assertIn(response.status_code, [401, 403])
+        UserProfile.objects.filter(user=self.user).update(status=UserProfile.STATUS_ACTIVE)
+
+    def test_guest_history_should_return_past_guests(self):
+        """验证入住人历史接口返回过往入住人信息。"""
+        self.login_user()
+        response = self.client.get("/api/v1/user/orders/guest-history")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertIn("items", data)
+
+
+class AdminApiExtendedTests(ApiBaseTestCase):
+    """管理端接口扩展测试集合。"""
+
+    def test_admin_check_out_completed_order(self):
+        """验证管理端办理退房流程。"""
+        self.login_admin()
+        BookingOrder.objects.filter(id=self.order.id).update(
+            status=BookingOrder.STATUS_CHECKED_IN,
+            payment_status=BookingOrder.PAYMENT_PAID,
+            room_no="1808",
+            check_in_date=timezone.localdate() - timedelta(days=2),
+            check_out_date=timezone.localdate(),
+        )
+        response = self.client.post("/api/v1/admin/orders/check-out", {
+            "order_id": self.order.id,
+        }, format="json")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["status"], "completed")
+
+    def test_admin_check_out_non_checked_in_should_validate(self):
+        """验证未入住订单的退房限制。"""
+        self.login_admin()
+        BookingOrder.objects.filter(id=self.order.id).update(
+            status=BookingOrder.STATUS_CANCELLED,
+            payment_status=BookingOrder.PAYMENT_UNPAID,
+        )
+        response = self.client.post("/api/v1/admin/orders/check-out", {
+            "order_id": self.order.id,
+        }, format="json")
+        self.assertEqual(response.status_code, 409)
+
+    def test_admin_extend_stay(self):
+        """验证续住功能（延长退房日期）。"""
+        self.login_admin()
+        new_checkout = timezone.localdate() + timedelta(days=5)
+        for day in range(3, 6):
+            RoomInventory.objects.get_or_create(
+                room_type=self.room_type,
+                date=timezone.localdate() + timedelta(days=day),
+                defaults={"price": Decimal("399.00"), "stock": 5, "status": "available"},
+            )
+        BookingOrder.objects.filter(id=self.order.id).update(
+            status=BookingOrder.STATUS_CHECKED_IN,
+            payment_status=BookingOrder.PAYMENT_PAID,
+            room_no="1808",
+        )
+        response = self.client.post("/api/v1/admin/orders/extend-stay", {
+            "order_id": self.order.id,
+            "new_check_out_date": str(new_checkout),
+        }, format="json")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["check_out_date"], str(new_checkout))
+
+    def test_admin_switch_room(self):
+        """验证管理端换房流程。"""
+        self.login_admin()
+        BookingOrder.objects.filter(id=self.order.id).update(
+            status=BookingOrder.STATUS_CHECKED_IN,
+            payment_status=BookingOrder.PAYMENT_PAID,
+            room_no="1808",
+        )
+        response = self.client.post("/api/v1/admin/orders/switch-room", {
+            "order_id": self.order.id,
+            "new_room_no": "2001",
+        }, format="json")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["room_no"], "2001")
+
+    def test_admin_switch_room_same_number_should_fail(self):
+        """验证换到相同房号应失败。"""
+        self.login_admin()
+        BookingOrder.objects.filter(id=self.order.id).update(
+            status=BookingOrder.STATUS_CHECKED_IN,
+            payment_status=BookingOrder.PAYMENT_PAID,
+            room_no="1808",
+        )
+        response = self.client.post("/api/v1/admin/orders/switch-room", {
+            "order_id": self.order.id,
+            "new_room_no": "1808",
+        }, format="json")
+        self.assertEqual(response.status_code, 409)
+
+    def test_admin_change_status_confirm_order(self):
+        """验证管理端确认订单状态变更。"""
+        self.login_admin()
+        BookingOrder.objects.filter(id=self.order.id).update(
+            status=BookingOrder.STATUS_PAID,
+            payment_status=BookingOrder.PAYMENT_PAID,
+        )
+        response = self.client.post("/api/v1/admin/orders/change-status", {
+            "order_id": self.order.id,
+            "target_status": "confirmed",
+        }, format="json")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["status"], "confirmed")
+
+    def test_admin_change_status_invalid_transition_should_fail(self):
+        """验证非法状态流转被拦截。"""
+        self.login_admin()
+        BookingOrder.objects.filter(id=self.order.id).update(
+            status=BookingOrder.STATUS_COMPLETED,
+            payment_status=BookingOrder.PAYMENT_PAID,
+        )
+        response = self.client.post("/api/v1/admin/orders/change-status", {
+            "order_id": self.order.id,
+            "target_status": "pending_payment",
+        }, format="json")
+        self.assertEqual(response.status_code, 409)
+
+    def test_admin_reviews_list_reply_and_toggle_visibility(self):
+        """验证管理端评价列表、回复、隐藏/显示切换。"""
+        self.login_admin()
+        completed_order = BookingOrder.objects.create(
+            user=self.user, hotel=self.hotel, room_type=self.room_type,
+            order_no="HTADMREV0001", status=BookingOrder.STATUS_COMPLETED,
+            payment_status=BookingOrder.PAYMENT_PAID,
+            check_in_date=timezone.localdate() - timedelta(days=3),
+            check_out_date=timezone.localdate() - timedelta(days=1),
+            guest_name="张三", guest_mobile="13800138000", guest_count=2,
+            original_amount=Decimal("798.00"), discount_amount=Decimal("0.00"),
+            pay_amount=Decimal("798.00"),
+        )
+        review = Review.objects.create(
+            user=self.user, order=completed_order, hotel=self.hotel,
+            score=4, content="服务不错",
+        )
+
+        list_resp = self.client.get("/api/v1/admin/reviews")
+        self.assertEqual(list_resp.status_code, 200)
+        self.assertGreaterEqual(list_resp.json()["data"]["total"], 1)
+
+        reply_resp = self.client.post("/api/v1/admin/reviews/reply", {
+            "review_id": review.id, "content": "感谢您的好评！",
+        }, format="json")
+        self.assertEqual(reply_resp.status_code, 200)
+        self.assertEqual(reply_resp.json()["data"]["reply_content"], "感谢您的好评！")
+
+        toggle_resp = self.client.post("/api/v1/admin/reviews/delete", {
+            "review_id": review.id,
+        }, format="json")
+        self.assertEqual(toggle_resp.status_code, 200)
+        self.assertFalse(toggle_resp.json()["data"]["is_visible"])
+
+        toggle_again = self.client.post("/api/v1/admin/reviews/delete", {
+            "review_id": review.id,
+        }, format="json")
+        self.assertEqual(toggle_again.status_code, 200)
+        self.assertTrue(toggle_again.json()["data"]["is_visible"])
+
+    def test_admin_users_list_and_keyword_search(self):
+        """验证管理端用户列表与关键词搜索。"""
+        self.login_admin()
+        response = self.client.get("/api/v1/admin/users", {"keyword": "张三"})
+        self.assertEqual(response.status_code, 200)
+        self.assertGreaterEqual(response.json()["data"]["total"], 1)
+
+    def test_admin_user_change_status_disable_and_enable(self):
+        """验证管理端禁用/启用用户。"""
+        self.login_admin()
+        target_user = User.objects.create_user(username="to_disable", password="Password123")
+        UserProfile.objects.create(
+            user=target_user, nickname="待禁用", role=UserProfile.ROLE_USER,
+            status=UserProfile.STATUS_ACTIVE,
+        )
+
+        disable_resp = self.client.post("/api/v1/admin/users/change-status", {
+            "user_id": target_user.id, "status": "disabled",
+        }, format="json")
+        self.assertEqual(disable_resp.status_code, 200)
+        self.assertEqual(disable_resp.json()["data"]["status"], "disabled")
+
+        enable_resp = self.client.post("/api/v1/admin/users/change-status", {
+            "user_id": target_user.id, "status": "active",
+        }, format="json")
+        self.assertEqual(enable_resp.status_code, 200)
+        self.assertEqual(enable_resp.json()["data"]["status"], "active")
+
+    def test_admin_cannot_disable_self(self):
+        """验证管理员不能禁用自己。"""
+        self.login_admin()
+        response = self.client.post("/api/v1/admin/users/change-status", {
+            "user_id": self.admin_user.id, "status": "disabled",
+        }, format="json")
+        self.assertEqual(response.status_code, 400)
+
+    def test_admin_user_update_member_level(self):
+        """验证管理端修改用户会员等级。"""
+        self.login_admin()
+        response = self.client.post("/api/v1/admin/users/update", {
+            "user_id": self.user.id,
+            "member_level": "platinum",
+        }, format="json")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["member_level"], "platinum")
+
+    def test_admin_coupon_template_create_and_list(self):
+        """验证管理端优惠券模板创建与列表。"""
+        self.login_admin()
+        create_resp = self.client.post("/api/v1/admin/coupons/create", {
+            "name": "管理员测试券",
+            "coupon_type": "cash",
+            "amount": "50.00",
+            "min_amount": "300.00",
+            "total_count": 200,
+            "per_user_limit": 1,
+            "valid_start": str(timezone.localdate()),
+            "valid_end": str(timezone.localdate() + timedelta(days=60)),
+        }, format="json")
+        self.assertEqual(create_resp.status_code, 200)
+        self.assertEqual(create_resp.json()["data"]["name"], "管理员测试券")
+
+        list_resp = self.client.get("/api/v1/admin/coupons")
+        self.assertEqual(list_resp.status_code, 200)
+        self.assertGreaterEqual(list_resp.json()["data"]["total"], 1)
+
+    def test_admin_dashboard_charts(self):
+        """验证管理端图表接口可正常返回。"""
+        self.login_admin()
+        response = self.client.get("/api/v1/admin/dashboard/charts")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["code"], 0)
+
+    def test_admin_members_overview(self):
+        """验证会员概览接口。"""
+        self.login_admin()
+        response = self.client.get("/api/v1/admin/members/overview")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["code"], 0)
+
+    def test_hotel_admin_cannot_create_coupon(self):
+        """验证酒店管理员不能创建优惠券模板。"""
+        self.login_hotel_admin()
+        response = self.client.post("/api/v1/admin/coupons/create", {
+            "name": "不应该成功",
+            "coupon_type": "cash",
+            "amount": "10.00",
+            "total_count": 10,
+            "valid_start": str(timezone.localdate()),
+            "valid_end": str(timezone.localdate() + timedelta(days=10)),
+        }, format="json")
+        self.assertEqual(response.status_code, 403)
+
+    def test_admin_user_reset_password(self):
+        """验证管理端重置用户密码，生成的随机密码可用于登录。"""
+        self.login_admin()
+        target_user = User.objects.create_user(username="reset_test", password="Password123")
+        UserProfile.objects.create(
+            user=target_user, nickname="重置密码", role=UserProfile.ROLE_USER,
+            status=UserProfile.STATUS_ACTIVE,
+        )
+        response = self.client.post("/api/v1/admin/users/reset-password", {
+            "user_id": target_user.id,
+        }, format="json")
+        self.assertEqual(response.status_code, 200)
+        new_password = response.json()["data"]["new_password"]
+        self.assertTrue(new_password)
+
+        login_resp = self.client.post("/api/v1/public/auth/login", {
+            "username": "reset_test", "password": new_password,
+        }, format="json")
+        self.assertEqual(login_resp.status_code, 200)
+
+    def test_admin_room_suggestions(self):
+        """验证智能房号推荐接口。"""
+        self.login_admin()
+        BookingOrder.objects.filter(id=self.order.id).update(
+            status=BookingOrder.STATUS_CHECKED_IN,
+            payment_status=BookingOrder.PAYMENT_PAID,
+            room_no="1808",
+        )
+        response = self.client.get("/api/v1/admin/orders/room-suggestions", {
+            "hotel_id": self.hotel.id,
+            "check_in": str(timezone.localdate() + timedelta(days=1)),
+            "check_out": str(timezone.localdate() + timedelta(days=3)),
+        })
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertIn("available", data)
+        self.assertIn("occupied", data)

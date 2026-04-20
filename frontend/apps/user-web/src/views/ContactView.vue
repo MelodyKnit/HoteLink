@@ -196,8 +196,9 @@ async function submitFeedback() {
   }
 
   submitting.value = true
-  await new Promise((resolve) => setTimeout(resolve, 1000))
-  showToast('感谢您的反馈！我们会认真处理。', 'success')
+  // TODO: 对接实际反馈 API，当前为前端演示。
+  await new Promise((resolve) => setTimeout(resolve, 800))
+  showToast('感谢您的反馈！我们已收到并会认真处理。', 'success')
   feedback.value = { type: '', content: '', contact: '' }
   errors.value = {}
   submitting.value = false

@@ -184,11 +184,12 @@ function onTaskTableSortChange(ordering: string) {
 
 // 加载 Charts 相关数据。
 async function loadCharts() {
-  const res = await dashboardApi.charts({ start_date: chartStart.value, end_date: chartEnd.value })
-  if (res.code !== 0 || !res.data) {
-    showToast(res.message || '图表数据加载失败', 'error')
-    return
-  }
+  try {
+    const res = await dashboardApi.charts({ start_date: chartStart.value, end_date: chartEnd.value })
+    if (res.code !== 0 || !res.data) {
+      showToast(res.message || '图表数据加载失败', 'error')
+      return
+    }
   const items = (res.data as Record<string, unknown>).items as { date: string; order_count: number; revenue: number }[]
   const dates = items.map(i => i.date)
   const revenues = items.map(i => i.revenue)
@@ -214,6 +215,9 @@ async function loadCharts() {
       series: [{ name: '订单数', type: 'bar', data: counts, itemStyle: { color: '#6366f1' } }],
       grid: { left: 50, right: 20, bottom: 30, top: 20 },
     })
+  }
+  } catch {
+    showToast('图表数据加载失败，请检查网络', 'error')
   }
 }
 
