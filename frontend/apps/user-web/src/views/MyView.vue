@@ -26,18 +26,14 @@
         <h3 class="font-semibold text-gray-800">我的订单</h3>
         <router-link to="/my/orders" class="text-xs text-brand hover:underline">全部 →</router-link>
       </div>
-      <div class="grid grid-cols-4 gap-2 text-center">
+      <div class="grid grid-cols-3 gap-2 text-center">
         <router-link to="/my/orders?status=pending_payment" class="rounded-xl py-3 transition hover:bg-gray-50">
           <p class="text-xl">💰</p>
           <p class="mt-1 text-xs text-gray-500">待支付</p>
         </router-link>
-        <router-link to="/my/orders?status=confirmed" class="rounded-xl py-3 transition hover:bg-gray-50">
+        <router-link to="/my/orders?status=paid,confirmed" class="rounded-xl py-3 transition hover:bg-gray-50">
           <p class="text-xl">📋</p>
           <p class="mt-1 text-xs text-gray-500">待入住</p>
-        </router-link>
-        <router-link to="/my/orders?status=checked_in" class="rounded-xl py-3 transition hover:bg-gray-50">
-          <p class="text-xl">🏨</p>
-          <p class="mt-1 text-xs text-gray-500">入住中</p>
         </router-link>
         <router-link to="/my/orders?status=completed" class="rounded-xl py-3 transition hover:bg-gray-50">
           <p class="text-xl">✅</p>
