@@ -83,7 +83,22 @@
           <p v-if="poiName && poiDistanceText" class="mt-2 rounded-lg bg-brand/10 px-3 py-2 text-xs text-brand">
             📍 距 {{ poiName }} 约 {{ poiDistanceText }} km（来自 AI 智能订房）
           </p>
-          <p v-if="hotel.description" class="mt-3 text-sm leading-relaxed text-gray-600">{{ hotel.description }}</p>
+          <div v-if="hotel.description" class="mt-3">
+            <p :class="[
+              'text-sm leading-relaxed text-gray-600 transition-all',
+              isDescriptionExpanded ? '' : 'line-clamp-2'
+            ]">
+              {{ hotel.description }}
+            </p>
+            <div v-if="isDescriptionTruncated" class="mt-2 flex justify-end">
+              <button
+                @click="isDescriptionExpanded = !isDescriptionExpanded"
+                class="text-xs font-medium text-brand hover:text-brand-dark transition"
+              >
+                {{ isDescriptionExpanded ? '收起' : '展开' }}
+              </button>
+            </div>
+          </div>
         </div>
 
         <!-- Map -->
@@ -293,6 +308,13 @@ const togglingFav = ref(false)
 const bookingLoading = ref<number | null>(null)
 const error = ref('')
 const bedTypeMap = BED_TYPE_MAP
+const isDescriptionExpanded = ref(false)
+
+const isDescriptionTruncated = computed(() => {
+  const desc = hotel.value?.description || ''
+  // 粗估计：每行约 45 个字符（中文），2 行约 90 个字符
+  return desc.length > 90
+})
 
 const poiName = computed(() => {
   const value = route.query.poi

@@ -3863,7 +3863,8 @@ class AdminAIReplySuggestionView(APIView):
                 status=AICallLog.STATUS_SUCCESS,
                 latency_ms=latency_ms,
             )
-            return api_response(data={"scene": "reply_suggestion", "suggestions": result})
+            result["scene"] = "reply_suggestion"
+            return api_response(data=result)
         except Exception as exc:
             record_ai_call_log(
                 user=request.user,
