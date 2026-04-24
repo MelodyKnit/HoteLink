@@ -590,32 +590,6 @@ sh ./scripts/docker.sh dev check
 
 - [`docs/frontend-system-design.md`](docs/frontend-system-design.md)
 
-## 论文对齐文档
-
-项目与毕业论文内容对齐说明见：
-
-- [`docs/thesis-alignment.md`](docs/thesis-alignment.md)
-
-## 毕设私密文件管理
-
-与毕业设计直接相关的私密原始材料，例如：
-
-- 论文正文源文件
-- 论文提取稿
-- 批注版文档
-- 答辩材料草稿
-
-统一放在项目根目录的 `private/` 下，例如：
-
-- `private/thesis/`
-
-安全约定：
-
-- `private/` 目录默认加入 `.gitignore`
-- 该目录中的内容不上传到 GitHub
-- 若后续新增毕设私密材料，也统一放入 `private/` 下管理
-- 公开文档中可以引用本地绝对路径，但不要把私密内容复制进公开仓库文档正文
-
 ## 文档维护约定
 
 - 新增模块、配置、部署方式、页面、AI 能力时，需要同步更新 `README.md` 与 `docs/` 下相关文档
@@ -624,7 +598,6 @@ sh ./scripts/docker.sh dev check
 - 页面与功能结构变更时，优先更新 [`docs/frontend-system-design.md`](docs/frontend-system-design.md)
 - 接口范围、字段和枚举变更时，优先更新 [`docs/api-spec.md`](docs/api-spec.md)
 - AI 相关配置、能力边界和安全规则变更时，优先更新 [`docs/ai-integration.md`](docs/ai-integration.md)
-- 与毕业论文主线范围或口径有关的变更时，优先更新 [`docs/thesis-alignment.md`](docs/thesis-alignment.md)
 
 ## 当前建议的下一步
 
@@ -632,5 +605,5 @@ sh ./scripts/docker.sh dev check
 2. 补齐管理端财务页面（财务总览、账单、支付记录、退款记录）
 3. 补齐管理端运营页面（通知中心、审计日志、角色权限）
 4. 管理端 AI 辅助接口接入真实 LLM 调用
-5. 生成 E-R 图用于论文
+5. 生成 E-R 图与模块关系图，补全文档可视化材料
 6. 详细功能规划见 [feature-improvements.md](docs/feature-improvements.md)，对应 API 设计见 [api-spec.md](docs/api-spec.md) §15-§16
