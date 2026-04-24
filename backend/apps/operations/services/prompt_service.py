@@ -75,18 +75,18 @@ class PromptTemplateService:
             raise PromptSceneError(f"prompt template not found: {template_name}") from exc
         return template.render(**context).strip()
 
-    def render_admin(self, scene: str, template_type: str, **context: Any) -> str:
+    def render_admin(self, scene_name: str, prompt_role: str, **context: Any) -> str:
         """渲染管理端或用户端 AI 场景模板。
 
         Args:
-            scene: 场景名称（如 report_summary / review_sentiment 等）
-            template_type: "system" 或 "user"
+            scene_name: 场景名称（如 report_summary / review_sentiment 等）
+            prompt_role: "system" 或 "user"
             **context: 模板变量
         """
         allowed = ADMIN_AI_SCENES | USER_AI_SCENES
-        if scene not in allowed:
-            raise PromptSceneError(f"unsupported admin AI scene: {scene}")
-        template_name = f"{scene}/{template_type}.j2"
+        if scene_name not in allowed:
+            raise PromptSceneError(f"unsupported admin AI scene: {scene_name}")
+        template_name = f"{scene_name}/{prompt_role}.j2"
         return self.render(template_name, **context)
 
     def dumps(self, payload: Any) -> str:

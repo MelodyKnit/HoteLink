@@ -1,5 +1,6 @@
 """apps/api/tests.py —— API 集成测试用例集合。"""
 
+import json
 from datetime import timedelta
 from decimal import Decimal
 from io import BytesIO
@@ -19,6 +20,7 @@ from apps.bookings.tasks import sweep_order_lifecycle_anomalies
 from apps.crm.models import ChatMessage, ChatSession, InvoiceTitle, Review, UserCoupon
 from apps.hotels.models import Hotel, RoomInventory, RoomType
 from apps.operations.models import AICallLog, SystemNotice
+from apps.operations.services.prompt_service import PromptTemplateService
 from apps.payments.models import PaymentRecord
 from apps.users.models import UserProfile
 from config.ai import _get_runtime_config_path
@@ -1740,6 +1742,44 @@ class UserApiExtendedTests(ApiBaseTestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()["data"]
         self.assertIn("items", data)
+
+    def test_prompt_template_render_admin_should_allow_scene_key_in_context(self):
+        """回归：recommendations 模板上下文包含 scene 时，不应触发参数冲突。"""
+        service = PromptTemplateService()
+        rendered = service.render_admin(
+            "recommendations",
+            "system",
+            user_profile_json="{}",
+            hotels_json="[]",
+            scene="home",
+            keyword="",
+            limit=6,
+        )
+        self.assertIn("场景：home", rendered)
+
+    def test_user_ai_recommendations_should_work_when_ai_available(self):
+        """回归：用户 AI 推荐在可用场景下应返回推荐结果，不应因 scene 参数冲突失败。"""
+        self.login_user()
+        ai_json = {
+            "recommended_ids": [self.hotel.id],
+            "reasons": {str(self.hotel.id): "匹配历史偏好"},
+        }
+        with patch("apps.api.views.AIChatService.is_available", return_value=True), patch(
+            "apps.api.views.AIChatService.create_chat_completion",
+            return_value={"content": json.dumps(ai_json, ensure_ascii=False)},
+        ):
+            response = self.client.post(
+                "/api/v1/user/ai/recommendations",
+                {"scene": "home", "limit": 3},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["code"], 0)
+        self.assertEqual(payload["data"]["scene"], "recommendations")
+        self.assertGreaterEqual(len(payload["data"]["recommendations"]), 1)
+        self.assertEqual(payload["data"]["recommendations"][0]["id"], self.hotel.id)
 
 
 class AdminApiExtendedTests(ApiBaseTestCase):
