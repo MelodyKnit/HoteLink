@@ -32,6 +32,33 @@ cd backend
 python manage.py check
 ```
 
+## Git 提交前检查
+
+项目已接入根目录 `pre-commit`，用于在本地提交和推送前做基础质量校验。
+
+安装与启用：
+
+```bash
+python -m pip install pre-commit
+pre-commit install
+pre-commit install --hook-type pre-push
+```
+
+默认行为：
+
+- `pre-commit` 阶段：检查 YAML / JSON / TOML 格式、尾随空格、文件结尾换行、合并冲突标记、大文件提交、行尾风格
+- `pre-push` 阶段：自动执行后端单元测试 `poetry run python manage.py test apps.api.tests -v 2`
+- `pre-push` 阶段：自动执行前端单元测试 `npm run test:unit:ci`
+
+手动执行：
+
+```bash
+pre-commit run --all-files
+pre-commit run --hook-stage pre-push --all-files
+```
+
+这样本地提交前能先挡住明显问题，推送到 GitHub 后再由 Actions 做一次完整兜底。
+
 ## 文档更新约定
 
 为保证“系统能力与文档一致”，后续开发默认执行以下约定：
