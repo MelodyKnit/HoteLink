@@ -644,10 +644,34 @@ class InvoiceApplySerializer(serializers.Serializer):
 class InvoiceRequestSerializer(serializers.ModelSerializer):
     """InvoiceRequest 序列化器：用于接口参数校验或响应数据转换。"""
     invoice_title = InvoiceTitleSerializer(read_only=True)
+    order_no = serializers.CharField(source="order.order_no", read_only=True)
+    amount = serializers.DecimalField(source="order.pay_amount", max_digits=10, decimal_places=2, read_only=True)
+    title = serializers.CharField(source="invoice_title.title", read_only=True)
+    invoice_type = serializers.CharField(source="invoice_title.invoice_type", read_only=True)
+    tax_no = serializers.CharField(source="invoice_title.tax_no", read_only=True)
+    email = serializers.EmailField(source="invoice_title.email", read_only=True)
+    status_label = serializers.SerializerMethodField()
+
+    def get_status_label(self, obj):
+        """Return the display label for an invoice request status."""
+        return dict(InvoiceRequest.STATUS_CHOICES).get(obj.status, obj.status)
 
     class Meta:
         model = InvoiceRequest
-        fields = ["id", "order_id", "status", "invoice_title", "created_at"]
+        fields = [
+            "id",
+            "order_id",
+            "order_no",
+            "amount",
+            "status",
+            "status_label",
+            "invoice_title",
+            "title",
+            "invoice_type",
+            "tax_no",
+            "email",
+            "created_at",
+        ]
 
 
 class UserCouponSerializer(serializers.ModelSerializer):

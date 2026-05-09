@@ -17,6 +17,34 @@ export interface PaginatedData<T = unknown> {
   total_pages: number
 }
 
+export interface InvoiceTitleItem {
+  id: number
+  invoice_type: 'personal' | 'company'
+  title: string
+  tax_no: string
+  email: string
+  created_at: string
+}
+
+export interface InvoiceRequestItem {
+  id: number
+  order_id: number
+  order_no: string
+  amount: string
+  status: 'pending' | 'issued' | 'cancelled'
+  status_label: string
+  invoice_title: InvoiceTitleItem
+  title: string
+  invoice_type: 'personal' | 'company'
+  tax_no: string
+  email: string
+  created_at: string
+}
+
+export type InvoiceCenterData = PaginatedData<InvoiceRequestItem> & {
+  titles: InvoiceTitleItem[]
+}
+
 const TOKEN_KEY_PREFIX = 'hotelink_access_token'
 const REFRESH_KEY_PREFIX = 'hotelink_refresh_token'
 
@@ -421,7 +449,7 @@ export const publicApi = {
   }>('/public/home'),
   hotels: (params?: Record<string, unknown>) => get<PaginatedData>('/public/hotels', params),
   searchSuggest: (keyword: string) => get<{ items: { label: string; type: string }[] }>('/public/hotels/search-suggest', { keyword }),
-  hotelDetail: (hotel_id: number) => get('/public/hotels/detail', { hotel_id }),
+  hotelDetail: (hotel_id: number, params?: { order_id?: number }) => get('/public/hotels/detail', { hotel_id, ...(params || {}) }),
   hotelReviews: (params: Record<string, unknown>) => get<PaginatedData>('/public/hotels/reviews', params),
   roomTypeCalendar: (params: { room_type_id: number; start_date: string; end_date: string }) =>
     get<{ room_type_id: number; calendar: { date: string; price: number; stock: number; status: string }[] }>('/public/room-types/calendar', params as Record<string, unknown>),
@@ -484,7 +512,7 @@ export const userCouponApi = {
 
 // ========== User Invoices ==========
 export const userInvoiceApi = {
-  list: () => get<PaginatedData>('/user/invoices'),
+  list: () => get<InvoiceCenterData>('/user/invoices'),
   createTitle: (data: { invoice_type: string; title: string; tax_no?: string; email: string }) =>
     post('/user/invoices/create', data),
   apply: (data: { order_id: number; invoice_title_id: number }) => post('/user/invoices/apply', data),

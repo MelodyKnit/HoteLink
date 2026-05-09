@@ -1,5 +1,6 @@
 .vscode/
 .idea/
+.codex/
 
 # Python
 __pycache__/

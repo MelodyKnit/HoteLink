@@ -25,7 +25,7 @@
             <div class="flex items-center gap-2">
               <button @click="openEditTitle(t)" class="text-xs text-brand hover:underline">编辑</button>
               <button @click="handleDeleteTitle(t)" class="text-xs text-red-500 hover:underline">删除</button>
-              <span class="rounded bg-brand/10 px-2 py-0.5 text-xs text-brand">{{ t.type === 'company' ? '企业' : '个人' }}</span>
+              <span class="rounded bg-brand/10 px-2 py-0.5 text-xs text-brand">{{ t.invoice_type === 'company' ? '企业' : '个人' }}</span>
             </div>
           </div>
         </div>
@@ -41,8 +41,8 @@
               <p class="text-xs text-gray-400">{{ inv.title }} · {{ inv.created_at }}</p>
             </div>
             <span class="rounded px-2 py-0.5 text-xs"
-              :class="inv.status === 'completed' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'">
-              {{ inv.status === 'completed' ? '已开具' : '处理中' }}
+              :class="inv.status === 'issued' ? 'bg-green-100 text-green-700' : inv.status === 'cancelled' ? 'bg-gray-100 text-gray-600' : 'bg-yellow-100 text-yellow-700'">
+              {{ inv.status_label || (inv.status === 'issued' ? '已开票' : inv.status === 'cancelled' ? '已取消' : '待处理') }}
             </span>
           </div>
         </div>
@@ -444,7 +444,7 @@ function validateEditTitleForm(): boolean {
 
 function openEditTitle(t: any) {
   editTitleForm.title_id = t.id
-  editTitleForm.invoice_type = t.type === 'company' ? 'company' : 'personal'
+  editTitleForm.invoice_type = t.invoice_type === 'company' ? 'company' : 'personal'
   editTitleForm.title = t.title || ''
   editTitleForm.tax_no = t.tax_no || ''
   editTitleForm.email = t.email || ''
@@ -497,15 +497,15 @@ onMounted(async () => {
     const res = await userInvoiceApi.list()
     if (res.code === 0 && res.data) {
       titles.value = (res.data as any).titles || []
-      invoices.value = (res.data as any).invoices || []
+      invoices.value = (res.data as any).items || []
     }
   } catch {
     titles.value = [
-      { id: 1, title: '个人', type: 'personal', tax_no: '' },
-      { id: 2, title: '某某科技有限公司', type: 'company', tax_no: '91110000MA00XXXXX' },
+      { id: 1, title: '个人', invoice_type: 'personal', tax_no: '' },
+      { id: 2, title: '某某科技有限公司', invoice_type: 'company', tax_no: '91110000MA00XXXXX' },
     ]
     invoices.value = [
-      { id: 1, amount: '688.00', title: '个人', status: 'completed', created_at: '2026-03-25' },
+      { id: 1, amount: '688.00', title: '个人', status: 'issued', status_label: '已开票', created_at: '2026-03-25' },
     ]
   } finally {
     pageLoading.value = false

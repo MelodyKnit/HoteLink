@@ -141,11 +141,12 @@ onMounted(async () => {
   try {
     const res = await userOrderApi.detail(orderId)
     if (res.code === 0 && res.data) {
-      order.value = res.data
+      const detail = res.data as Record<string, unknown> & { created_at?: string }
+      order.value = detail
       // 根据订单创建时间计算剩余支付时间（默认 30 分钟）
       const cancelMinutes = 30
-      if (res.data.created_at) {
-        const createdTime = new Date(res.data.created_at).getTime()
+      if (detail.created_at) {
+        const createdTime = new Date(detail.created_at).getTime()
         const deadline = createdTime + cancelMinutes * 60 * 1000
         const remaining = Math.max(0, Math.floor((deadline - Date.now()) / 1000))
         countdown.value = remaining

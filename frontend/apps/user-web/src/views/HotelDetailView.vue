@@ -5,7 +5,15 @@
       <button @click="$router.back()" class="mr-3 rounded-lg p-1 text-gray-600 hover:bg-gray-100">← 返回</button>
       <h1 class="truncate text-sm font-semibold text-gray-800">{{ hotel.name || '酒店详情' }}</h1>
       <div class="flex-1" />
-      <button @click="toggleFav" :disabled="togglingFav" class="text-xl transition-opacity" :class="[isFav ? 'text-red-500' : 'text-gray-300', togglingFav ? 'opacity-50' : '']" >{{ isFav ? '❤️' : '🤍' }}</button>
+      <button
+        v-if="hotel.id && !error"
+        @click="toggleFav"
+        :disabled="togglingFav"
+        class="text-xl transition-opacity"
+        :class="[isFav ? 'text-red-500' : 'text-gray-300', togglingFav ? 'opacity-50' : '']"
+      >
+        {{ isFav ? '❤️' : '🤍' }}
+      </button>
     </header>
 
     <div v-if="loading" class="mx-auto max-w-5xl space-y-4 px-4 py-6">
@@ -21,9 +29,79 @@
       </div>
     </div>
 
-    <div v-else-if="error" class="mx-auto max-w-5xl px-4 py-16 text-center">
-      <p class="text-sm text-red-500">{{ error }}</p>
-      <router-link to="/hotels" class="mt-3 inline-block rounded-xl bg-brand px-4 py-2 text-sm text-white">返回酒店列表</router-link>
+    <div v-else-if="error" class="relative overflow-hidden px-4 py-12 md:py-16">
+      <div class="absolute inset-x-0 top-0 h-48 bg-gradient-to-br from-brand/15 via-teal-100 to-cyan-50" />
+      <div class="relative mx-auto max-w-4xl">
+        <div class="overflow-hidden rounded-3xl bg-white shadow-sm ring-1 ring-slate-100">
+          <div class="bg-gradient-to-r from-brand via-teal-500 to-cyan-500 px-6 py-6 text-white sm:px-8">
+            <p class="text-xs font-semibold uppercase tracking-[0.22em] text-teal-50/85">
+              {{ enteredFromOrderDetail ? '历史订单入口' : '酒店详情' }}
+            </p>
+            <h2 class="mt-3 text-2xl font-bold">{{ enteredFromOrderDetail ? '酒店当前无法直接展示' : '暂时找不到这家酒店' }}</h2>
+            <p class="mt-2 max-w-2xl text-sm leading-6 text-teal-50/90">
+              {{ error }}
+            </p>
+          </div>
+
+          <div class="grid gap-5 px-6 py-6 sm:px-8 lg:grid-cols-[1.2fr,0.8fr]">
+            <div class="rounded-3xl border border-slate-100 bg-slate-50/80 p-5">
+              <div class="flex h-14 w-14 items-center justify-center rounded-2xl bg-brand/10 text-brand">
+                <svg viewBox="0 0 24 24" class="h-7 w-7" fill="none" stroke="currentColor" stroke-width="1.8">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M4 20h16M6 20V8.5A1.5 1.5 0 017.5 7H9V5.5A1.5 1.5 0 0110.5 4h3A1.5 1.5 0 0115 5.5V7h1.5A1.5 1.5 0 0118 8.5V20M9 11h.01M9 14h.01M15 11h.01M15 14h.01M12 11h.01M12 14h.01" />
+                </svg>
+              </div>
+              <h3 class="mt-4 text-lg font-semibold text-slate-900">
+                {{ enteredFromOrderDetail ? '订单关联酒店已下线或暂不可访问' : '链接可能已失效或酒店暂未开放' }}
+              </h3>
+              <p class="mt-2 text-sm leading-6 text-slate-500">
+                {{ enteredFromOrderDetail ? '如果这是您历史订单关联的酒店，请优先返回订单详情继续处理发票、评价或联系客服。' : '您可以返回酒店列表重新选择，或回到上一页继续浏览其他内容。' }}
+              </p>
+            </div>
+
+            <div class="rounded-3xl border border-slate-100 bg-white p-5 shadow-sm ring-1 ring-slate-100/70">
+              <p class="text-sm font-semibold text-slate-900">建议操作</p>
+              <div class="mt-4 space-y-3 text-sm text-slate-500">
+                <div class="rounded-2xl bg-slate-50 px-4 py-3">
+                  <p class="font-medium text-slate-800">回到酒店列表重新选择</p>
+                  <p class="mt-1 text-xs leading-5 text-slate-400">适合继续找房、重新比价或查看仍可预订的酒店。</p>
+                </div>
+                <div v-if="enteredFromOrderDetail" class="rounded-2xl bg-amber-50 px-4 py-3">
+                  <p class="font-medium text-amber-800">返回订单详情继续处理</p>
+                  <p class="mt-1 text-xs leading-5 text-amber-700/80">发票、评价、取消咨询等操作仍建议从订单页发起。</p>
+                </div>
+                <div class="rounded-2xl bg-slate-50 px-4 py-3">
+                  <p class="font-medium text-slate-800">保留当前浏览路径</p>
+                  <p class="mt-1 text-xs leading-5 text-slate-400">如果只是误触，可以直接返回上一页继续当前流程。</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex flex-col gap-3 border-t border-slate-100 px-6 py-5 sm:flex-row sm:px-8">
+            <button
+              v-if="enteredFromOrderDetail && orderDetailPath"
+              type="button"
+              class="inline-flex h-11 items-center justify-center rounded-2xl bg-brand px-5 text-sm font-semibold text-white transition hover:bg-brand-dark"
+              @click="goToOrderDetail"
+            >
+              返回订单详情
+            </button>
+            <router-link
+              to="/hotels"
+              class="inline-flex h-11 items-center justify-center rounded-2xl border border-brand/20 bg-brand/5 px-5 text-sm font-medium text-brand transition hover:bg-brand/10"
+            >
+              返回酒店列表
+            </router-link>
+            <button
+              type="button"
+              class="inline-flex h-11 items-center justify-center rounded-2xl border border-slate-200 px-5 text-sm font-medium text-slate-600 transition hover:bg-slate-50"
+              @click="goBackSafely"
+            >
+              返回上一页
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <template v-else>
@@ -101,6 +179,23 @@
           </div>
         </div>
 
+        <div v-if="isHistoricalHotelPreview" class="mt-4 rounded-2xl border border-amber-200 bg-amber-50/80 p-4 shadow-sm">
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p class="text-sm font-semibold text-amber-900">该酒店当前未开放对外预订</p>
+              <p class="mt-1 text-xs leading-5 text-amber-800/80">您是从历史订单进入，因此系统保留基础信息展示；房型、价格和库存以当前上架状态为准。</p>
+            </div>
+            <button
+              v-if="orderDetailPath"
+              type="button"
+              class="inline-flex h-9 items-center justify-center rounded-xl border border-amber-300 bg-white px-4 text-xs font-medium text-amber-800 transition hover:bg-amber-100"
+              @click="goToOrderDetail"
+            >
+              返回订单详情
+            </button>
+          </div>
+        </div>
+
         <!-- Map -->
         <div class="mt-4 rounded-2xl bg-white p-5 shadow-sm">
           <h3 class="mb-3 font-semibold text-gray-800">地图位置</h3>
@@ -173,8 +268,8 @@
         <!-- Room Types -->
         <div class="mt-6">
           <h3 class="mb-4 text-lg font-bold text-gray-900">可选房型</h3>
-          <div class="space-y-3">
-            <div v-for="room in hotel.room_types || []" :key="room.id"
+          <div v-if="visibleRoomTypes.length" class="space-y-3">
+            <div v-for="room in visibleRoomTypes" :key="room.id"
               class="flex overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-gray-100"
             >
               <div class="hidden h-32 w-32 shrink-0 overflow-hidden bg-gray-200 sm:block">
@@ -200,7 +295,15 @@
                 </div>
               </div>
             </div>
-            <div v-if="!hotel.room_types?.length" class="py-10 text-center text-sm text-gray-400">暂无可预订房型</div>
+          </div>
+          <div v-else class="rounded-3xl bg-white px-5 py-8 text-center shadow-sm ring-1 ring-slate-100">
+            <div class="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
+              <svg viewBox="0 0 24 24" class="h-7 w-7" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4 13h16M6 13V9.5A1.5 1.5 0 017.5 8H9m6 0h1.5A1.5 1.5 0 0118 9.5V13m-8-5V6.5A1.5 1.5 0 0111.5 5h1A1.5 1.5 0 0114 6.5V8m-9 9h14a1 1 0 011 1v1H4v-1a1 1 0 011-1Z" />
+              </svg>
+            </div>
+            <p class="mt-4 text-sm font-semibold text-slate-800">{{ roomEmptyTitle }}</p>
+            <p class="mt-2 text-xs leading-6 text-slate-400">{{ roomEmptyDescription }}</p>
           </div>
         </div>
 
@@ -310,11 +413,37 @@ const error = ref('')
 const bedTypeMap = BED_TYPE_MAP
 const isDescriptionExpanded = ref(false)
 
+function parsePositiveInt(value: unknown): number {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0
+}
+
 const isDescriptionTruncated = computed(() => {
   const desc = hotel.value?.description || ''
   // 粗估计：每行约 45 个字符（中文），2 行约 90 个字符
   return desc.length > 90
 })
+
+const currentHotelId = computed(() => parsePositiveInt(route.params.id))
+const orderContextOrderId = computed(() => parsePositiveInt(route.query.order_id))
+const enteredFromOrderDetail = computed(() => route.query.from === 'order_detail' && orderContextOrderId.value > 0)
+const orderDetailPath = computed(() => (orderContextOrderId.value ? `/my/orders/${orderContextOrderId.value}` : ''))
+const isHistoricalHotelPreview = computed(() => Boolean(
+  enteredFromOrderDetail.value && hotel.value?.status && hotel.value.status !== 'online'
+))
+const visibleRoomTypes = computed(() => (
+  hotel.value?.status === 'online'
+    ? (hotel.value?.room_types || [])
+    : []
+))
+const roomEmptyTitle = computed(() => (
+  isHistoricalHotelPreview.value ? '该酒店当前暂不可再次预订' : '暂无可预订房型'
+))
+const roomEmptyDescription = computed(() => (
+  isHistoricalHotelPreview.value
+    ? '这是历史订单关联酒店，系统暂不展示新的可售房型；如需售后处理，请返回订单详情继续操作。'
+    : '当前没有可直接下单的房型，您可以稍后重试或返回酒店列表查看其他选择。'
+))
 
 const poiName = computed(() => {
   const value = route.query.poi
@@ -685,10 +814,23 @@ async function checkFavStatus(hotelId: number) {
   } catch { /* ignore */ }
 }
 
+function goToOrderDetail() {
+  if (!orderDetailPath.value) return
+  router.push(orderDetailPath.value)
+}
+
+function goBackSafely() {
+  if (window.history.length > 1) {
+    router.back()
+    return
+  }
+  router.push('/hotels')
+}
+
 // 切换Fav显示状态。
 async function toggleFav() {
   if (togglingFav.value) return
-  const hotelId = Number(route.params.id)
+  const hotelId = currentHotelId.value
   if (!getToken()) {
     showToast('请先登录后再进行收藏操作', 'warning')
     router.push({ name: 'login', query: { redirect: route.fullPath } })
@@ -724,7 +866,7 @@ async function toggleFav() {
 // 处理 Book 交互逻辑。
 function handleBook(room: any) {
   if (bookingLoading.value) return
-  const hotelId = Number(route.params.id)
+  const hotelId = currentHotelId.value
   if (!getToken()) { router.push({ name: 'login', query: { redirect: route.fullPath } }); return }
   if (!Number.isFinite(hotelId) || hotelId <= 0) return
   bookingLoading.value = room.id
@@ -733,8 +875,8 @@ function handleBook(room: any) {
 }
 
 async function loadHotelDetail() {
-  const hotelId = Number(route.params.id)
-  if (!Number.isFinite(hotelId) || hotelId <= 0) {
+  const hotelId = currentHotelId.value
+  if (hotelId <= 0) {
     error.value = '酒店参数无效，请返回列表重新选择'
     loading.value = false
     return
@@ -742,8 +884,10 @@ async function loadHotelDetail() {
   loading.value = true
   error.value = ''
   try {
+    // 订单详情跳转会附带 order_id，用于加载本人历史订单关联的已下线酒店。
+    const hotelDetailParams = orderContextOrderId.value ? { order_id: orderContextOrderId.value } : undefined
     const [hotelResult, reviewResult] = await Promise.allSettled([
-      withTimeout(publicApi.hotelDetail(hotelId)),
+      withTimeout(publicApi.hotelDetail(hotelId, hotelDetailParams)),
       withTimeout(publicApi.hotelReviews({ hotel_id: hotelId, page: 1, page_size: 5 })),
     ])
 
@@ -817,25 +961,22 @@ watch(
 )
 
 watch(
-  () => route.params.id,
+  () => [route.params.id, route.query.order_id],
   () => {
-    const parsed = Number(route.params.id)
-    if (Number.isFinite(parsed)) {
-      stopGalleryAutoPlay()
-      currentImg.value = 0
-      galleryTouchStartX.value = 0
-      galleryTouchDeltaX.value = 0
-      galleryTouchMoved.value = false
-      galleryTouchActive.value = false
-      imagePreviewVisible.value = false
-      previewImgIndex.value = 0
-      resetPreviewTransform()
-      previewTouchActive.value = false
-      previewTouchDeltaX.value = 0
-      previewTouchDeltaY.value = 0
-      previewPinchStartDistance.value = 0
-      loadHotelDetail()
-    }
+    stopGalleryAutoPlay()
+    currentImg.value = 0
+    galleryTouchStartX.value = 0
+    galleryTouchDeltaX.value = 0
+    galleryTouchMoved.value = false
+    galleryTouchActive.value = false
+    imagePreviewVisible.value = false
+    previewImgIndex.value = 0
+    resetPreviewTransform()
+    previewTouchActive.value = false
+    previewTouchDeltaX.value = 0
+    previewTouchDeltaY.value = 0
+    previewPinchStartDistance.value = 0
+    loadHotelDetail()
   },
   { immediate: true }
 )

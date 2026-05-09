@@ -9,14 +9,38 @@
       <div class="h-8 w-8 animate-spin rounded-full border-4 border-brand border-t-transparent" />
     </div>
 
-    <div v-else class="mx-auto max-w-2xl px-4 py-6">
+    <div v-else class="mx-auto max-w-4xl px-4 py-6 pb-28 md:pb-8">
       <p v-if="error" class="mb-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-600">{{ error }}</p>
 
       <!-- Status -->
-      <div class="rounded-2xl bg-gradient-to-r from-brand to-teal-500 p-5 text-white">
-        <p class="text-sm text-teal-100">订单状态</p>
-        <h2 class="mt-1 text-xl font-bold">{{ statusLabel(order.status) }}</h2>
-        <p class="mt-1 text-xs text-teal-200">订单号：{{ order.order_no }}</p>
+      <div class="overflow-hidden rounded-3xl bg-white shadow-sm ring-1 ring-slate-100">
+        <div class="bg-gradient-to-r from-brand via-teal-500 to-cyan-500 p-5 text-white sm:p-6">
+          <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p class="text-sm text-teal-50/90">订单状态</p>
+              <h2 class="mt-1 text-2xl font-bold">{{ statusLabel(order.status) }}</h2>
+              <p class="mt-2 text-xs text-teal-50/80">订单号：{{ order.order_no }}</p>
+            </div>
+            <div class="rounded-2xl bg-white/15 px-4 py-3 text-left backdrop-blur sm:text-right">
+              <p class="text-xs text-teal-50/80">实付金额</p>
+              <p class="mt-1 text-2xl font-bold">¥{{ displayAmount }}</p>
+            </div>
+          </div>
+        </div>
+        <div class="grid grid-cols-3 divide-x divide-slate-100 px-4 py-4 text-center">
+          <div>
+            <p class="text-xs text-slate-400">入住</p>
+            <p class="mt-1 text-sm font-semibold text-slate-800">{{ order.check_in_date || '-' }}</p>
+          </div>
+          <div>
+            <p class="text-xs text-slate-400">离店</p>
+            <p class="mt-1 text-sm font-semibold text-slate-800">{{ order.check_out_date || '-' }}</p>
+          </div>
+          <div>
+            <p class="text-xs text-slate-400">晚数</p>
+            <p class="mt-1 text-sm font-semibold text-slate-800">{{ stayNights }} 晚</p>
+          </div>
+        </div>
       </div>
 
       <!-- 订单进度条 -->
@@ -151,14 +175,52 @@
       </div>
 
       <!-- Payment -->
-      <div class="mt-4 rounded-2xl bg-white p-5 shadow-sm">
-        <h4 class="mb-2 font-semibold text-gray-800">费用信息</h4>
-        <div class="flex items-end justify-between">
-          <div class="text-sm text-gray-600">
-            <p>支付方式：{{ paymentMethodMap[order.payment_method] || order.payment_method || '待支付' }}</p>
-            <p>支付状态：{{ paymentStatusMap[order.payment_status] || order.payment_status || '-' }}</p>
+      <div class="mt-4 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-100">
+        <div class="mb-4 flex items-center justify-between">
+          <h4 class="font-semibold text-gray-800">费用信息</h4>
+          <span class="rounded-full bg-orange-50 px-3 py-1 text-xs font-medium text-orange-600">¥{{ displayAmount }}</span>
+        </div>
+        <div class="grid gap-3 text-sm text-gray-600 sm:grid-cols-2">
+          <div class="rounded-xl bg-slate-50 px-3 py-2.5">
+            <p class="text-xs text-gray-400">支付方式</p>
+            <p class="mt-1 font-medium text-slate-800">{{ paymentMethodMap[order.payment_method] || order.payment_method || '待支付' }}</p>
           </div>
-          <span class="text-xl font-bold text-orange-600">¥{{ formatMoney(order.pay_amount || order.total_amount || order.original_amount || 0) }}</span>
+          <div class="rounded-xl bg-slate-50 px-3 py-2.5">
+            <p class="text-xs text-gray-400">支付状态</p>
+            <p class="mt-1 font-medium text-slate-800">{{ paymentStatusMap[order.payment_status] || order.payment_status || '-' }}</p>
+          </div>
+          <div class="rounded-xl bg-slate-50 px-3 py-2.5">
+            <p class="text-xs text-gray-400">原价</p>
+            <p class="mt-1 font-medium text-slate-800">¥{{ formatMoney(order.original_amount || 0) }}</p>
+          </div>
+          <div class="rounded-xl bg-slate-50 px-3 py-2.5">
+            <p class="text-xs text-gray-400">优惠</p>
+            <p class="mt-1 font-medium text-slate-800">¥{{ formatMoney((Number(order.member_discount_amount || 0) + Number(order.coupon_discount_amount || 0)) || order.discount_amount || 0) }}</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Invoice -->
+      <div v-if="canOpenInvoice" class="mt-4 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-100">
+        <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div class="flex items-center gap-2">
+              <h4 class="font-semibold text-gray-800">发票服务</h4>
+              <span v-if="invoiceRequestForOrder" class="rounded-full px-2.5 py-1 text-xs font-medium" :class="invoiceStatusClass(invoiceRequestForOrder.status)">
+                {{ invoiceStatusLabel(invoiceRequestForOrder) }}
+              </span>
+            </div>
+            <p class="mt-1 text-sm text-gray-500">
+              {{ invoiceRequestForOrder ? `已提交至「${invoiceRequestForOrder.title}」` : '当前订单已完成，可提交电子发票申请。' }}
+            </p>
+          </div>
+          <button
+            type="button"
+            @click="openInvoiceModal"
+            class="inline-flex h-10 items-center justify-center rounded-xl bg-brand px-4 text-sm font-semibold text-white transition hover:bg-brand-dark"
+          >
+            {{ invoiceRequestForOrder ? '查看发票' : '开发票' }}
+          </button>
         </div>
       </div>
 
@@ -205,7 +267,7 @@
           </button>
           <router-link
             v-if="showRebook && hotelDetailPath"
-            :to="hotelDetailPath"
+            :to="hotelDetailRoute"
             class="inline-flex h-11 min-w-[120px] flex-1 items-center justify-center whitespace-nowrap rounded-xl border border-brand/30 bg-brand/5 px-4 text-center text-sm font-medium text-brand transition hover:bg-brand/10"
           >
             再次预订
@@ -232,6 +294,75 @@
           <div class="mt-4 flex gap-3">
             <button @click="showCancelModal = false" class="flex-1 rounded-xl border py-2.5 text-sm text-gray-600 hover:bg-gray-50">取消</button>
             <button @click="handleCancel" :disabled="cancelling" class="flex-1 rounded-xl bg-red-500 py-2.5 text-sm text-white hover:bg-red-600 disabled:opacity-50">确认取消</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Invoice modal -->
+    <Teleport to="body">
+      <div v-if="showInvoiceModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" @click.self="showInvoiceModal = false">
+        <div class="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <h3 class="text-lg font-bold text-gray-900">开具电子发票</h3>
+              <p class="mt-1 text-xs text-gray-400">订单 {{ order.order_no }} · ¥{{ displayAmount }}</p>
+            </div>
+            <button type="button" class="rounded-lg px-2 py-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600" @click="showInvoiceModal = false">×</button>
+          </div>
+
+          <div v-if="invoiceLoading" class="flex justify-center py-10">
+            <div class="h-7 w-7 animate-spin rounded-full border-4 border-brand border-t-transparent" />
+          </div>
+
+          <div v-else-if="invoiceRequestForOrder" class="mt-5 rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4">
+            <div class="flex items-center justify-between gap-3">
+              <p class="font-semibold text-emerald-900">{{ invoiceRequestForOrder.title }}</p>
+              <span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="invoiceStatusClass(invoiceRequestForOrder.status)">
+                {{ invoiceStatusLabel(invoiceRequestForOrder) }}
+              </span>
+            </div>
+            <div class="mt-3 grid gap-2 text-sm text-emerald-800">
+              <p>接收邮箱：{{ invoiceRequestForOrder.email || '未填写' }}</p>
+              <p>提交时间：{{ invoiceRequestForOrder.created_at }}</p>
+              <p v-if="invoiceRequestForOrder.tax_no">税号：{{ invoiceRequestForOrder.tax_no }}</p>
+            </div>
+          </div>
+
+          <div v-else class="mt-5 space-y-4">
+            <div v-if="invoiceError" class="rounded-xl bg-red-50 px-3 py-2 text-xs text-red-600">{{ invoiceError }}</div>
+
+            <div v-if="invoiceTitles.length">
+              <label class="text-sm font-medium text-gray-700">选择发票抬头</label>
+              <SelectField v-model.number="selectedInvoiceTitleId" class="mt-2 w-full">
+                <option :value="0">请选择抬头</option>
+                <option v-for="title in invoiceTitles" :key="title.id" :value="title.id">
+                  {{ title.title }} · {{ title.invoice_type === 'company' ? '企业' : '个人' }}
+                </option>
+              </SelectField>
+              <p class="mt-2 text-xs text-gray-400">提交后后台会进入发票处理流程，同一订单不能重复申请。</p>
+            </div>
+
+            <div v-else class="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-center">
+              <p class="text-sm font-medium text-slate-700">暂无发票抬头</p>
+              <p class="mt-1 text-xs text-slate-400">请先到发票管理添加个人或企业抬头。</p>
+              <router-link to="/my/invoices" class="mt-3 inline-flex rounded-xl border border-brand/30 bg-brand/5 px-4 py-2 text-sm font-medium text-brand hover:bg-brand/10">
+                去添加抬头
+              </router-link>
+            </div>
+          </div>
+
+          <div class="mt-5 flex gap-3">
+            <button type="button" @click="showInvoiceModal = false" class="flex-1 rounded-xl border border-gray-200 py-2.5 text-sm text-gray-600 hover:bg-gray-50">关闭</button>
+            <button
+              v-if="!invoiceRequestForOrder && invoiceTitles.length"
+              type="button"
+              @click="handleInvoiceApply"
+              :disabled="invoiceApplying"
+              class="flex-1 rounded-xl bg-brand py-2.5 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-50"
+            >
+              {{ invoiceApplying ? '提交中…' : '提交开票' }}
+            </button>
           </div>
         </div>
       </div>
@@ -323,9 +454,11 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { userOrderApi, userReviewApi, commonApi } from '@hotelink/api'
-import { ORDER_STATUS_MAP, PAYMENT_METHOD_MAP, PAYMENT_STATUS_MAP, buildImageThumbUrl, formatMoney } from '@hotelink/utils'
-import { OrderStepBar, useToast } from '@hotelink/ui'
+import type { LocationQueryRaw } from 'vue-router'
+import { userOrderApi, userReviewApi, commonApi, userInvoiceApi } from '@hotelink/api'
+import type { InvoiceRequestItem, InvoiceTitleItem } from '@hotelink/api'
+import { ORDER_STATUS_MAP, PAYMENT_METHOD_MAP, PAYMENT_STATUS_MAP, buildImageThumbUrl, extractApiError, formatMoney } from '@hotelink/utils'
+import { OrderStepBar, SelectField, useToast } from '@hotelink/ui'
 
 const { showToast } = useToast()
 
@@ -347,6 +480,13 @@ const reviewImages = ref<string[]>([])
 const reviewing = ref(false)
 const uploadingImage = ref(false)
 const reviewSuccessMsg = ref('')
+const showInvoiceModal = ref(false)
+const invoiceLoading = ref(false)
+const invoiceApplying = ref(false)
+const invoiceTitles = ref<InvoiceTitleItem[]>([])
+const invoiceRequests = ref<InvoiceRequestItem[]>([])
+const selectedInvoiceTitleId = ref(0)
+const invoiceError = ref('')
 let refreshTimer: number | null = null
 
 const reviewCharCount = computed(() => reviewContent.value.trim().length)
@@ -362,15 +502,36 @@ const reviewPointsPreview = computed(() => {
 const paymentMethodMap = PAYMENT_METHOD_MAP
 const paymentStatusMap = PAYMENT_STATUS_MAP
 const supportPhone = '4001234567'
+const displayAmount = computed(() => formatMoney(order.value.pay_amount || order.value.total_amount || order.value.original_amount || 0))
+const stayNights = computed(() => {
+  const start = new Date(order.value.check_in_date)
+  const end = new Date(order.value.check_out_date)
+  const diff = end.getTime() - start.getTime()
+  if (!Number.isFinite(diff) || diff <= 0) return 0
+  return Math.max(1, Math.round(diff / 86400000))
+})
 
 // 根据状态值返回对应展示信息。
 function statusLabel(s: string): string { return ORDER_STATUS_MAP[s]?.label || s || '未知' }
 const canCancel = computed(() => ['pending_payment', 'paid', 'confirmed'].includes(order.value.status))
+const canOpenInvoice = computed(() => order.value.status === 'completed')
+const invoiceRequestForOrder = computed(() => invoiceRequests.value.find((item) => Number(item.order_id) === orderId))
 const hotelDetailId = computed(() => {
   const parsed = Number(order.value.hotel_id ?? order.value.hotel ?? 0)
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0
 })
 const hotelDetailPath = computed(() => (hotelDetailId.value ? `/hotels/${hotelDetailId.value}` : ''))
+// 订单详情跳转会携带 order_id，便于酒店已下线时展示历史订单关联信息。
+const hotelDetailQuery = computed<LocationQueryRaw>(() => (
+  hotelDetailId.value
+    ? { from: 'order_detail', order_id: String(orderId) }
+    : {}
+))
+const hotelDetailRoute = computed(() => (
+  hotelDetailPath.value
+    ? { path: hotelDetailPath.value, query: hotelDetailQuery.value }
+    : '/'
+))
 const showRebook = computed(() => hotelDetailId.value > 0 && ['completed', 'cancelled', 'refunded'].includes(order.value.status))
 const showActionBar = computed(() => (
   order.value.status === 'pending_payment'
@@ -438,7 +599,7 @@ const hasRollbackEvent = computed(() => changeEvents.value.some((item) => item.t
 
 function openHotelDetail() {
   if (!hotelDetailPath.value) return
-  router.push(hotelDetailPath.value)
+  router.push(hotelDetailRoute.value)
 }
 
 function askAiCustomerService() {
@@ -458,6 +619,74 @@ function askAiCustomerService() {
 // 处理 goToPay 业务流程。
 function goToPay() { router.push(`/payment/${orderId}`) }
 
+function invoiceStatusLabel(invoice: InvoiceRequestItem): string {
+  return invoice.status_label || (invoice.status === 'issued' ? '已开票' : invoice.status === 'cancelled' ? '已取消' : '待处理')
+}
+
+function invoiceStatusClass(status: InvoiceRequestItem['status']): string {
+  if (status === 'issued') return 'bg-emerald-100 text-emerald-700'
+  if (status === 'cancelled') return 'bg-slate-100 text-slate-600'
+  return 'bg-amber-100 text-amber-700'
+}
+
+async function loadInvoiceCenter(options: { silent?: boolean } = {}) {
+  invoiceLoading.value = true
+  try {
+    const res = await userInvoiceApi.list()
+    if (res.code === 0 && res.data) {
+      invoiceTitles.value = res.data.titles || []
+      invoiceRequests.value = res.data.items || []
+      if (!selectedInvoiceTitleId.value && invoiceTitles.value.length) {
+        selectedInvoiceTitleId.value = invoiceTitles.value[0].id
+      }
+    } else if (!options.silent) {
+      showToast(res.message || '发票信息加载失败', 'error')
+    }
+  } catch {
+    if (!options.silent) {
+      showToast('发票信息加载失败，请稍后重试', 'error')
+    }
+  } finally {
+    invoiceLoading.value = false
+  }
+}
+
+async function openInvoiceModal() {
+  showInvoiceModal.value = true
+  invoiceError.value = ''
+  await loadInvoiceCenter({ silent: true })
+}
+
+async function handleInvoiceApply() {
+  if (!selectedInvoiceTitleId.value) {
+    invoiceError.value = '请选择发票抬头'
+    showToast('请选择发票抬头', 'warning')
+    return
+  }
+
+  invoiceApplying.value = true
+  try {
+    // Backend validates ownership, order status, and duplicate invoice requests.
+    const res = await userInvoiceApi.apply({
+      order_id: orderId,
+      invoice_title_id: selectedInvoiceTitleId.value,
+    })
+    if (res.code === 0) {
+      showToast('发票申请已提交', 'success')
+      showInvoiceModal.value = false
+      await loadInvoiceCenter({ silent: true })
+    } else {
+      invoiceError.value = extractApiError(res, '发票申请失败，请稍后重试')
+      showToast(invoiceError.value, 'error')
+    }
+  } catch {
+    invoiceError.value = '发票申请失败，请检查网络后重试'
+    showToast(invoiceError.value, 'error')
+  } finally {
+    invoiceApplying.value = false
+  }
+}
+
 function consumeAssistantActionQuery() {
   const source = typeof route.query.source === 'string' ? route.query.source : ''
   const action = typeof route.query.action === 'string' ? route.query.action : ''
@@ -475,7 +704,7 @@ function consumeAssistantActionQuery() {
     }
   }
 
-  const nextQuery = { ...route.query } as Record<string, unknown>
+  const nextQuery: LocationQueryRaw = { ...route.query }
   delete nextQuery.source
   delete nextQuery.action
   delete nextQuery.intent
@@ -584,6 +813,9 @@ onMounted(async () => {
     const res = await userOrderApi.detail(orderId)
     if (res.code === 0 && res.data) {
       order.value = res.data
+      if (order.value.status === 'completed') {
+        loadInvoiceCenter({ silent: true })
+      }
       consumeAssistantActionQuery()
     } else {
       order.value = {}

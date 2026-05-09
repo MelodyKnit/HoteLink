@@ -108,6 +108,7 @@ const genderOpts = [
 
 const form = ref({
   avatar: '',
+  username: '',
   nickname: '',
   gender: 'unknown',
   birthday: '',
@@ -221,6 +222,7 @@ onMounted(async () => {
     const res = await userProfileApi.get()
     if (res.code === 0 && res.data) {
       form.value.avatar = (res.data as any).avatar || ''
+      form.value.username = (res.data as any).username || ''
       form.value.nickname = (res.data as any).nickname || ''
       form.value.gender = (res.data as any).gender || 'unknown'
       form.value.birthday = (res.data as any).birthday || ''
@@ -231,6 +233,7 @@ onMounted(async () => {
     showToast('个人资料加载失败，请稍后重试', 'error')
     form.value = {
       avatar: '',
+      username: authStore.user?.username || '',
       nickname: authStore.user?.username || '',
       gender: 'unknown',
       birthday: '',

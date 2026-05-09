@@ -157,6 +157,7 @@
 
 - 首页、酒店列表、酒店详情、评价、房态日历
 - `GET /api/v1/public/hotels` 支持查询参数：`keyword`、`city`、`star`、`type`（hotel/homestay/short_rent）、`facilities`（逗号分隔）、`min_price`、`max_price`、`sort`
+- `GET /api/v1/public/hotels/detail` 支持可选 `order_id`：当用户已登录，且该订单属于当前用户并且订单关联酒店就是 `hotel_id` 时，即使酒店已下线，也允许查看历史酒店基础信息；该场景不返回新的可售房型，避免误触再次预订
 - 用户注册/登录、管理员登录、刷新令牌
 
 ### 6.4 User
@@ -164,6 +165,7 @@
 - 用户资料、头像、改密
 - 收藏、订单、支付、取消、评价、积分、优惠券、发票、通知
 - AI：聊天、流式聊天、推荐、对比、会话管理
+- 发票中心：`GET /api/v1/user/invoices` 返回开票记录分页字段 `items/page/page_size/total/total_pages`，并额外返回 `titles` 供订单详情页选择发票抬头
 - 发票抬头编辑/删除：`POST /api/v1/user/invoices/title/update`、`POST /api/v1/user/invoices/title/delete`（有开票记录的抬头不可删除，返回 4091）
 
 注意：

@@ -1020,6 +1020,27 @@ class PublicHotelSearchSuggestView(APIView):
         return api_response(data={"items": items})
 
 
+def build_public_hotel_detail_queryset(*, include_bookable_room_types: bool = True):
+    """构造酒店详情查询，并按场景决定是否返回当前可预订房型。"""
+    room_types_queryset = RoomType.objects.none()
+    if include_bookable_room_types:
+        room_types_queryset = RoomType.objects.filter(status=RoomType.STATUS_ONLINE).select_related("hotel")
+    return Hotel.objects.prefetch_related(Prefetch("room_types", queryset=room_types_queryset))
+
+
+def can_access_historical_hotel_detail(request, hotel_id: int) -> bool:
+    """仅允许订单所属用户查看与自己订单关联的历史酒店详情。"""
+    if not getattr(request.user, "is_authenticated", False):
+        return False
+    try:
+        order_id = int(request.query_params.get("order_id"))
+    except (TypeError, ValueError):
+        return False
+    if order_id <= 0:
+        return False
+    return BookingOrder.objects.filter(id=order_id, user=request.user, hotel_id=hotel_id).exists()
+
+
 class PublicHotelDetailView(APIView):
     """酒店详情接口：返回酒店信息及房型明细。"""
     permission_classes = [AllowAny]
@@ -1032,11 +1053,11 @@ class PublicHotelDetailView(APIView):
             hotel_id = int(hotel_id)
         except (ValueError, TypeError):
             return api_response(code=4001, message="参数格式错误", data=None, status_code=400)
-        try:
-            hotel = Hotel.objects.prefetch_related(
-                Prefetch("room_types", queryset=RoomType.objects.filter(status=RoomType.STATUS_ONLINE).select_related("hotel"))
-            ).get(pk=hotel_id, status=Hotel.STATUS_ONLINE)
-        except Hotel.DoesNotExist:
+        hotel = build_public_hotel_detail_queryset().filter(pk=hotel_id, status=Hotel.STATUS_ONLINE).first()
+        if hotel is None and can_access_historical_hotel_detail(request, hotel_id):
+            # 历史订单场景只展示酒店基础信息，不暴露新的可售房型。
+            hotel = build_public_hotel_detail_queryset(include_bookable_room_types=False).filter(pk=hotel_id).first()
+        if hotel is None:
             return api_response(code=4040, message="酒店不存在", data=None, status_code=404)
         return api_response(data=HotelDetailSerializer(hotel).data)
 
@@ -1952,10 +1973,19 @@ class UserInvoicesView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        queryset = InvoiceRequest.objects.filter(invoice_title__user=request.user).select_related("invoice_title")
+        """Return invoice requests and reusable invoice titles for the current user."""
+        queryset = InvoiceRequest.objects.filter(invoice_title__user=request.user).select_related("invoice_title", "order")
+        titles = InvoiceTitle.objects.filter(user=request.user)
         page, page_size = get_page_params(request)
         page_queryset, total = paginate_queryset(queryset, page, page_size)
-        return paginated_response(items=InvoiceRequestSerializer(page_queryset, many=True).data, page=page, page_size=page_size, total=total)
+        # Keep title data with the invoice list so frontend order pages can apply invoices without another endpoint.
+        return paginated_response(
+            items=InvoiceRequestSerializer(page_queryset, many=True).data,
+            page=page,
+            page_size=page_size,
+            total=total,
+            extra={"titles": InvoiceTitleSerializer(titles, many=True).data},
+        )
 
 
 class UserInvoiceTitleCreateView(APIView):

@@ -304,6 +304,16 @@ class UserApiTests(ApiBaseTestCase):
         self.assertEqual(invoice_apply.status_code, 200)
         self.assertEqual(invoice_apply.json()["data"]["status"], "pending")
 
+        invoices_response = self.client.get("/api/v1/user/invoices")
+        self.assertEqual(invoices_response.status_code, 200)
+        invoices_payload = invoices_response.json()["data"]
+        self.assertGreaterEqual(len(invoices_payload["titles"]), 1)
+        self.assertEqual(invoices_payload["titles"][0]["title"], self.invoice_title.title)
+        self.assertGreaterEqual(invoices_payload["total"], 1)
+        self.assertEqual(invoices_payload["items"][0]["order_id"], self.order.id)
+        self.assertEqual(invoices_payload["items"][0]["title"], self.invoice_title.title)
+        self.assertEqual(invoices_payload["items"][0]["amount"], "798.00")
+
     def test_user_notices_should_include_related_order_fields(self):
         """验证通知列表会返回订单关联字段，支持前端直达订单详情。"""
         self.login_user()
@@ -1430,6 +1440,50 @@ class PublicApiExtendedTests(ApiBaseTestCase):
             min_price=Decimal("100.00"), status=Hotel.STATUS_DRAFT,
         )
         response = self.client.get("/api/v1/public/hotels/detail", {"hotel_id": offline_hotel.id})
+        self.assertEqual(response.status_code, 404)
+
+    def test_hotel_detail_should_allow_historical_order_owner_to_view_offline_hotel(self):
+        """验证订单所属用户可查看已下线酒店的历史详情。"""
+        self.login_user()
+        self.hotel.status = Hotel.STATUS_OFFLINE
+        self.hotel.save(update_fields=["status"])
+
+        response = self.client.get("/api/v1/public/hotels/detail", {
+            "hotel_id": self.hotel.id,
+            "order_id": self.order.id,
+        })
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertEqual(data["id"], self.hotel.id)
+        self.assertEqual(data["status"], Hotel.STATUS_OFFLINE)
+        self.assertEqual(data["room_types"], [])
+
+    def test_hotel_detail_should_reject_offline_hotel_for_non_owner_order_context(self):
+        """验证其他用户不能借助 order_id 查看已下线酒店。"""
+        other_user = User.objects.create_user(username="history_other", password="Password123")
+        UserProfile.objects.create(
+            user=other_user,
+            nickname="其他用户",
+            mobile="13800138088",
+            role=UserProfile.ROLE_USER,
+            status=UserProfile.STATUS_ACTIVE,
+        )
+        self.hotel.status = Hotel.STATUS_OFFLINE
+        self.hotel.save(update_fields=["status"])
+
+        login_resp = self.client.post(
+            "/api/v1/public/auth/login",
+            {"username": "history_other", "password": "Password123"},
+            format="json",
+        )
+        self.assertEqual(login_resp.status_code, 200)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login_resp.json()['data']['access_token']}")
+
+        response = self.client.get("/api/v1/public/hotels/detail", {
+            "hotel_id": self.hotel.id,
+            "order_id": self.order.id,
+        })
         self.assertEqual(response.status_code, 404)
 
     def test_hotel_reviews_should_return_visible_only(self):
