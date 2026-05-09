@@ -1,8 +1,8 @@
 # HoteLink API 路由清单（源码自动生成）
 
-- 生成时间：2026-04-17 14:28:41
+- 生成时间：2026-05-10 00:59:42
 - 来源文件：`backend/apps/api/urls.py` + `backend/apps/api/views.py`
-- 总路由数：**114**
+- 总路由数：**122**
 
 > 本文件由 `scripts/docs/generate_api_inventory.py` 生成，请勿手工编辑。
 
@@ -75,6 +75,7 @@
 | `GET` | `/api/v1/user/orders/detail` | `UserOrdersDetailView` | `user-orders-detail` |
 | `GET` | `/api/v1/user/orders/guest-history` | `UserOrderGuestHistoryView` | `user-order-guest-history` |
 | `POST` | `/api/v1/user/orders/pay` | `UserOrdersPayView` | `user-orders-pay` |
+| `GET` | `/api/v1/user/orders/payment-options` | `UserOrderPaymentOptionsView` | `user-order-payment-options` |
 | `POST` | `/api/v1/user/orders/update` | `UserOrdersUpdateView` | `user-orders-update` |
 | `GET` | `/api/v1/user/points/logs` | `UserPointsLogsView` | `user-points-logs` |
 | `GET,POST` | `/api/v1/user/profile` | `UserProfileView` | `user-profile` |
@@ -131,6 +132,13 @@
 | `POST` | `/api/v1/admin/orders/check-in` | `AdminOrdersCheckInView` | `admin-orders-check-in` |
 | `POST` | `/api/v1/admin/orders/check-out` | `AdminOrdersCheckOutView` | `admin-orders-check-out` |
 | `GET` | `/api/v1/admin/orders/detail` | `AdminOrdersDetailView` | `admin-orders-detail` |
+| `POST` | `/api/v1/admin/orders/extend-stay` | `AdminOrdersExtendStayView` | `admin-orders-extend-stay` |
+| `GET` | `/api/v1/admin/orders/room-suggestions` | `AdminRoomSuggestionsView` | `admin-orders-room-suggestions` |
+| `POST` | `/api/v1/admin/orders/switch-room` | `AdminOrdersSwitchRoomView` | `admin-orders-switch-room` |
+| `GET,POST` | `/api/v1/admin/payment-gateways` | `AdminPaymentGatewaySettingsView` | `admin-payment-gateways` |
+| `POST` | `/api/v1/admin/payment-gateways/provider/delete` | `AdminPaymentGatewayProviderDeleteView` | `admin-payment-gateways-provider-delete` |
+| `POST` | `/api/v1/admin/payment-gateways/provider/save` | `AdminPaymentGatewayProviderSaveView` | `admin-payment-gateways-provider-save` |
+| `GET,POST` | `/api/v1/admin/payment-gateways/update` | `AdminPaymentGatewaySettingsView` | `admin-payment-gateways-update` |
 | `GET,POST` | `/api/v1/admin/reports/tasks` | `AdminReportTasksView` | `admin-report-tasks` |
 | `GET,POST` | `/api/v1/admin/reports/tasks/create` | `AdminReportTasksView` | `admin-report-tasks-create` |
 | `POST` | `/api/v1/admin/reports/tasks/delete` | `AdminReportTaskDeleteView` | `admin-report-tasks-delete` |

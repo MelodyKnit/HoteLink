@@ -71,6 +71,50 @@
           <div class="rounded-lg bg-slate-50 p-3 text-sm">
             <span class="font-semibold text-slate-700">{{ replyTarget.username }}</span>
             <p class="mt-2 max-h-36 overflow-y-auto break-words whitespace-pre-wrap text-slate-600 leading-relaxed">{{ replyTarget.content }}</p>
+            <div v-if="reviewImageThumbs.length" class="mt-3 border-t border-slate-100 pt-3">
+              <div class="mb-2 flex items-center justify-between">
+                <h5 class="text-xs font-medium text-slate-500">评价图片</h5>
+                <span class="text-xs text-slate-400">{{ reviewImageThumbs.length }} 张</span>
+              </div>
+              <div class="overflow-hidden rounded-xl border border-slate-200 bg-white">
+                <img
+                  v-if="activeReviewImagePreview"
+                  :src="activeReviewImagePreview"
+                  :alt="`评价图片预览 ${reviewImageIndex}`"
+                  class="h-52 w-full bg-slate-100 object-contain sm:h-64"
+                  loading="lazy"
+                  decoding="async"
+                />
+              </div>
+              <div class="mt-2 grid grid-cols-4 gap-2 sm:grid-cols-5">
+                <button
+                  v-for="(image, index) in reviewImageThumbs"
+                  :key="`${image.original}-${index}`"
+                  type="button"
+                  class="overflow-hidden rounded-xl border transition focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  :class="image.original === activeReviewImage ? 'border-teal-500 ring-2 ring-teal-200' : 'border-slate-200 hover:border-slate-300'"
+                  @click="selectReviewImage(image.original)"
+                >
+                  <img
+                    :src="image.thumb"
+                    :alt="`评价图片缩略图 ${index + 1}`"
+                    class="h-16 w-full object-cover sm:h-20"
+                    loading="lazy"
+                    decoding="async"
+                  />
+                </button>
+              </div>
+              <div class="mt-2 flex justify-end">
+                <a
+                  :href="activeReviewImage"
+                  target="_blank"
+                  rel="noreferrer"
+                  class="text-xs font-medium text-teal-600 transition hover:text-teal-700 hover:underline"
+                >
+                  查看原图
+                </a>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -107,7 +151,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { reviewApi, hotelApi, aiApi } from '@hotelink/api'
-import { extractApiError } from '@hotelink/utils'
+import { buildImageThumbList, buildImageThumbUrl, extractApiError, normalizeImageList } from '@hotelink/utils'
 import { PageHeader, ModalDialog, Pagination, useToast, useConfirm, SelectField } from '@hotelink/ui'
 import { useAuthStore } from '@hotelink/store'
 
@@ -136,6 +180,28 @@ const aiSuggestion = ref('')
 const loadingAI = ref(false)
 const replying = ref(false)
 const deleting = ref(false)
+const selectedReviewImage = ref('')
+
+const reviewImageUrls = computed<string[]>(() => normalizeImageList(replyTarget.images))
+const reviewImageThumbs = computed(() => (
+  reviewImageUrls.value.map((original, index) => ({
+    original,
+    thumb: buildImageThumbList([original], 240, 180)[0] || original,
+    index: index + 1,
+  }))
+))
+const activeReviewImage = computed(() => (
+  reviewImageUrls.value.includes(selectedReviewImage.value)
+    ? selectedReviewImage.value
+    : (reviewImageUrls.value[0] || '')
+))
+const activeReviewImagePreview = computed(() => (
+  activeReviewImage.value ? buildImageThumbUrl(activeReviewImage.value, 960, 720) : ''
+))
+const reviewImageIndex = computed(() => {
+  if (!activeReviewImage.value) return 0
+  return reviewImageUrls.value.findIndex((url) => url === activeReviewImage.value) + 1
+})
 
 function patchReviewRow(reviewId: number, patch: Record<string, unknown>) {
   list.value = list.value.map((item) => (Number(item.id) === reviewId ? { ...item, ...patch } : item))
@@ -144,6 +210,10 @@ function patchReviewRow(reviewId: number, patch: Record<string, unknown>) {
 function removeReviewRow(reviewId: number) {
   list.value = list.value.filter((item) => Number(item.id) !== reviewId)
   total.value = Math.max(0, total.value - 1)
+}
+
+function selectReviewImage(imageUrl: string) {
+  selectedReviewImage.value = imageUrl
 }
 
 // 加载 List 相关数据。
@@ -184,10 +254,13 @@ async function loadHotels() {
 
 // 打开 Reply 相关界面。
 function openReply(row: Record<string, unknown>) {
+  // 清空旧的响应式字段，避免上一次打开的评价图片残留到当前详情里。
+  Object.keys(replyTarget).forEach((key) => delete replyTarget[key])
   Object.assign(replyTarget, row)
   replyContent.value = (row.reply_content as string) || ''
   aiSuggestion.value = ''
   loadingAI.value = false
+  selectedReviewImage.value = normalizeImageList(row.images)[0] || ''
   showReply.value = true
 }
 

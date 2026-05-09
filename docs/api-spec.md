@@ -1,6 +1,6 @@
 # HoteLink API 规范（源码对齐版）
 
-> 更新时间：2026-04-20  
+> 更新时间：2026-05-10  
 > 对齐基线：`backend/apps/api/urls.py`、`backend/apps/api/views.py`
 
 ## 1. 文档范围
@@ -17,13 +17,13 @@
 ## 2. 当前实现快照
 
 - API 前缀：`/api/v1/`
-- 已注册路由：`114`
+- 已注册路由：`122`
 - 分组统计：
   - system：`2`
   - common：`4`
   - public：`10`
-  - user：`36`
-  - admin：`61`
+  - user：`37`
+  - admin：`68`
 
 ---
 
@@ -165,6 +165,7 @@
 - 用户资料、头像、改密
 - 收藏、订单、支付、取消、评价、积分、优惠券、发票、通知
 - AI：聊天、流式聊天、推荐、对比、会话管理
+- 支付上下文：`GET /api/v1/user/orders/payment-options` 返回订单支付倒计时、可用支付方式、客服联系方式与统一支付动作入口所需上下文
 - 发票中心：`GET /api/v1/user/invoices` 返回开票记录分页字段 `items/page/page_size/total/total_pages`，并额外返回 `titles` 供订单详情页选择发票抬头
 - 发票抬头编辑/删除：`POST /api/v1/user/invoices/title/update`、`POST /api/v1/user/invoices/title/delete`（有开票记录的抬头不可删除，返回 4091）
 
@@ -175,6 +176,7 @@
 - `/api/v1/user/notices` 支持 `GET`/`POST`/`DELETE`
 - `/api/v1/user/notices` 的 `GET` 响应项新增 `related_order_id`、`related_order_no`，用于订单通知直达详情页
 - `/api/v1/user/orders` 支持多维筛选参数：`status`、`payment_status`、`keyword`、`check_in_start`、`check_in_end`、`created_start`、`created_end`、`amount_min`、`amount_max`
+- `/api/v1/user/orders/pay` 现返回 `payment_action` 与 `payment_record`：模拟支付会直接成功；真实网关会返回 `pending` 动作协议，由前端继续对接 SDK、跳转收银台或等待回调确认
 - `/api/v1/user/ai/chat` 与 `/api/v1/user/ai/chat/stream` 支持可选 `session_id`（续聊）；服务端会自动写入会话消息
 - `/api/v1/user/ai/chat` 与 `/api/v1/user/ai/chat/stream` 支持可选 `conversation_summary`（历史对话压缩摘要，最长 4000 字符）
 
@@ -182,6 +184,7 @@
 
 - 仪表盘、酒店/房型/库存、订单处理、评价、用户、员工、设置、报表
 - 优惠券与会员概览
+- 支付网关：`GET/POST /api/v1/admin/payment-gateways`、`POST /api/v1/admin/payment-gateways/provider/save`、`POST /api/v1/admin/payment-gateways/provider/delete`
 - 系统状态与系统重置
 - AI：配置、供应商管理、摘要、定价、经营报告（含流式）、情感分析、文案与内容生成、异常分析、调用日志、用量统计
 - **员工管理完善**：`POST /api/v1/admin/employees/update`（编辑昵称/手机/角色，仅限 hotel_admin↔receptionist）、`POST /api/v1/admin/employees/change-status`（启用/禁用）、`POST /api/v1/admin/employees/reset-password`（重置为 Abc123456）
@@ -194,6 +197,7 @@
 补充说明：
 
 - `GET /api/v1/admin/ai/settings` 仅 `system_admin` 可访问，供应商列表不会回传明文 `api_key`；编辑时若不提交 `api_key`，服务端会保留原密钥。
+- `GET /api/v1/admin/payment-gateways` 仅 `system_admin` 可访问，支付密钥/证书不会明文回传；再次编辑时若留空对应秘密字段，服务端会保留旧值。
 - `POST /api/v1/admin/ai/test` 用于管理端连通性测试，可验证当前或指定供应商是否可用。
 - `GET /api/v1/admin/ai/call-logs` 分页查询 AI 调用历史记录；支持 `scene`、`status` 过滤参数；响应字段包含 `id`、`scene`、`provider`、`model`、`input_tokens`、`output_tokens`、`total_tokens`、`latency_ms`、`cost_estimate`、`status`、`error_message`（完整错误文本，最长 5000 字符）、`username`、`created_at`。
 - `GET /api/v1/admin/ai/usage-stats` 按场景/状态汇总 token 用量与费用；支持 `start_date`、`end_date` 过滤；响应包含 `success_count`、`failed_count`、`total_tokens`、`cost_estimate`、`by_scene`、`by_status`。
@@ -219,8 +223,9 @@
 ### 7.1 用户下单并支付
 
 1. `POST /api/v1/user/orders/create`
-2. `POST /api/v1/user/orders/pay`
-3. 管理端可后续执行：
+2. `GET /api/v1/user/orders/payment-options`
+3. `POST /api/v1/user/orders/pay`
+4. 管理端可后续执行：
    - `POST /api/v1/admin/orders/check-in`
    - `POST /api/v1/admin/orders/check-out`
   - `POST /api/v1/admin/orders/extend-stay`

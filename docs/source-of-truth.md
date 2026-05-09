@@ -36,6 +36,11 @@
 - reports: 1（`ReportTask`）
 - operations: 5（含 `AICallLog`、`PlatformConfig`、`RuntimeConfig`）
 
+补充（2026-05）：
+
+- `PaymentRecord` 已扩展为真实支付预留结构，除基础流水号/金额外，还包含 `gateway_name`、`gateway_label`、`provider_type`、`scene`、`external_trade_no` 与请求/响应载荷字段。
+- `RuntimeConfig` 当前同时承担 AI 供应商配置与支付网关运行时配置持久化。
+
 ### 2.3 Celery 与定时任务
 
 - Celery 已启用且有真实任务，不是“仅框架预留”：
@@ -65,7 +70,7 @@
 ### 2.5 前端路由
 
 - user-web：`28` 个路由项（含 404 捕获），`25` 个视图文件
-- admin-web：`25` 个路由项（含 404 捕获），`23` 个视图文件
+- admin-web：`26` 个路由项（含 404 捕获），`24` 个视图文件
 
 ---
 

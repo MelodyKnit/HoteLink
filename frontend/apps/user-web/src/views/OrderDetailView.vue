@@ -183,7 +183,7 @@
         <div class="grid gap-3 text-sm text-gray-600 sm:grid-cols-2">
           <div class="rounded-xl bg-slate-50 px-3 py-2.5">
             <p class="text-xs text-gray-400">支付方式</p>
-            <p class="mt-1 font-medium text-slate-800">{{ paymentMethodMap[order.payment_method] || order.payment_method || '待支付' }}</p>
+            <p class="mt-1 font-medium text-slate-800">{{ order.payment_gateway_label || paymentMethodMap[order.payment_method] || order.payment_method || '待支付' }}</p>
           </div>
           <div class="rounded-xl bg-slate-50 px-3 py-2.5">
             <p class="text-xs text-gray-400">支付状态</p>
@@ -197,6 +197,9 @@
             <p class="text-xs text-gray-400">优惠</p>
             <p class="mt-1 font-medium text-slate-800">¥{{ formatMoney((Number(order.member_discount_amount || 0) + Number(order.coupon_discount_amount || 0)) || order.discount_amount || 0) }}</p>
           </div>
+        </div>
+        <div v-if="order.latest_payment?.payment_no" class="mt-3 rounded-xl border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-500">
+          最近支付单号：{{ order.latest_payment.payment_no }}<span v-if="order.latest_payment.scene"> · 场景：{{ order.latest_payment.scene }}</span>
         </div>
       </div>
 

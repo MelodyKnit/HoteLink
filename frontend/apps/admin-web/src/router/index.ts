@@ -81,6 +81,7 @@ const router = createRouter({
         { path: 'reports', name: 'reports', component: () => import('../views/ReportView.vue') },
         { path: 'employees', name: 'employees', component: () => import('../views/EmployeeListView.vue') },
         { path: 'settings', name: 'settings', component: () => import('../views/SettingsView.vue') },
+        { path: 'payment-gateways', name: 'payment-gateways', component: () => import('../views/PaymentGatewayView.vue') },
         { path: 'system-status', name: 'system-status', component: () => import('../views/SystemStatusView.vue') },
         { path: 'ai', name: 'ai', component: () => import('../views/AIAssistantView.vue') },
         { path: 'ai-settings', name: 'ai-settings', component: () => import('../views/AISettingsView.vue') },

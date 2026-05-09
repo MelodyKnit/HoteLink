@@ -119,6 +119,19 @@
             </div>
           </div>
         </div>
+        <div class="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
+          <p class="text-xs uppercase tracking-wider text-slate-400">扩展配置</p>
+          <div class="mt-4 space-y-3">
+            <router-link to="/admin/payment-gateways" class="flex items-center justify-between rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 transition hover:border-teal-500 hover:bg-teal-50 hover:text-teal-700">
+              <span>支付网关</span>
+              <span>→</span>
+            </router-link>
+            <router-link to="/admin/ai-settings" class="flex items-center justify-between rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 transition hover:border-teal-500 hover:bg-teal-50 hover:text-teal-700">
+              <span>AI 配置</span>
+              <span>→</span>
+            </router-link>
+          </div>
+        </div>
       </div>
     </div>
   </section>

@@ -17,6 +17,101 @@ export interface PaginatedData<T = unknown> {
   total_pages: number
 }
 
+export type PaymentGatewayProviderType = 'wechat' | 'alipay' | 'custom'
+
+export interface PaymentGatewayItem {
+  name: string
+  label: string
+  provider_type: PaymentGatewayProviderType
+  payment_method: string
+  enabled: boolean
+  sandbox: boolean
+  priority: number
+  description: string
+  scenes: string[]
+  gateway_url: string
+  checkout_url: string
+  notify_url: string
+  return_url: string
+  app_id: string
+  merchant_id: string
+  merchant_name: string
+  merchant_cert_serial_no: string
+  sign_type: string
+  charset: string
+  extra: Record<string, unknown>
+  supported_scenes: string[]
+  required_fields: string[]
+  missing_required_fields: string[]
+  missing_required_labels: string[]
+  is_configured: boolean
+  action_type_hint: string
+  secret_flags: Record<string, boolean>
+}
+
+export interface BuiltinPaymentTemplate {
+  name: string
+  label: string
+  provider_type: PaymentGatewayProviderType
+  payment_method: string
+  description: string
+  supported_scenes: string[]
+  required_fields: string[]
+  default_values: Record<string, unknown>
+}
+
+export interface PaymentGatewaySettingsData {
+  mock_enabled: boolean
+  gateways: PaymentGatewayItem[]
+  builtin_templates: BuiltinPaymentTemplate[]
+  field_labels: Record<string, string>
+  scene_labels: Record<string, string>
+}
+
+export interface UserPaymentMethodOption {
+  value: string
+  label: string
+  description: string
+  icon: string
+  gateway_name: string
+  gateway_label: string
+  provider_type: string
+  payment_method: string
+  scene: string
+  scenes: string[]
+  sandbox: boolean
+  action_type: string
+  is_mock: boolean
+}
+
+export interface PaymentAction {
+  type: string
+  status: 'paid' | 'pending' | 'failed'
+  title: string
+  message: string
+  redirect_url: string
+  instructions: string[]
+  client_payload: Record<string, unknown>
+}
+
+export interface UserPaymentOptionsData {
+  order: Record<string, unknown>
+  available_methods: UserPaymentMethodOption[]
+  remaining_seconds: number
+  expires_at: string
+  support_phone: string
+  support_email: string
+  mock_enabled: boolean
+}
+
+export interface OrderPaymentResultData {
+  order_id: number
+  payment_id: number
+  payment_status: string
+  payment_action: PaymentAction
+  payment_record: Record<string, unknown>
+}
+
 export interface InvoiceTitleItem {
   id: number
   invoice_type: 'personal' | 'company'
@@ -334,6 +429,13 @@ export const settingsApi = {
   update: (data: Record<string, unknown>) => post('/admin/settings/update', data),
 }
 
+export const paymentGatewayApi = {
+  get: () => get<PaymentGatewaySettingsData>('/admin/payment-gateways'),
+  update: (data: { mock_enabled?: boolean }) => post('/admin/payment-gateways/update', data as Record<string, unknown>),
+  saveProvider: (data: Record<string, unknown>) => post<{ gateways: PaymentGatewayItem[] }>('/admin/payment-gateways/provider/save', data),
+  deleteProvider: (name: string) => post<{ gateways: PaymentGatewayItem[] }>('/admin/payment-gateways/provider/delete', { name }),
+}
+
 // ========== System ==========
 export const adminSystemApi = {
   reset: (confirm: string) => post<{ reset: boolean; deleted_counts: Record<string, number>; message: string }>('/admin/system/reset', { confirm }),
@@ -483,9 +585,11 @@ export const userOrderApi = {
   list: (params?: Record<string, unknown>) => get<PaginatedData>('/user/orders', params),
   guestHistory: (params?: { limit?: number }) => get<{ items: { guest_name: string; guest_mobile: string; masked_mobile: string }[] }>('/user/orders/guest-history', params as Record<string, unknown>),
   detail: (order_id: number) => get('/user/orders/detail', { order_id }),
+  paymentOptions: (order_id: number) => get<UserPaymentOptionsData>('/user/orders/payment-options', { order_id }),
   create: (data: Record<string, unknown>) => post('/user/orders/create', data),
   update: (data: Record<string, unknown>) => post('/user/orders/update', data),
-  pay: (data: { order_id: number; payment_method: string }) => post('/user/orders/pay', data),
+  pay: (data: { order_id: number; payment_method: string; gateway_name?: string; payment_scene?: string }) =>
+    post<OrderPaymentResultData>('/user/orders/pay', data as Record<string, unknown>),
   cancel: (data: { order_id: number; reason: string }) => post('/user/orders/cancel', data),
 }
 

@@ -122,6 +122,9 @@ from apps.api.serializers import (
     PasswordChangeSerializer,
     PointsLogSerializer,
     PaymentRecordSerializer,
+    PaymentGatewayDeleteSerializer,
+    PaymentGatewayProviderSerializer,
+    PaymentGatewaySettingsUpdateSerializer,
     ProfileUpdateSerializer,
     RegisterSerializer,
     ReplyReviewSerializer,
@@ -149,6 +152,16 @@ from apps.hotels.models import Hotel, RoomInventory, RoomType
 from apps.operations.models import AICallLog, PlatformConfig, SystemNotice
 from apps.operations.services.ai_service import AIChatService
 from apps.operations.services.prompt_service import PromptSceneError
+from apps.payments.services import build_payment_action, build_user_payment_methods, resolve_gateway_for_method
+from config.payment import (
+    PAYMENT_FIELD_LABELS,
+    PAYMENT_SCENE_LABELS,
+    delete_payment_gateway,
+    list_builtin_payment_templates,
+    load_payment_settings,
+    save_payment_gateway,
+    update_payment_settings,
+)
 from config.ai import load_ai_settings, update_ai_settings, BUILTIN_PROVIDERS
 from apps.payments.models import PaymentRecord
 from apps.reports.models import ReportTask
@@ -618,6 +631,7 @@ def get_dict_payload() -> dict:
             {"label": "模拟支付", "value": "mock"},
             {"label": "微信支付", "value": "wechat"},
             {"label": "支付宝", "value": "alipay"},
+            {"label": "其他支付平台", "value": "custom"},
             {"label": "现金", "value": "cash"},
             {"label": "银行卡", "value": "card"},
         ],
@@ -1370,6 +1384,53 @@ class UserOrderGuestHistoryView(APIView):
         return api_response(data={"items": items})
 
 
+class UserOrderPaymentOptionsView(APIView):
+    """用户订单支付方式接口：返回订单支付上下文和可用网关列表。"""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        order_id = request.query_params.get("order_id")
+        if not order_id:
+            return api_response(code=4002, message="缺少 order_id", data=None, status_code=400)
+        try:
+            order_id = int(order_id)
+        except (TypeError, ValueError):
+            return api_response(code=4001, message="参数格式错误", data=None, status_code=400)
+
+        order = (
+            BookingOrder.objects.filter(id=order_id, user=request.user)
+            .select_related("hotel", "room_type")
+            .prefetch_related("payments")
+            .first()
+        )
+        if not order:
+            return api_response(code=4040, message="订单不存在", data=None, status_code=404)
+
+        platform_config = PlatformConfig.load()
+        cancel_minutes = platform_config.order_auto_cancel_minutes
+        expires_at = order.created_at + timedelta(minutes=cancel_minutes)
+        remaining_seconds = max(0, int((expires_at - timezone.now()).total_seconds()))
+        if order.payment_status == BookingOrder.PAYMENT_PAID:
+            remaining_seconds = 0
+
+        available_methods = build_user_payment_methods()
+        if order.status != BookingOrder.STATUS_PENDING_PAYMENT or order.payment_status == BookingOrder.PAYMENT_PAID:
+            available_methods = []
+
+        return api_response(
+            data={
+                "order": UserBookingOrderSerializer(order).data,
+                "available_methods": available_methods,
+                "remaining_seconds": remaining_seconds,
+                "expires_at": expires_at.isoformat(),
+                "support_phone": platform_config.support_phone,
+                "support_email": platform_config.support_email,
+                "mock_enabled": load_payment_settings().mock_enabled,
+            }
+        )
+
+
 class UserOrdersDetailView(APIView):
     """用户订单详情接口，仅允许查看自己的订单。"""
     permission_classes = [IsAuthenticated]
@@ -1549,7 +1610,7 @@ class UserOrdersUpdateView(APIView):
 
 
 class UserOrdersPayView(APIView):
-    """用户订单支付接口：创建支付记录并更新订单支付状态。"""
+    """用户订单支付接口：根据支付方式生成模拟或真实网关支付动作。"""
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -1557,6 +1618,9 @@ class UserOrdersPayView(APIView):
         if not serializer.is_valid():
             return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         data = serializer.validated_data
+        payment_method = data["payment_method"]
+        gateway_name = str(data.get("gateway_name") or "").strip()
+        payment_scene = str(data.get("payment_scene") or "").strip().lower()
 
         from apps.bookings.tasks import cancel_timeout_unpaid_order
         cancel_minutes = PlatformConfig.load().order_auto_cancel_minutes
@@ -1578,42 +1642,119 @@ class UserOrdersPayView(APIView):
                     return api_response(code=4093, message="订单已超时未支付，已自动取消，请重新下单", data=None, status_code=409)
                 return api_response(code=4093, message="当前订单状态不允许支付", data=None, status_code=409)
 
-            payment = PaymentRecord.objects.create(
-                order=order,
-                payment_no=make_payment_no(),
-                method=data["payment_method"],
-                status=PaymentRecord.STATUS_PAID,
-                amount=order.pay_amount,
-                paid_at=timezone.now(),
-            )
-            paid_at = payment.paid_at or timezone.now()
-            order.payment_status = BookingOrder.PAYMENT_PAID
-            order.status = BookingOrder.STATUS_PAID
-            if not order.paid_at:
-                order.paid_at = paid_at
-            # 支付成功后奖励积分（事务内，保证一致性）
-            profile = ensure_profile(request.user)
-            base_points = int(order.pay_amount / Decimal("10"))
-            earned_points = int(base_points * Decimal(str(profile.points_multiplier))) if base_points > 0 else 0
-            if earned_points > 0:
-                order.points_earned = earned_points
-                order.save(update_fields=["payment_status", "status", "paid_at", "points_earned", "updated_at"])
-                add_points(
-                    request.user, earned_points, PointsLog.TYPE_CONSUME_REWARD,
-                    f"订单 {order.order_no} 消费奖励（{profile.points_multiplier}x倍率）",
+            payment_action = None
+            payment_payload = {
+                "order_id": order.id,
+                "order_no": order.order_no,
+                "payment_method": payment_method,
+                "gateway_name": gateway_name,
+                "payment_scene": payment_scene,
+            }
+
+            if payment_method == PaymentRecord.METHOD_MOCK:
+                settings = load_payment_settings()
+                if not settings.mock_enabled:
+                    return api_response(code=4093, message="模拟支付已关闭，请选择真实支付方式", data=None, status_code=409)
+
+                payment = PaymentRecord.objects.create(
                     order=order,
+                    payment_no=make_payment_no(),
+                    method=PaymentRecord.METHOD_MOCK,
+                    gateway_name="mock",
+                    gateway_label="模拟支付",
+                    provider_type="mock",
+                    scene="mock",
+                    status=PaymentRecord.STATUS_PAID,
+                    amount=order.pay_amount,
+                    paid_at=timezone.now(),
+                    request_payload=payment_payload,
+                    response_payload={},
                 )
+                paid_at = payment.paid_at or timezone.now()
+                order.payment_status = BookingOrder.PAYMENT_PAID
+                order.status = BookingOrder.STATUS_PAID
+                if not order.paid_at:
+                    order.paid_at = paid_at
+                # 支付成功后奖励积分（事务内，保证一致性）
+                profile = ensure_profile(request.user)
+                base_points = int(order.pay_amount / Decimal("10"))
+                earned_points = int(base_points * Decimal(str(profile.points_multiplier))) if base_points > 0 else 0
+                if earned_points > 0:
+                    order.points_earned = earned_points
+                    order.save(update_fields=["payment_status", "status", "paid_at", "points_earned", "updated_at"])
+                    add_points(
+                        request.user,
+                        earned_points,
+                        PointsLog.TYPE_CONSUME_REWARD,
+                        f"订单 {order.order_no} 消费奖励（{profile.points_multiplier}x倍率）",
+                        order=order,
+                    )
+                else:
+                    order.save(update_fields=["payment_status", "status", "paid_at", "updated_at"])
+                payment_action = build_payment_action(order=order, gateway=None, payment_no=payment.payment_no)
+                payment.response_payload = payment_action
+                payment.save(update_fields=["response_payload"])
             else:
-                order.save(update_fields=["payment_status", "status", "paid_at", "updated_at"])
+                gateway = resolve_gateway_for_method(payment_method, gateway_name=gateway_name)
+                if gateway is None:
+                    return api_response(code=4003, message="当前支付方式未配置或已关闭，请联系管理员", data=None, status_code=400)
+                if payment_scene and payment_scene not in gateway.normalized_scenes:
+                    return api_response(code=4001, message="所选支付场景当前不可用", data=None, status_code=400)
+
+                payment = PaymentRecord.objects.create(
+                    order=order,
+                    payment_no=make_payment_no(),
+                    method=gateway.payment_method,
+                    gateway_name=gateway.name,
+                    gateway_label=gateway.label,
+                    provider_type=gateway.provider_type,
+                    scene=payment_scene or gateway.primary_scene,
+                    status=PaymentRecord.STATUS_UNPAID,
+                    amount=order.pay_amount,
+                    request_payload=payment_payload,
+                    response_payload={},
+                )
+                payment_action = build_payment_action(order=order, gateway=gateway, payment_no=payment.payment_no)
+                payment.response_payload = payment_action
+                payment.save(update_fields=["response_payload"])
+                order.save(update_fields=["updated_at"])
+
+        if payment_action and payment_action.get("status") == "paid":
+            SystemNotice.objects.create(
+                user=request.user,
+                notice_type=SystemNotice.TYPE_PAYMENT,
+                title="支付成功",
+                content=f"订单 {order.order_no} 已完成支付。",
+                related_order=order,
+            )
+            return api_response(
+                message="支付成功",
+                data={
+                    "order_id": order.id,
+                    "payment_id": payment.id,
+                    "payment_status": order.payment_status,
+                    "payment_action": payment_action,
+                    "payment_record": PaymentRecordSerializer(payment).data,
+                },
+            )
 
         SystemNotice.objects.create(
             user=request.user,
             notice_type=SystemNotice.TYPE_PAYMENT,
-            title="支付成功",
-            content=f"订单 {order.order_no} 已完成支付。",
+            title="支付请求已创建",
+            content=f"订单 {order.order_no} 的支付请求已生成，请继续完成支付。",
             related_order=order,
         )
-        return api_response(message="支付成功", data={"order_id": order.id, "payment_id": payment.id, "payment_status": order.payment_status})
+        return api_response(
+            message="支付请求已创建",
+            data={
+                "order_id": order.id,
+                "payment_id": payment.id,
+                "payment_status": order.payment_status,
+                "payment_action": payment_action,
+                "payment_record": PaymentRecordSerializer(payment).data,
+            },
+        )
 
 
 class UserOrdersCancelView(APIView):
@@ -1653,7 +1794,7 @@ class UserOrdersCancelView(APIView):
                 update_fields.append("payment_status")
                 PaymentRecord.objects.filter(
                     order=order, status=PaymentRecord.STATUS_PAID,
-                ).update(status=PaymentRecord.STATUS_REFUNDED)
+                ).update(status=PaymentRecord.STATUS_REFUNDED, refunded_at=timezone.now())
 
             order.save(update_fields=update_fields)
 
@@ -3410,6 +3551,86 @@ class AdminSettingsView(APIView):
                 setattr(cfg, field, data[field])
         cfg.save()
         return api_response(message="平台设置已更新", data=self._serialize_config(cfg))
+
+
+class AdminPaymentGatewaySettingsView(APIView):
+    """支付网关设置接口：仅系统管理员可查看或修改支付运行时配置。"""
+
+    permission_classes = [IsAuthenticated, IsSystemAdminRole]
+
+    def get(self, request):
+        payment_settings = load_payment_settings()
+        return api_response(
+            data={
+                "mock_enabled": payment_settings.mock_enabled,
+                "gateways": payment_settings.list_gateways(),
+                "builtin_templates": list_builtin_payment_templates(),
+                "field_labels": PAYMENT_FIELD_LABELS,
+                "scene_labels": PAYMENT_SCENE_LABELS,
+            }
+        )
+
+    def post(self, request):
+        serializer = PaymentGatewaySettingsUpdateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
+        settings = update_payment_settings(mock_enabled=serializer.validated_data.get("mock_enabled"))
+        return api_response(
+            message="支付网关设置已更新",
+            data={
+                "mock_enabled": settings.mock_enabled,
+                "gateways": settings.list_gateways(),
+            },
+        )
+
+
+class AdminPaymentGatewayProviderSaveView(APIView):
+    """支付网关新增或编辑接口：保存微信、支付宝或其他支付平台配置。"""
+
+    permission_classes = [IsAuthenticated, IsSystemAdminRole]
+
+    _PUBLIC_URL_PATTERN = re.compile(
+        r"(127\.0\.0\.1|localhost|0\.0\.0\.0|169\.254|10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|metadata|internal)",
+        re.IGNORECASE,
+    )
+
+    @classmethod
+    def _validate_public_url(cls, value: str, field_name: str):
+        """Reject internal callback or gateway endpoints to reduce SSRF risk."""
+
+        if value and cls._PUBLIC_URL_PATTERN.search(value):
+            raise ValueError(f"{field_name} 不允许使用内网地址")
+
+    def post(self, request):
+        serializer = PaymentGatewayProviderSerializer(data=request.data)
+        if not serializer.is_valid():
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
+
+        data = dict(serializer.validated_data)
+        try:
+            # 限制网关、回调和托管收银台 URL 只能指向外部地址，避免把敏感请求打进内网。
+            self._validate_public_url(str(data.get("gateway_url") or ""), "gateway_url")
+            self._validate_public_url(str(data.get("checkout_url") or ""), "checkout_url")
+            self._validate_public_url(str(data.get("notify_url") or ""), "notify_url")
+            self._validate_public_url(str(data.get("return_url") or ""), "return_url")
+        except ValueError as exc:
+            return api_response(code=4001, message=str(exc), data=None, status_code=400)
+
+        settings = save_payment_gateway(data)
+        return api_response(message="支付网关已保存", data={"gateways": settings.list_gateways()})
+
+
+class AdminPaymentGatewayProviderDeleteView(APIView):
+    """支付网关删除接口：仅系统管理员可删除运行时支付配置。"""
+
+    permission_classes = [IsAuthenticated, IsSystemAdminRole]
+
+    def post(self, request):
+        serializer = PaymentGatewayDeleteSerializer(data=request.data)
+        if not serializer.is_valid():
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
+        settings = delete_payment_gateway(serializer.validated_data["name"])
+        return api_response(message="支付网关已删除", data={"gateways": settings.list_gateways()})
 
 
 class AdminSystemStatusView(APIView):

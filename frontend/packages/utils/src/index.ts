@@ -46,6 +46,39 @@ export function buildImageThumbUrl(url: string | null | undefined, width = 56, h
   }
 }
 
+export function normalizeImageList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => String(item ?? '').trim())
+      .filter(Boolean)
+  }
+
+  if (typeof value !== 'string') {
+    return []
+  }
+
+  const raw = value.trim()
+  if (!raw) return []
+
+  if (raw.startsWith('[') && raw.endsWith(']')) {
+    try {
+      return normalizeImageList(JSON.parse(raw))
+    } catch {
+      return []
+    }
+  }
+
+  return [raw]
+}
+
+export function buildImageThumbList(
+  value: unknown,
+  width = 56,
+  height = 40,
+): string[] {
+  return normalizeImageList(value).map((url) => buildImageThumbUrl(url, width, height))
+}
+
 export function debounce<T extends (...args: unknown[]) => void>(fn: T, delay = 300): T {
   let timer: ReturnType<typeof setTimeout> | null = null
   return ((...args: unknown[]) => {
@@ -117,9 +150,34 @@ export const PAYMENT_METHOD_MAP: Record<string, string> = {
   mock: '模拟支付',
   wechat: '微信支付',
   alipay: '支付宝',
+  custom: '其他支付平台',
   cash: '现金',
   card: '银行卡',
 }
+
+export type PaymentGatewaySwitchKey = 'enabled' | 'sandbox'
+
+export interface PaymentGatewaySwitchMeta {
+  key: PaymentGatewaySwitchKey
+  label: string
+  description: string
+  tone: 'teal' | 'amber'
+}
+
+export const PAYMENT_GATEWAY_SWITCH_META: readonly PaymentGatewaySwitchMeta[] = [
+  {
+    key: 'enabled',
+    label: '启用网关',
+    description: '保存后参与用户端支付方式展示与真实下单路由。',
+    tone: 'teal',
+  },
+  {
+    key: 'sandbox',
+    label: '沙箱 / 联调',
+    description: '标记当前商户用于测试、联调或沙箱环境。',
+    tone: 'amber',
+  },
+]
 
 export const PAYMENT_STATUS_MAP: Record<string, string> = {
   unpaid: '未支付',
@@ -127,6 +185,20 @@ export const PAYMENT_STATUS_MAP: Record<string, string> = {
   failed: '支付失败',
   refunding: '退款中',
   refunded: '已退款',
+}
+
+export function suggestUniquePaymentGatewayName(base: string, existingNames: string[]): string {
+  const normalizedBase = base.toLowerCase().trim().replace(/[^a-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '') || 'gateway'
+  let candidate = normalizedBase
+  let index = 1
+  const names = new Set(existingNames)
+
+  while (names.has(candidate)) {
+    index += 1
+    candidate = `${normalizedBase}_${index}`
+  }
+
+  return candidate
 }
 
 export type FieldErrors = Record<string, string>

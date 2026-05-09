@@ -24,6 +24,11 @@ from apps.operations.services.prompt_service import PromptTemplateService
 from apps.payments.models import PaymentRecord
 from apps.users.models import UserProfile
 from config.ai import _get_runtime_config_path
+from config.payment import (
+    _get_runtime_config_path as _get_payment_runtime_config_path,
+    save_payment_gateway,
+    update_payment_settings,
+)
 from PIL import Image
 
 User = get_user_model()
@@ -136,10 +141,13 @@ class ApiBaseTestCase(APITestCase):
         path = _get_runtime_config_path()
         if path.exists():
             path.unlink()
+        payment_path = _get_payment_runtime_config_path()
+        if payment_path.exists():
+            payment_path.unlink()
         try:
             from apps.operations.models import RuntimeConfig
 
-            RuntimeConfig.objects.filter(key="ai_runtime").delete()
+            RuntimeConfig.objects.filter(key__in=["ai_runtime", "payment_runtime"]).delete()
         except Exception:
             pass
 
@@ -231,6 +239,88 @@ class UserApiTests(ApiBaseTestCase):
         )
         self.assertEqual(pay_response.status_code, 200)
         self.assertEqual(pay_response.json()["data"]["payment_status"], "paid")
+
+    def test_user_payment_options_should_follow_gateway_settings(self):
+        """验证用户支付方式列表会严格跟随支付网关配置变化。"""
+        save_payment_gateway({
+            "name": "wechat_main",
+            "label": "微信支付主商户",
+            "provider_type": "wechat",
+            "enabled": True,
+            "sandbox": True,
+            "scenes": ["jsapi"],
+            "gateway_url": "https://api.mch.weixin.qq.com/v3",
+            "notify_url": "https://pay.example.com/wechat/notify",
+            "return_url": "https://pay.example.com/payment/result",
+            "app_id": "wx1234567890",
+            "merchant_id": "1900000109",
+            "merchant_cert_serial_no": "SERIAL123456",
+            "api_v3_key": "12345678901234567890123456789012",
+            "merchant_private_key": "wechat-private-key",
+        })
+        update_payment_settings(mock_enabled=False)
+
+        self.login_user()
+        response = self.client.get("/api/v1/user/orders/payment-options", {"order_id": self.order.id})
+        self.assertEqual(response.status_code, 200)
+
+        payload = response.json()["data"]
+        self.assertFalse(payload["mock_enabled"])
+        self.assertEqual(len(payload["available_methods"]), 1)
+        self.assertEqual(payload["available_methods"][0]["value"], "wechat")
+        self.assertEqual(payload["available_methods"][0]["gateway_name"], "wechat_main")
+
+    def test_user_pay_with_mock_should_fail_when_mock_disabled(self):
+        """验证关闭模拟支付后，用户不能再通过 mock 支付直接成功。"""
+        update_payment_settings(mock_enabled=False)
+        self.login_user()
+
+        response = self.client.post(
+            "/api/v1/user/orders/pay",
+            {"order_id": self.order.id, "payment_method": "mock"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("模拟支付已关闭", response.json()["message"])
+
+    def test_user_pay_with_real_gateway_should_return_pending_action(self):
+        """验证真实网关支付会返回待完成的支付动作，而不是直接标记为已支付。"""
+        save_payment_gateway({
+            "name": "alipay_live",
+            "label": "支付宝直营",
+            "provider_type": "alipay",
+            "enabled": True,
+            "sandbox": False,
+            "scenes": ["page"],
+            "gateway_url": "https://openapi.alipay.com/gateway.do",
+            "notify_url": "https://pay.example.com/alipay/notify",
+            "return_url": "https://pay.example.com/payment/result",
+            "app_id": "2021000118630000",
+            "app_private_key": "alipay-private-key",
+            "alipay_public_key": "alipay-public-key",
+            "sign_type": "RSA2",
+            "charset": "utf-8",
+        })
+        update_payment_settings(mock_enabled=False)
+        self.login_user()
+
+        response = self.client.post(
+            "/api/v1/user/orders/pay",
+            {"order_id": self.order.id, "payment_method": "alipay"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()["data"]
+        self.assertEqual(payload["payment_status"], "unpaid")
+        self.assertEqual(payload["payment_action"]["status"], "pending")
+        self.assertEqual(payload["payment_record"]["gateway_name"], "alipay_live")
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.payment_status, BookingOrder.PAYMENT_UNPAID)
+        self.assertEqual(self.order.status, BookingOrder.STATUS_PENDING_PAYMENT)
+        payment = PaymentRecord.objects.get(id=payload["payment_id"])
+        self.assertEqual(payment.status, PaymentRecord.STATUS_UNPAID)
+        self.assertEqual(payment.gateway_label, "支付宝直营")
 
     def test_user_pay_timeout_order_should_auto_cancel(self):
         """验证支付超时订单时会被自动取消，避免长期挂起。"""
@@ -1110,6 +1200,59 @@ class AdminApiTests(ApiBaseTestCase):
         ai_settings = self.client.get("/api/v1/admin/ai/settings")
         self.assertEqual(ai_settings.status_code, 200)
         self.assertIn("active_provider", ai_settings.json()["data"])
+
+    def test_admin_payment_gateway_settings_crud(self):
+        """验证管理端可读取、保存并删除支付网关配置。"""
+        self.login_admin()
+
+        update_response = self.client.post(
+            "/api/v1/admin/payment-gateways/update",
+            {"mock_enabled": False},
+            format="json",
+        )
+        self.assertEqual(update_response.status_code, 200)
+        self.assertFalse(update_response.json()["data"]["mock_enabled"])
+
+        save_response = self.client.post(
+            "/api/v1/admin/payment-gateways/provider/save",
+            {
+                "name": "wechat_main",
+                "label": "微信支付主商户",
+                "provider_type": "wechat",
+                "enabled": True,
+                "sandbox": True,
+                "priority": 10,
+                "scenes": ["jsapi", "h5"],
+                "gateway_url": "https://api.mch.weixin.qq.com/v3",
+                "notify_url": "https://pay.example.com/wechat/notify",
+                "return_url": "https://pay.example.com/payment/result",
+                "app_id": "wx1234567890",
+                "merchant_id": "1900000109",
+                "merchant_cert_serial_no": "SERIAL123456",
+                "api_v3_key": "12345678901234567890123456789012",
+                "merchant_private_key": "wechat-private-key",
+            },
+            format="json",
+        )
+        self.assertEqual(save_response.status_code, 200)
+        self.assertEqual(save_response.json()["code"], 0)
+
+        settings_response = self.client.get("/api/v1/admin/payment-gateways")
+        self.assertEqual(settings_response.status_code, 200)
+        settings_payload = settings_response.json()["data"]
+        self.assertFalse(settings_payload["mock_enabled"])
+        self.assertIn("field_labels", settings_payload)
+        target = next(item for item in settings_payload["gateways"] if item["name"] == "wechat_main")
+        self.assertTrue(target["secret_flags"]["api_v3_key"])
+        self.assertTrue(target["is_configured"])
+
+        delete_response = self.client.post(
+            "/api/v1/admin/payment-gateways/provider/delete",
+            {"name": "wechat_main"},
+            format="json",
+        )
+        self.assertEqual(delete_response.status_code, 200)
+        self.assertFalse(any(item["name"] == "wechat_main" for item in delete_response.json()["data"]["gateways"]))
 
     def test_admin_hotel_and_room_create_should_reject_duplicates(self):
         """验证酒店与房型重复创建会返回明确错误。"""

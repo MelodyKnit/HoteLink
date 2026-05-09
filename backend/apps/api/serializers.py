@@ -196,11 +196,13 @@ class BookingOrderSerializer(serializers.ModelSerializer):
     hotel_id = serializers.IntegerField(read_only=True)
     room_type_id = serializers.IntegerField(read_only=True)
     payment_method = serializers.SerializerMethodField()
+    payment_gateway_label = serializers.SerializerMethodField()
     paid_at = serializers.SerializerMethodField()
     total_amount = serializers.SerializerMethodField()
     has_review = serializers.SerializerMethodField()
     is_lifecycle_anomaly = serializers.SerializerMethodField()
     lifecycle_warning = serializers.SerializerMethodField()
+    latest_payment = serializers.SerializerMethodField()
 
     def _latest_payment(self, obj):
         """从预取缓存中获取最新支付记录，避免额外查询。"""
@@ -210,6 +212,12 @@ class BookingOrderSerializer(serializers.ModelSerializer):
     def get_payment_method(self, obj):
         latest_payment = self._latest_payment(obj)
         return latest_payment.method if latest_payment else ""
+
+    def get_payment_gateway_label(self, obj):
+        latest_payment = self._latest_payment(obj)
+        if latest_payment and latest_payment.gateway_label:
+            return latest_payment.gateway_label
+        return dict(PaymentRecord.METHOD_CHOICES).get(self.get_payment_method(obj), "")
 
     def get_paid_at(self, obj):
         if obj.paid_at:
@@ -241,6 +249,12 @@ class BookingOrderSerializer(serializers.ModelSerializer):
             return f"订单离店日 {obj.check_out_date} 已过，仍未办理入住/退房，请人工核查"
         return ""
 
+    def get_latest_payment(self, obj):
+        latest_payment = self._latest_payment(obj)
+        if latest_payment is None:
+            return None
+        return PaymentRecordSerializer(latest_payment).data
+
     class Meta:
         model = BookingOrder
         fields = [
@@ -255,6 +269,7 @@ class BookingOrderSerializer(serializers.ModelSerializer):
             "status",
             "payment_status",
             "payment_method",
+            "payment_gateway_label",
             "paid_at",
             "confirmed_at",
             "checked_in_at",
@@ -274,6 +289,7 @@ class BookingOrderSerializer(serializers.ModelSerializer):
             "discount_amount",
             "pay_amount",
             "total_amount",
+            "latest_payment",
             "has_review",
             "is_lifecycle_anomaly",
             "lifecycle_warning",
@@ -298,7 +314,23 @@ class PaymentRecordSerializer(serializers.ModelSerializer):
     """PaymentRecord 序列化器：用于接口参数校验或响应数据转换。"""
     class Meta:
         model = PaymentRecord
-        fields = ["id", "order_id", "payment_no", "method", "status", "amount", "paid_at", "created_at"]
+        fields = [
+            "id",
+            "order_id",
+            "payment_no",
+            "method",
+            "gateway_name",
+            "gateway_label",
+            "provider_type",
+            "scene",
+            "status",
+            "amount",
+            "external_trade_no",
+            "failure_reason",
+            "paid_at",
+            "refunded_at",
+            "created_at",
+        ]
 
 
 class ReportTaskSerializer(serializers.ModelSerializer):
@@ -405,6 +437,8 @@ class OrderPaySerializer(serializers.Serializer):
     """OrderPay 序列化器：用于接口参数校验或响应数据转换。"""
     order_id = serializers.IntegerField(min_value=1)
     payment_method = serializers.ChoiceField(choices=PaymentRecord.METHOD_CHOICES)
+    gateway_name = serializers.CharField(max_length=50, required=False, allow_blank=True)
+    payment_scene = serializers.CharField(max_length=20, required=False, allow_blank=True)
 
 
 class OrderCancelSerializer(serializers.Serializer):
@@ -829,6 +863,78 @@ class AIProviderSwitchSerializer(serializers.Serializer):
 class AIProviderDeleteSerializer(serializers.Serializer):
     """AIProviderDelete 序列化器：删除供应商。"""
     provider_name = serializers.CharField(max_length=50)
+
+
+class PaymentGatewaySettingsUpdateSerializer(serializers.Serializer):
+    """支付网关全局配置序列化器。"""
+
+    mock_enabled = serializers.BooleanField(required=False)
+
+
+class PaymentGatewayProviderSerializer(serializers.Serializer):
+    """支付网关新增/编辑序列化器。"""
+
+    PROVIDER_TYPE_CHOICES = [("wechat", "微信支付"), ("alipay", "支付宝"), ("custom", "其他支付平台")]
+
+    name = serializers.CharField(max_length=50)
+    label = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    provider_type = serializers.ChoiceField(choices=PROVIDER_TYPE_CHOICES)
+    payment_method = serializers.ChoiceField(choices=PaymentRecord.METHOD_CHOICES, required=False)
+    enabled = serializers.BooleanField(required=False, default=False)
+    sandbox = serializers.BooleanField(required=False, default=False)
+    priority = serializers.IntegerField(min_value=0, max_value=9999, required=False, default=100)
+    description = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
+    scenes = serializers.ListField(child=serializers.CharField(max_length=20), required=False, default=list)
+    gateway_url = serializers.URLField(required=False, allow_blank=True)
+    checkout_url = serializers.URLField(required=False, allow_blank=True)
+    notify_url = serializers.URLField(required=False, allow_blank=True)
+    return_url = serializers.URLField(required=False, allow_blank=True)
+    app_id = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    merchant_id = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    merchant_name = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    merchant_cert_serial_no = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    api_v3_key = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    merchant_private_key = serializers.CharField(required=False, allow_blank=True)
+    merchant_certificate = serializers.CharField(required=False, allow_blank=True)
+    platform_certificate = serializers.CharField(required=False, allow_blank=True)
+    platform_public_key = serializers.CharField(required=False, allow_blank=True)
+    app_private_key = serializers.CharField(required=False, allow_blank=True)
+    alipay_public_key = serializers.CharField(required=False, allow_blank=True)
+    sign_type = serializers.CharField(max_length=50, required=False, allow_blank=True)
+    charset = serializers.CharField(max_length=50, required=False, allow_blank=True)
+    extra = serializers.DictField(required=False, default=dict)
+
+    def validate_name(self, value: str) -> str:
+        normalized = "".join(char for char in value.strip().lower() if char.isalnum() or char in {"_", "-"})
+        if not normalized:
+            raise serializers.ValidationError("网关标识不能为空，且仅支持字母、数字、下划线和短横线")
+        return normalized
+
+    def validate(self, attrs):
+        provider_type = attrs["provider_type"]
+        if provider_type == "wechat":
+            attrs["payment_method"] = PaymentRecord.METHOD_WECHAT
+        elif provider_type == "alipay":
+            attrs["payment_method"] = PaymentRecord.METHOD_ALIPAY
+        else:
+            attrs["payment_method"] = attrs.get("payment_method") or PaymentRecord.METHOD_CUSTOM
+
+        scenes = [str(item).strip().lower() for item in attrs.get("scenes", []) if str(item).strip()]
+        if not scenes:
+            if provider_type == "wechat":
+                scenes = ["jsapi"]
+            elif provider_type == "alipay":
+                scenes = ["page"]
+            else:
+                scenes = ["redirect"]
+        attrs["scenes"] = list(dict.fromkeys(scenes))
+        return attrs
+
+
+class PaymentGatewayDeleteSerializer(serializers.Serializer):
+    """支付网关删除序列化器。"""
+
+    name = serializers.CharField(max_length=50)
 
 
 class SystemResetSerializer(serializers.Serializer):

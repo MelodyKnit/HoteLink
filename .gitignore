@@ -1,6 +1,7 @@
 .vscode/
 .idea/
 .codex/
+worknote
 
 # Python
 __pycache__/
@@ -46,6 +47,9 @@ pnpm-debug.log*
 .cache/
 .parcel-cache/
 .sass-cache/
+playwright-report/
+test-results/
+.playwright-artifacts/
 
 # Environment files
 .env

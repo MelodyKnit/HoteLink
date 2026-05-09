@@ -73,7 +73,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { userReviewApi } from '@hotelink/api'
-import { buildImageThumbUrl } from '@hotelink/utils'
+import { buildImageThumbList, normalizeImageList } from '@hotelink/utils'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
@@ -126,7 +126,8 @@ onMounted(async () => {
       reviews.value = Array.isArray(rawItems)
         ? rawItems.map((item: any) => ({
           ...item,
-          image_thumbs: (Array.isArray(item?.images) ? item.images : []).map((url: string) => buildImageThumbUrl(url, 160, 160)),
+          images: normalizeImageList(item?.images),
+          image_thumbs: buildImageThumbList(item?.images, 160, 160),
         }))
         : []
     } else {

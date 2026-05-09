@@ -142,6 +142,7 @@ const ALL_MENU_GROUPS = [
   {
     label: '财务与报表',
     items: [
+      { path: '/admin/payment-gateways', icon: '💸', label: '支付网关', systemOnly: true },
       { path: '/admin/reports', icon: '📈', label: '经营报表' },
     ],
   },

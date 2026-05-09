@@ -311,18 +311,41 @@
         <div class="mt-6">
           <h3 class="mb-4 text-lg font-bold text-gray-900">住客评价</h3>
           <div v-if="reviews.length" class="space-y-3">
-            <div v-for="r in reviews" :key="r.id" class="rounded-2xl bg-white p-4 shadow-sm">
-              <div class="flex items-center justify-between">
-                <div class="flex items-center gap-2">
+            <div v-for="r in reviews" :key="r.id" class="overflow-hidden rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-100">
+              <div class="flex items-start justify-between gap-3">
+                <div class="flex min-w-0 items-center gap-2">
                   <div class="flex h-8 w-8 items-center justify-center rounded-full bg-brand/10 text-xs font-bold text-brand">{{ (r.username || '用户').charAt(0) }}</div>
-                  <span class="text-sm font-medium text-gray-800">{{ r.username || '匿名用户' }}</span>
+                  <span class="truncate text-sm font-medium text-gray-800">{{ r.username || '匿名用户' }}</span>
                 </div>
-                <span class="text-xs text-yellow-500">{{ '★'.repeat(r.score) }}</span>
+                <span class="shrink-0 text-xs text-yellow-500">{{ '★'.repeat(r.score) }}</span>
               </div>
-              <p class="mt-2 text-sm text-gray-600">{{ r.content }}</p>
-              <p class="mt-2 text-xs text-gray-400">{{ r.created_at }}</p>
-              <div v-if="r.reply" class="mt-2 rounded-lg bg-gray-50 p-3 text-xs text-gray-500">
-                <span class="font-medium text-brand">酒店回复：</span>{{ r.reply }}
+
+              <p class="mt-3 whitespace-pre-wrap break-all text-sm leading-7 text-gray-600 [overflow-wrap:anywhere]">
+                {{ r.content || '（未填写评价内容）' }}
+              </p>
+
+              <div v-if="r.image_thumbs?.length" class="mt-3 flex gap-2 overflow-x-auto pb-1">
+                <img
+                  v-for="(img, index) in r.image_thumbs"
+                  :key="`${r.id}-review-image-${index}`"
+                  :src="img"
+                  :alt="`${r.username || '住客'}的评价图片 ${index + 1}`"
+                  class="h-20 w-20 shrink-0 rounded-xl object-cover ring-1 ring-slate-100"
+                  loading="lazy"
+                  decoding="async"
+                />
+              </div>
+
+              <div class="mt-3 flex items-center justify-between gap-3 text-xs text-gray-400">
+                <span class="break-all [overflow-wrap:anywhere]">{{ r.created_at_display || r.created_at }}</span>
+                <span v-if="r.reply_content" class="shrink-0 text-brand">酒店已回复</span>
+              </div>
+
+              <div v-if="r.reply_content" class="mt-3 rounded-xl bg-gray-50 p-3 text-xs text-gray-500">
+                <p class="font-medium text-gray-700">酒店回复：</p>
+                <p class="mt-1 whitespace-pre-wrap break-all leading-6 [overflow-wrap:anywhere]">
+                  {{ r.reply_content }}
+                </p>
               </div>
             </div>
           </div>
@@ -384,7 +407,19 @@ const route = useRoute()
 const router = useRouter()
 const loading = ref(true)
 const hotel = ref<any>({})
-const reviews = ref<any[]>([])
+interface HotelReviewItem {
+  id: number
+  username: string
+  score: number
+  content: string
+  images: string[]
+  image_thumbs: string[]
+  reply_content: string
+  created_at: string
+  created_at_display: string
+}
+
+const reviews = ref<HotelReviewItem[]>([])
 const currentImg = ref(0)
 const imagePreviewVisible = ref(false)
 const previewImgIndex = ref(0)
@@ -586,6 +621,17 @@ function formatFacilityLabel(value: unknown): string {
   return FACILITY_MAP[key] || key.replace(/_/g, ' ')
 }
 
+function formatReviewDateTime(value: unknown): string {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  const date = new Date(raw)
+  if (Number.isNaN(date.getTime())) {
+    return raw.replace('T', ' ').slice(0, 16)
+  }
+  const pad = (num: number) => String(num).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
 function withTimeout<T>(promise: Promise<T>, timeoutMs = 12000): Promise<T> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('timeout')), timeoutMs)
@@ -613,6 +659,23 @@ function normalizeHotelData(data: any) {
       image_url: room?.image_url || room?.image || cover || '',
       image_thumb: buildImageThumbUrl(room?.image_url || room?.image || cover || '', 256, 256) || room?.image_thumb || room?.image_url || room?.image || cover || '',
     })),
+  }
+}
+
+function normalizeReviewData(item: any): HotelReviewItem {
+  const images = Array.isArray(item?.images)
+    ? item.images.filter((url: unknown) => typeof url === 'string' && url.trim())
+    : []
+  return {
+    id: Number(item?.id) || 0,
+    username: String(item?.username || '匿名用户'),
+    score: Number(item?.score) || 0,
+    content: String(item?.content || ''),
+    images,
+    image_thumbs: images.map((url: string) => buildImageThumbUrl(url, 160, 160) || url),
+    reply_content: String(item?.reply_content || item?.reply || ''),
+    created_at: String(item?.created_at || ''),
+    created_at_display: formatReviewDateTime(item?.created_at),
   }
 }
 
@@ -914,7 +977,9 @@ async function loadHotelDetail() {
 
     if (reviewResult.status === 'fulfilled') {
       const reviewRes = reviewResult.value
-      reviews.value = (reviewRes.code === 0 && reviewRes.data) ? ((reviewRes.data as any).items || []) : []
+      reviews.value = (reviewRes.code === 0 && reviewRes.data)
+        ? (((reviewRes.data as any).items || []).map(normalizeReviewData))
+        : []
     } else {
       reviews.value = []
     }

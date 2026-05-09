@@ -8,12 +8,14 @@ class PaymentRecord(models.Model):
     METHOD_MOCK = "mock"
     METHOD_WECHAT = "wechat"
     METHOD_ALIPAY = "alipay"
+    METHOD_CUSTOM = "custom"
     METHOD_CASH = "cash"
     METHOD_CARD = "card"
     METHOD_CHOICES = [
         (METHOD_MOCK, "模拟支付"),
         (METHOD_WECHAT, "微信支付"),
         (METHOD_ALIPAY, "支付宝"),
+        (METHOD_CUSTOM, "其他支付平台"),
         (METHOD_CASH, "现金"),
         (METHOD_CARD, "银行卡"),
     ]
@@ -35,9 +37,19 @@ class PaymentRecord(models.Model):
     order = models.ForeignKey("bookings.BookingOrder", on_delete=models.CASCADE, related_name="payments")
     payment_no = models.CharField(max_length=64, unique=True)
     method = models.CharField(max_length=20, choices=METHOD_CHOICES, default=METHOD_MOCK)
+    gateway_name = models.CharField(max_length=50, blank=True, db_index=True)
+    gateway_label = models.CharField(max_length=100, blank=True)
+    provider_type = models.CharField(max_length=20, blank=True, db_index=True)
+    scene = models.CharField(max_length=20, blank=True, db_index=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_UNPAID)
     amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    external_trade_no = models.CharField(max_length=100, blank=True, db_index=True)
+    request_payload = models.JSONField(default=dict, blank=True)
+    response_payload = models.JSONField(default=dict, blank=True)
+    notify_payload = models.JSONField(default=dict, blank=True)
+    failure_reason = models.CharField(max_length=255, blank=True)
     paid_at = models.DateTimeField(null=True, blank=True)
+    refunded_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

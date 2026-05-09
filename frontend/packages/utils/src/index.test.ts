@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  PAYMENT_GATEWAY_SWITCH_META,
+  buildImageThumbList,
   buildImageThumbUrl,
   extractApiFieldErrors,
   formatDate,
   formatMoney,
   isValidChineseMobile,
+  normalizeImageList,
+  suggestUniquePaymentGatewayName,
 } from './index'
 
 describe('utils helpers', () => {
@@ -29,6 +33,19 @@ describe('utils helpers', () => {
     )
   })
 
+  it('normalizes raw image payloads and builds thumbs for review images', () => {
+    expect(normalizeImageList(['/media/reviews/a.jpg', '  ', null])).toEqual([
+      '/media/reviews/a.jpg',
+    ])
+    expect(normalizeImageList('["/media/reviews/a.jpg","/media/reviews/b.jpg"]')).toEqual([
+      '/media/reviews/a.jpg',
+      '/media/reviews/b.jpg',
+    ])
+    expect(buildImageThumbList('["/media/reviews/a.jpg"]', 160, 160)).toEqual([
+      '/api/v1/common/image-thumb?url=%2Fmedia%2Freviews%2Fa.jpg&w=160&h=160',
+    ])
+  })
+
   it('extracts translated field errors from api payloads', () => {
     const fieldErrors = extractApiFieldErrors({
       data: {
@@ -48,5 +65,28 @@ describe('utils helpers', () => {
   it('validates chinese mobile numbers', () => {
     expect(isValidChineseMobile('13800138000')).toBe(true)
     expect(isValidChineseMobile('23800138000')).toBe(false)
+  })
+
+  it('exposes unified payment gateway switch metadata', () => {
+    expect(PAYMENT_GATEWAY_SWITCH_META).toEqual([
+      {
+        key: 'enabled',
+        label: '启用网关',
+        description: '保存后参与用户端支付方式展示与真实下单路由。',
+        tone: 'teal',
+      },
+      {
+        key: 'sandbox',
+        label: '沙箱 / 联调',
+        description: '标记当前商户用于测试、联调或沙箱环境。',
+        tone: 'amber',
+      },
+    ])
+  })
+
+  it('suggests unique payment gateway names from existing identifiers', () => {
+    expect(suggestUniquePaymentGatewayName('Wechat Main', [])).toBe('wechat_main')
+    expect(suggestUniquePaymentGatewayName('Wechat Main', ['wechat_main'])).toBe('wechat_main_2')
+    expect(suggestUniquePaymentGatewayName('***', [])).toBe('gateway')
   })
 })
