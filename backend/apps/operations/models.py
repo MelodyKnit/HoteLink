@@ -65,6 +65,7 @@ class SystemNotice(models.Model):
     TYPE_REVIEW = "review"
     TYPE_MEMBER = "member"
     TYPE_COUPON = "coupon"
+    TYPE_INVOICE = "invoice"
     TYPE_CHOICES = [
         (TYPE_ORDER, "订单通知"),
         (TYPE_PAYMENT, "支付通知"),
@@ -73,6 +74,7 @@ class SystemNotice(models.Model):
         (TYPE_REVIEW, "评价通知"),
         (TYPE_MEMBER, "会员通知"),
         (TYPE_COUPON, "优惠券通知"),
+        (TYPE_INVOICE, "发票通知"),
     ]
 
     user_id: int

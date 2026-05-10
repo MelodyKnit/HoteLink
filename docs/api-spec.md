@@ -11,18 +11,28 @@
 
 若本文件与代码不一致，以源码和 `api-inventory.md` 为准。
 
+### 1.1 什么时候看这份文档
+
+- 你已经知道要找哪个业务域，但想确认接口怎么调、参数怎么传、返回长什么样。
+- 你在联调前后端，想统一请求格式、分页结构、错误码和权限口径。
+- 你需要快速知道“某个功能接口大概在哪一组”，但不想直接翻 `views.py`。
+
+如果你只是想确认“这条路由有没有”，看 [`api-inventory.md`](./api-inventory.md) 会更快。
+
 ---
 
 ## 2. 当前实现快照
 
 - API 前缀：`/api/v1/`
-- 已注册路由：`122`
+- 已注册路由：`127`
 - 分组统计：
+  - root：`1`
   - system：`2`
   - common：`4`
   - public：`10`
   - user：`37`
-  - admin：`68`
+  - admin：`72`
+  - other：`1`
 
 ---
 
@@ -109,6 +119,7 @@
   - `auth_logout`：150/min
   - `system_init`：15/hour
   - `upload`：100/hour
+  - `payment_notify`：600/hour
   - `ai_user`：150/hour
   - `ai_admin`：300/hour
 - 注册接口独立限流（`9/minute`），防止批量注册
@@ -132,6 +143,7 @@
 | `4030` | 无权限 |
 | `4040` | 资源不存在 |
 | `4090` | 资源冲突（如唯一键冲突） |
+| `4091` | 业务保护冲突（如已有业务关联、状态不允许删除或重复处理） |
 | `4093` | 状态冲突（当前状态不允许操作） |
 
 ---
@@ -168,7 +180,8 @@
 - 用户资料与登录态：`/user/auth/me`、`/user/profile` 返回 `points`（兼容旧字段，等同消费积分）、`consume_points`（可兑换余额）与 `member_points`（会员成长积分）
 - 积分流水：`GET /api/v1/user/points/logs` 返回 `current_points/points/consume_points/member_points/member_level/next_level/items/total`；支持 `point_type=consume|member` 过滤，流水项包含 `point_type`、`point_type_label`、`log_type`、`points`、`balance`、`description`、`created_at`
 - 优惠券兑换：`GET /api/v1/user/coupons/available` 返回可领券列表以及当前 `consume_points`、`member_points`；`POST /api/v1/user/coupons/claim` 使用消费积分扣减，成功后返回更新后的两类积分
-- 发票中心：`GET /api/v1/user/invoices` 返回开票记录分页字段 `items/page/page_size/total/total_pages`，并额外返回 `titles` 供订单详情页选择发票抬头
+- 发票中心：`GET /api/v1/user/invoices` 返回开票记录分页字段 `items/page/page_size/total/total_pages`，并额外返回 `titles` 供订单详情页选择发票抬头；记录项包含申请时固化的 `amount/title/invoice_type/tax_no/email` 快照，以及 `invoice_code`、`invoice_no`、`invoice_file_url`、`processor_remark`、`issued_at`、`processed_at` 等管理端处理结果
+- 发票申请：`POST /api/v1/user/invoices/apply` 仅允许当前用户本人已支付且未退款的订单提交，同一订单只允许一条发票申请；提交时固化订单金额和购买方抬头信息，后续编辑发票抬头不会改写历史申请
 - 发票抬头编辑/删除：`POST /api/v1/user/invoices/title/update`、`POST /api/v1/user/invoices/title/delete`（有开票记录的抬头不可删除，返回 4091）
 
 注意：
@@ -180,6 +193,7 @@
 - `/api/v1/user/orders` 支持多维筛选参数：`status`、`payment_status`、`keyword`、`check_in_start`、`check_in_end`、`created_start`、`created_end`、`amount_min`、`amount_max`
 - 订单状态包含 `pending_payment/paid/confirmed/checked_in/completed/no_show/cancelled/refunding/refunded`；`no_show` 表示已支付或已确认订单在未办理入住的情况下超过生命周期窗口，支付状态仍保留为 `paid`，不自动退款
 - `/api/v1/user/orders/pay` 现返回 `payment_action` 与 `payment_record`：模拟支付会直接成功；真实网关会返回 `pending` 动作协议，由前端继续对接 SDK、跳转收银台或等待回调确认
+- 真实支付回调统一走 `POST /api/v1/payments/notify`：请求必须携带 `payment_no/status/amount/signature`，签名口径为 `payment_no|status|amount` 的 HMAC-SHA256，密钥来自支付网关配置 `notify_secret`；回调会校验金额、网关、签名并幂等更新 `PaymentRecord`、订单支付状态、积分奖励与支付通知
 - `/api/v1/user/orders/detail` 返回订单积分字段：`points_earned` 表示本单获得消费积分，`member_points_earned` 表示本单累计会员积分；同时返回 `no_show_at`、`is_lifecycle_anomaly`、`lifecycle_warning`，用于用户端展示“未入住/过期未办理”提示
 - 用户端订单详情、列表和支付上下文读取前会修复过期订单生命周期；用户取消订单时也会先修复生命周期，入住日已开始的已支付/已确认订单不可自助取消，需要联系酒店处理
 - `/api/v1/user/ai/chat` 与 `/api/v1/user/ai/chat/stream` 支持可选 `session_id`（续聊）；服务端会自动写入会话消息
@@ -192,10 +206,14 @@
 - 仪表盘、酒店/房型/库存、订单处理、评价、用户、员工、设置、报表
 - 优惠券与会员概览
 - 支付网关：`GET/POST /api/v1/admin/payment-gateways`、`POST /api/v1/admin/payment-gateways/provider/save`、`POST /api/v1/admin/payment-gateways/provider/delete`
+- 库存批量设置：`POST /api/v1/admin/inventory/bulk-update`
+- 支付回调：`POST /api/v1/payments/notify`
+- 发票管理：`GET /api/v1/admin/invoices`、`POST /api/v1/admin/invoices/process`
 - 系统状态与系统重置
+- 审计日志：`GET /api/v1/admin/audit-logs`
 - AI：配置、供应商管理、摘要、定价、经营报告（含流式）、情感分析、文案与内容生成、异常分析、调用日志、用量统计
-- **员工管理完善**：`POST /api/v1/admin/employees/update`（编辑昵称/手机/角色，仅限 hotel_admin↔receptionist）、`POST /api/v1/admin/employees/change-status`（启用/禁用）、`POST /api/v1/admin/employees/reset-password`（重置为 Abc123456）
-- **用户管理完善**：`POST /api/v1/admin/users/update`（编辑昵称/手机/会员等级；上调等级会补足会员积分门槛，不调整消费积分）、`POST /api/v1/admin/users/reset-password`（重置为 Abc123456）
+- **员工管理完善**：`POST /api/v1/admin/employees/update`（编辑昵称/手机/角色；当前仅允许维护已接入登录与权限体系的 `hotel_admin`，`receptionist` 未接入前不允许写入）、`POST /api/v1/admin/employees/change-status`（启用/禁用）、`POST /api/v1/admin/employees/reset-password`（生成随机临时密码并返回 `new_password`）
+- **用户管理完善**：`POST /api/v1/admin/users/update`（编辑昵称/手机/会员等级；上调等级会补足会员积分门槛，不调整消费积分）、`POST /api/v1/admin/users/reset-password`（生成随机临时密码并返回 `new_password`）
 - **优惠券管理完善**：`POST /api/v1/admin/coupons/update` 现支持全字段编辑（名称/类型/面额/折扣/门槛/库存/消费积分成本/等级/有效期/状态）；新增 `POST /api/v1/admin/coupons/delete`（已有用户领取则返回 4091 禁止删除）
 - **报表任务删除**：`POST /api/v1/admin/reports/tasks/delete`（运行中的任务不可删除，返回 4091）
 - **删除安全**：酒店删除和房型删除前校验是否存在进行中订单（4091 阻断），通知批量删除前端增加二次确认弹窗
@@ -204,7 +222,11 @@
 补充说明：
 
 - `GET /api/v1/admin/ai/settings` 仅 `system_admin` 可访问，供应商列表不会回传明文 `api_key`；编辑时若不提交 `api_key`，服务端会保留原密钥。
-- `GET /api/v1/admin/payment-gateways` 仅 `system_admin` 可访问，支付密钥/证书不会明文回传；再次编辑时若留空对应秘密字段，服务端会保留旧值。
+- `GET /api/v1/admin/payment-gateways` 仅 `system_admin` 可访问，支付密钥/证书和 `notify_secret` 不会明文回传；再次编辑时若留空对应秘密字段，服务端会保留旧值。真实支付网关配置必须补齐 `notify_url` 与 `notify_secret` 才能安全承接异步回调。
+- `GET /api/v1/admin/invoices` 用于管理端处理用户开票申请，支持 `keyword`、`status`、`invoice_type`、`created_start`、`created_end`、`ordering`、`page`、`page_size`；响应分页项使用 `InvoiceRequestSerializer`，并通过 `summary.pending/issued/cancelled/total_amount` 返回当前筛选范围的处理概览。
+- `POST /api/v1/admin/invoices/process` 支持 `action=issue|cancel`；开票时必须提交 `invoice_no`，可选 `invoice_code`、`invoice_file_url`、`processor_remark`、`issued_at`；取消时必须提交 `processor_remark`。处理成功后写入发票处理人、处理时间、站内发票通知和审计日志。
+- `POST /api/v1/admin/inventory/bulk-update` 支持 `room_type_ids`、`start_date`、`end_date`、可选 `price`、`weekend_price`、`stock`、`status`、`weekdays`。后端按房型和目标日期创建或更新 `RoomInventory`，单次最多处理 5000 条库存记录，并写入审计日志。
+- `GET /api/v1/admin/audit-logs` 仅 `system_admin` 可访问，支持 `keyword`、`action`、`target`、`user_id`、`start_date`、`end_date` 过滤；响应项包含操作人、动作、目标、详情 JSON、风险等级和创建时间。
 - `GET /api/v1/admin/members/overview` 返回 `total_users`、`total_member_points`、`total_consume_points` 与各等级 `member_points_threshold`，供管理端展示会员成长积分与消费积分余额的运营口径。
 - `POST /api/v1/admin/ai/test` 用于管理端连通性测试，可验证当前或指定供应商是否可用。
 - `GET /api/v1/admin/ai/call-logs` 分页查询 AI 调用历史记录；支持 `scene`、`status` 过滤参数；响应字段包含 `id`、`scene`、`provider`、`model`、`input_tokens`、`output_tokens`、`total_tokens`、`latency_ms`、`cost_estimate`、`status`、`error_message`（完整错误文本，最长 5000 字符）、`username`、`created_at`。
@@ -224,6 +246,8 @@
 
 - `/api/v1/admin/orders/detail` 返回订单基础信息外，还包含 `payments`（支付记录列表）与订单状态时间字段（如 `paid_at`、`confirmed_at`、`checked_in_at`、`completed_at`、`no_show_at`、`cancelled_at`），以及 `is_lifecycle_anomaly/lifecycle_warning`
 - 管理端入住必须满足订单已支付、状态为 `paid/confirmed`、入住日已开始且未超过离店日；退房、续住、换房只允许 `checked_in` 订单
+- 管理端退房结算支持 `consume_amount` 与 `deposit_deduction`，押金抵扣不能大于额外消费金额；实际补收金额会写入已支付 `PaymentRecord(scene=checkout_extra)`，并回写订单 `original_amount/pay_amount` 与结算摘要
+- 管理端续住会按新增晚数和房态价格计算补差，成功后写入已支付 `PaymentRecord(scene=extend_stay)`，方便订单详情和后续对账查看
 - BookingOrder 支付状态新增 `PAYMENT_REFUNDING`（退款中），用于标记已发起退款但尚未到账的中间态
 
 ---
@@ -235,13 +259,28 @@
 1. `POST /api/v1/user/orders/create`
 2. `GET /api/v1/user/orders/payment-options`
 3. `POST /api/v1/user/orders/pay`
-4. 管理端可后续执行：
+4. 若选择真实网关，支付平台回调：
+   - `POST /api/v1/payments/notify`
+5. 管理端可后续执行：
    - `POST /api/v1/admin/orders/check-in`
    - `POST /api/v1/admin/orders/check-out`
-  - `POST /api/v1/admin/orders/extend-stay`
-  - `POST /api/v1/admin/orders/switch-room`
+   - `POST /api/v1/admin/orders/extend-stay`
+   - `POST /api/v1/admin/orders/switch-room`
 
-### 7.2 用户 AI 对话（含订房编排）
+### 7.2 用户申请发票与管理端处理
+
+1. 用户在订单详情或发票中心准备抬头：
+   - `GET /api/v1/user/invoices`
+   - `POST /api/v1/user/invoices/create`
+   - `POST /api/v1/user/invoices/title/update`
+2. 用户提交开票申请：
+   - `POST /api/v1/user/invoices/apply`
+3. 管理端财务人员筛选和处理申请：
+   - `GET /api/v1/admin/invoices`
+   - `POST /api/v1/admin/invoices/process`
+4. 用户端通过发票中心、订单详情和通知中心查看处理结果、发票号码、电子票链接或取消原因。
+
+### 7.3 用户 AI 对话（含订房编排）
 
 1. `POST /api/v1/user/ai/chat`
 2. 如需流式输出：`POST /api/v1/user/ai/chat/stream`

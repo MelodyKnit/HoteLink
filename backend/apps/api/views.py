@@ -23,8 +23,9 @@ apps/api/views.py —— 项目所有 REST API 视图类。
             AdminInventoryView / AdminOrdersView / AdminOrdersDetailView /
             AdminOrdersChangeStatusView / AdminOrdersCheckInView /
             AdminOrdersCheckOutView / AdminReviewsView / AdminReviewsReplyView /
-            AdminUsersView / AdminUsersChangeStatusView / AdminEmployeesView /
-            AdminSettingsView / AdminAISettingsView / AdminAIProviderAddView /
+            AdminInvoicesView / AdminInvoiceProcessView / AdminUsersView /
+            AdminUsersChangeStatusView / AdminEmployeesView / AdminSettingsView /
+            AdminAISettingsView / AdminAIProviderAddView /
             AdminAIProviderSwitchView / AdminAIProviderDeleteView /
             AdminAIReportSummaryView / AdminAIReviewSummaryView /
             AdminAIReplySuggestionView / AdminAIPricingSuggestionView /
@@ -33,6 +34,7 @@ apps/api/views.py —— 项目所有 REST API 视图类。
             AdminAIContentGenerateView / AdminAIAnomalyReportView /
             AdminAIOrderAnomalySummaryView / AdminReportTasksView /
             AdminAICallLogsView / AdminAIUsageStatsView / AdminSystemResetView
+  《支付》  PaymentNotifyView
   《用户AI》  UserAIRecommendationsView / UserAIHotelCompareView /
             UserAISessionsView / UserAISessionMessagesView
 """
@@ -46,6 +48,7 @@ from decimal import Decimal, InvalidOperation
 from io import BytesIO
 from pathlib import Path
 import hashlib
+import hmac
 
 from django.db import transaction
 from django.db.models import F
@@ -88,6 +91,8 @@ from apps.api.serializers import (
     AIReviewSentimentSerializer,
     AIReviewSummarySerializer,
     AISettingsUpdateSerializer,
+    AuditLogSerializer,
+    AdminInvoiceProcessSerializer,
     BookingOrderSerializer,
     ChatMessageSerializer,
     ChatSessionDeleteSerializer,
@@ -110,6 +115,7 @@ from apps.api.serializers import (
     InvoiceRequestSerializer,
     InvoiceTitleCreateSerializer,
     InvoiceTitleSerializer,
+    InventoryBulkUpdateSerializer,
     InventoryUpdateSerializer,
     LoginSerializer,
     OrderCancelSerializer,
@@ -125,6 +131,7 @@ from apps.api.serializers import (
     PaymentGatewayDeleteSerializer,
     PaymentGatewayProviderSerializer,
     PaymentGatewaySettingsUpdateSerializer,
+    PaymentNotifySerializer,
     ProfileUpdateSerializer,
     RegisterSerializer,
     ReplyReviewSerializer,
@@ -149,7 +156,7 @@ from apps.api.serializers import (
 from apps.bookings.models import BookingOrder
 from apps.crm.models import ChatMessage, ChatSession, CouponTemplate, FavoriteHotel, InvoiceRequest, InvoiceTitle, PointsLog, Review, UserCoupon
 from apps.hotels.models import Hotel, RoomInventory, RoomType
-from apps.operations.models import AICallLog, PlatformConfig, SystemNotice
+from apps.operations.models import AICallLog, AuditLog, PlatformConfig, SystemNotice
 from apps.operations.services.ai_service import AIChatService
 from apps.operations.services.prompt_service import PromptSceneError
 from apps.payments.services import build_payment_action, build_user_payment_methods, resolve_gateway_for_method
@@ -400,6 +407,18 @@ def is_order_checkin_started(order: BookingOrder, *, today=None) -> bool:
     return bool(check_in_date and check_in_date <= current_day)
 
 
+def can_apply_invoice_for_order(order: BookingOrder) -> bool:
+    """Return whether the paid order state can submit an invoice request."""
+    invoiceable_statuses = {
+        BookingOrder.STATUS_PAID,
+        BookingOrder.STATUS_CONFIRMED,
+        BookingOrder.STATUS_CHECKED_IN,
+        BookingOrder.STATUS_COMPLETED,
+        BookingOrder.STATUS_NO_SHOW,
+    }
+    return order.payment_status == BookingOrder.PAYMENT_PAID and order.status in invoiceable_statuses
+
+
 def refresh_locked_order_lifecycle(order: BookingOrder, *, today=None) -> bool:
     """Refresh lifecycle transitions for an order already locked by the caller."""
     from apps.bookings.tasks import refresh_order_lifecycle
@@ -500,6 +519,80 @@ def make_payment_no() -> str:
     """生成唯一支付流水号，格式：PM + 时间戳(14位) + 6位随机数字。"""
     now = timezone.localtime()
     return f"PM{now.strftime('%Y%m%d%H%M%S')}{get_random_string(6, allowed_chars='0123456789')}"
+
+
+def build_payment_notify_signature(*, payment_no: str, status: str, amount: Decimal, secret: str) -> str:
+    """Build the HMAC signature expected from unified payment notifications."""
+    amount_text = f"{Decimal(amount).quantize(Decimal('0.01')):.2f}"
+    payload = f"{payment_no}|{status}|{amount_text}"
+    return hmac.new(secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def mark_payment_record_paid(*, order: BookingOrder, payment: PaymentRecord, paid_at=None) -> bool:
+    """Mark a payment record and its order as paid without duplicating reward points.
+
+    Args:
+        order: Locked order associated with the payment record.
+        payment: Locked payment record that received a successful notification.
+        paid_at: Optional gateway payment timestamp.
+
+    Returns:
+        True if the order transitioned to paid in this call, otherwise False.
+    """
+    paid_time = paid_at or timezone.now()
+    payment.status = PaymentRecord.STATUS_PAID
+    payment.paid_at = payment.paid_at or paid_time
+    payment.save(update_fields=["status", "paid_at"])
+
+    if order.payment_status == BookingOrder.PAYMENT_PAID:
+        return False
+
+    order.payment_status = BookingOrder.PAYMENT_PAID
+    order.status = BookingOrder.STATUS_PAID
+    if not order.paid_at:
+        order.paid_at = paid_time
+    update_fields = ["payment_status", "status", "paid_at", "updated_at"]
+
+    # Payment completion is the single owner of consume/member reward creation.
+    profile = ensure_profile(order.user)
+    base_points = int(order.pay_amount / Decimal("10"))
+    earned_points = int(base_points * Decimal(str(profile.points_multiplier))) if base_points > 0 else 0
+    if earned_points > 0 and order.points_earned == 0 and order.member_points_earned == 0:
+        order.points_earned = earned_points
+        order.member_points_earned = earned_points
+        update_fields.extend(["points_earned", "member_points_earned"])
+        add_points(
+            order.user,
+            earned_points,
+            PointsLog.TYPE_CONSUME_REWARD,
+            f"订单 {order.order_no} 消费奖励（{profile.points_multiplier}x倍率）",
+            order=order,
+            also_member_points=True,
+        )
+
+    order.save(update_fields=update_fields)
+    return True
+
+
+def create_frontdesk_payment_record(*, order: BookingOrder, amount: Decimal, label: str, scene: str, payload: dict) -> PaymentRecord | None:
+    """Create a paid front-desk settlement payment record for manual order charges."""
+    amount = Decimal(amount).quantize(Decimal("0.01"))
+    if amount <= 0:
+        return None
+    return PaymentRecord.objects.create(
+        order=order,
+        payment_no=make_payment_no(),
+        method=PaymentRecord.METHOD_CASH,
+        gateway_name="frontdesk",
+        gateway_label=label,
+        provider_type="offline",
+        scene=scene,
+        status=PaymentRecord.STATUS_PAID,
+        amount=amount,
+        paid_at=timezone.now(),
+        request_payload=payload,
+        response_payload={"source": "admin_frontdesk", "settled": True},
+    )
 
 
 def fallback_ai_reply(scene: str) -> str:
@@ -1866,6 +1959,95 @@ class UserOrdersPayView(APIView):
         )
 
 
+class PaymentNotifyView(APIView):
+    """统一支付网关异步通知接口，用于真实网关回调确认支付结果。"""
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "payment_notify"
+
+    def post(self, request):
+        """Verify a signed gateway notification and settle the linked order."""
+        serializer = PaymentNotifySerializer(data=request.data)
+        if not serializer.is_valid():
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
+        data = serializer.validated_data
+
+        with transaction.atomic():
+            payment = (
+                PaymentRecord.objects.select_for_update()
+                .select_related("order", "order__user")
+                .filter(payment_no=data["payment_no"])
+                .first()
+            )
+            if not payment:
+                return api_response(code=4040, message="支付记录不存在", data=None, status_code=404)
+
+            order = BookingOrder.objects.select_for_update().filter(id=payment.order_id).select_related("user").first()
+            if not order:
+                return api_response(code=4040, message="订单不存在", data=None, status_code=404)
+            if data.get("gateway_name") and data["gateway_name"] != payment.gateway_name:
+                return api_response(code=4001, message="支付网关不匹配", data=None, status_code=400)
+            if Decimal(data["amount"]).quantize(Decimal("0.01")) != Decimal(payment.amount).quantize(Decimal("0.01")):
+                return api_response(code=4001, message="支付金额不匹配", data=None, status_code=400)
+
+            gateway = load_payment_settings().get_gateway(payment.gateway_name)
+            if not gateway or not gateway.notify_secret:
+                return api_response(code=4001, message="支付网关未配置回调签名密钥", data=None, status_code=400)
+            expected_signature = build_payment_notify_signature(
+                payment_no=payment.payment_no,
+                status=data["status"],
+                amount=data["amount"],
+                secret=gateway.notify_secret,
+            )
+            if not hmac.compare_digest(expected_signature, data["signature"]):
+                return api_response(code=4030, message="支付通知签名校验失败", data=None, status_code=403)
+
+            payment.external_trade_no = data.get("external_trade_no", "")
+            payment.notify_payload = data.get("notify_payload") or dict(request.data)
+            payment.save(update_fields=["external_trade_no", "notify_payload"])
+
+            if data["status"] == PaymentNotifySerializer.STATUS_FAILED:
+                if payment.status != PaymentRecord.STATUS_PAID:
+                    payment.status = PaymentRecord.STATUS_FAILED
+                    payment.failure_reason = "网关通知支付失败"
+                    payment.save(update_fields=["status", "failure_reason"])
+                    if order.payment_status != BookingOrder.PAYMENT_PAID:
+                        order.payment_status = BookingOrder.PAYMENT_FAILED
+                        order.save(update_fields=["payment_status", "updated_at"])
+                return api_response(
+                    message="支付失败通知已处理",
+                    data={
+                        "order_id": order.id,
+                        "payment_id": payment.id,
+                        "payment_status": order.payment_status,
+                        "payment_record": PaymentRecordSerializer(payment).data,
+                    },
+                )
+
+            if order.status in {BookingOrder.STATUS_CANCELLED, BookingOrder.STATUS_REFUNDING, BookingOrder.STATUS_REFUNDED}:
+                return api_response(code=4093, message="当前订单状态不允许确认支付", data={"status": order.status}, status_code=409)
+
+            transitioned = mark_payment_record_paid(order=order, payment=payment, paid_at=timezone.now())
+            if transitioned:
+                SystemNotice.objects.create(
+                    user=order.user,
+                    notice_type=SystemNotice.TYPE_PAYMENT,
+                    title="支付成功",
+                    content=f"订单 {order.order_no} 已收到支付网关确认。",
+                    related_order=order,
+                )
+
+        return api_response(
+            message="支付通知已处理",
+            data={
+                "order_id": order.id,
+                "payment_id": payment.id,
+                "payment_status": order.payment_status,
+                "payment_record": PaymentRecordSerializer(payment).data,
+            },
+        )
+
+
 class UserOrdersCancelView(APIView):
     """用户取消订单接口：限制已入住/已完成/已取消/退款中/已退款订单不可取消。"""
     permission_classes = [IsAuthenticated]
@@ -2298,23 +2480,31 @@ class UserInvoiceApplyView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        """Create an invoice request with immutable buyer and amount snapshots."""
         serializer = InvoiceApplySerializer(data=request.data)
         if not serializer.is_valid():
             return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
         data = serializer.validated_data
-        order = BookingOrder.objects.filter(id=data["order_id"], user=request.user).first()
-        title = InvoiceTitle.objects.filter(id=data["invoice_title_id"], user=request.user).first()
-        if not order or not title:
-            return api_response(code=4040, message="订单或发票抬头不存在", data=None, status_code=404)
-        allowed_statuses = {
-            BookingOrder.STATUS_PAID, BookingOrder.STATUS_CONFIRMED,
-            BookingOrder.STATUS_CHECKED_IN, BookingOrder.STATUS_COMPLETED,
-        }
-        if order.status not in allowed_statuses:
-            return api_response(code=4001, message="当前订单状态不允许开票", data=None, status_code=400)
-        if InvoiceRequest.objects.filter(order=order).exists():
-            return api_response(code=4090, message="该订单已存在发票申请，请勿重复提交", data=None, status_code=409)
-        invoice_request = InvoiceRequest.objects.create(order=order, invoice_title=title)
+        with transaction.atomic():
+            order = BookingOrder.objects.select_for_update().filter(id=data["order_id"], user=request.user).first()
+            title = InvoiceTitle.objects.filter(id=data["invoice_title_id"], user=request.user).first()
+            if not order or not title:
+                return api_response(code=4040, message="订单或发票抬头不存在", data=None, status_code=404)
+            if not can_apply_invoice_for_order(order):
+                return api_response(code=4001, message="仅已支付且未退款订单允许申请开票", data=None, status_code=400)
+            if InvoiceRequest.objects.filter(order=order).exists():
+                return api_response(code=4090, message="该订单已存在发票申请，请勿重复提交", data=None, status_code=409)
+
+            # Snapshot buyer fields so later title edits cannot rewrite historical invoice requests.
+            invoice_request = InvoiceRequest.objects.create(
+                order=order,
+                invoice_title=title,
+                amount=order.pay_amount,
+                invoice_type_snapshot=title.invoice_type,
+                title_snapshot=title.title,
+                tax_no_snapshot=title.tax_no,
+                email_snapshot=title.email,
+            )
         return api_response(message="发票申请已提交", data=InvoiceRequestSerializer(invoice_request).data)
 
 
@@ -2353,6 +2543,153 @@ class UserInvoiceTitleDeleteView(APIView):
             return api_response(code=4091, message="该抬头已有关联开票记录，无法删除", data=None, status_code=409)
         title.delete()
         return api_response(message="发票抬头已删除", data={"title_id": title_id, "deleted": True})
+
+
+class AdminInvoicesView(APIView):
+    """管理端发票申请列表接口：承接用户提交的开票申请。"""
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    _ORDERING_WHITELIST = {
+        "id", "-id",
+        "created_at", "-created_at",
+        "updated_at", "-updated_at",
+        "processed_at", "-processed_at",
+        "issued_at", "-issued_at",
+        "amount", "-amount",
+        "status", "-status",
+        "order__order_no", "-order__order_no",
+    }
+
+    def get(self, request):
+        """Return invoice requests with filters, paging, and operational summary."""
+        queryset = InvoiceRequest.objects.select_related(
+            "invoice_title",
+            "order",
+            "order__user",
+            "order__hotel",
+            "order__room_type",
+            "processor",
+        )
+        keyword = (request.query_params.get("keyword") or "").strip()
+        status_filter = (request.query_params.get("status") or "").strip()
+        invoice_type = (request.query_params.get("invoice_type") or "").strip()
+        ordering = request.query_params.get("ordering", "-id")
+        created_start = parse_date(request.query_params.get("created_start", ""))
+        created_end = parse_date(request.query_params.get("created_end", ""))
+
+        if keyword:
+            queryset = queryset.filter(
+                Q(order__order_no__icontains=keyword)
+                | Q(order__guest_name__icontains=keyword)
+                | Q(order__guest_mobile__icontains=keyword)
+                | Q(title_snapshot__icontains=keyword)
+                | Q(tax_no_snapshot__icontains=keyword)
+                | Q(email_snapshot__icontains=keyword)
+                | Q(invoice_no__icontains=keyword)
+            )
+        if status_filter:
+            queryset = queryset.filter(status=status_filter)
+        if invoice_type:
+            queryset = queryset.filter(invoice_type_snapshot=invoice_type)
+        if created_start:
+            queryset = queryset.filter(created_at__date__gte=created_start)
+        if created_end:
+            queryset = queryset.filter(created_at__date__lte=created_end)
+        if ordering not in self._ORDERING_WHITELIST:
+            ordering = "-id"
+
+        summary_data = queryset.aggregate(
+            pending=Count("id", filter=Q(status=InvoiceRequest.STATUS_PENDING)),
+            issued=Count("id", filter=Q(status=InvoiceRequest.STATUS_ISSUED)),
+            cancelled=Count("id", filter=Q(status=InvoiceRequest.STATUS_CANCELLED)),
+            total_amount=Sum("amount"),
+        )
+        summary = {
+            "pending": summary_data["pending"] or 0,
+            "issued": summary_data["issued"] or 0,
+            "cancelled": summary_data["cancelled"] or 0,
+            "total_amount": f"{Decimal(summary_data['total_amount'] or Decimal('0.00')):.2f}",
+        }
+
+        queryset = queryset.order_by(ordering)
+        page, page_size = get_page_params(request)
+        page_queryset, total = paginate_queryset(queryset, page, page_size)
+        return paginated_response(
+            items=InvoiceRequestSerializer(page_queryset, many=True).data,
+            page=page,
+            page_size=page_size,
+            total=total,
+            extra={"summary": summary},
+        )
+
+
+class AdminInvoiceProcessView(APIView):
+    """管理端发票处理接口：将待处理申请开票或取消。"""
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def post(self, request):
+        """Process one pending invoice request and notify the user."""
+        serializer = AdminInvoiceProcessSerializer(data=request.data)
+        if not serializer.is_valid():
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
+        data = serializer.validated_data
+
+        with transaction.atomic():
+            invoice_request = InvoiceRequest.objects.select_for_update().select_related(
+                "order",
+                "order__user",
+                "invoice_title",
+            ).filter(id=data["invoice_id"]).first()
+            if not invoice_request:
+                return api_response(code=4040, message="发票申请不存在", data=None, status_code=404)
+            if invoice_request.status != InvoiceRequest.STATUS_PENDING:
+                return api_response(code=4091, message="该发票申请已处理，不能重复操作", data=None, status_code=409)
+
+            action = data["action"]
+            now = timezone.now()
+            invoice_request.processor = request.user
+            invoice_request.processed_at = now
+            invoice_request.processor_remark = data.get("processor_remark", "")
+            update_fields = ["processor", "processed_at", "processor_remark", "updated_at", "status"]
+
+            if action == AdminInvoiceProcessSerializer.ACTION_ISSUE:
+                invoice_request.status = InvoiceRequest.STATUS_ISSUED
+                invoice_request.invoice_code = data.get("invoice_code", "")
+                invoice_request.invoice_no = data["invoice_no"]
+                invoice_request.invoice_file_url = data.get("invoice_file_url", "")
+                invoice_request.issued_at = data.get("issued_at") or now
+                update_fields.extend(["invoice_code", "invoice_no", "invoice_file_url", "issued_at"])
+                notice_title = "电子发票已开具"
+                notice_content = f"订单 {invoice_request.order.order_no} 的电子发票已开具，发票号码 {invoice_request.invoice_no}。"
+                audit_action = "invoice.issued"
+                message = "发票已开具"
+            else:
+                invoice_request.status = InvoiceRequest.STATUS_CANCELLED
+                notice_title = "发票申请已取消"
+                notice_content = f"订单 {invoice_request.order.order_no} 的发票申请未通过：{invoice_request.processor_remark}"
+                audit_action = "invoice.cancelled"
+                message = "发票申请已取消"
+
+            invoice_request.save(update_fields=update_fields)
+            SystemNotice.objects.create(
+                user=invoice_request.order.user,
+                notice_type=SystemNotice.TYPE_INVOICE,
+                title=notice_title,
+                content=notice_content[:255],
+                related_order=invoice_request.order,
+            )
+            AuditLog.objects.create(
+                user=request.user,
+                action=audit_action,
+                target=f"invoice_request:{invoice_request.id}",
+                detail={
+                    "order_no": invoice_request.order.order_no,
+                    "status": invoice_request.status,
+                    "invoice_no": invoice_request.invoice_no,
+                },
+            )
+
+        return api_response(message=message, data=InvoiceRequestSerializer(invoice_request).data)
 
 
 class UserAIChatView(APIView):
@@ -2937,6 +3274,151 @@ class AdminInventoryView(APIView):
         return api_response(message="库存更新成功", data=RoomInventorySerializer(inventory).data)
 
 
+class AdminInventoryBulkUpdateView(APIView):
+    """库存批量设置接口：按房型和日期范围批量调整价格、库存与可售状态。"""
+
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    @staticmethod
+    def _iter_target_dates(start_date, end_date, weekdays: list[int]):
+        """Yield dates in the selected range that match the requested weekdays."""
+        current = start_date
+        weekday_set = set(weekdays)
+        while current <= end_date:
+            if current.weekday() in weekday_set:
+                yield current
+            current += timedelta(days=1)
+
+    @staticmethod
+    def _request_ip(request) -> str:
+        """Return the best-effort client IP for audit details."""
+        forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR", "")
+        if forwarded_for:
+            return forwarded_for.split(",")[0].strip()
+        return request.META.get("REMOTE_ADDR", "")
+
+    def post(self, request):
+        serializer = InventoryBulkUpdateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return api_response(code=4001, message="参数错误", data={"errors": serializer.errors}, status_code=400)
+        data = serializer.validated_data
+
+        target_dates = list(self._iter_target_dates(data["start_date"], data["end_date"], data["weekdays"]))
+        if not target_dates:
+            return api_response(code=4001, message="所选星期范围内没有可设置日期", data=None, status_code=400)
+
+        room_types = list(RoomType.objects.select_related("hotel").filter(id__in=data["room_type_ids"]))
+        room_type_map = {item.id: item for item in room_types}
+        missing_ids = [item for item in data["room_type_ids"] if item not in room_type_map]
+        if missing_ids:
+            return api_response(
+                code=4040,
+                message="部分房型不存在",
+                data={"missing_room_type_ids": missing_ids},
+                status_code=404,
+            )
+
+        operation_count = len(room_types) * len(target_dates)
+        if operation_count > 5000:
+            return api_response(code=4001, message="单次批量设置不能超过 5000 条库存记录", data=None, status_code=400)
+
+        price = data.get("price")
+        weekend_price = data.get("weekend_price")
+        stock = data.get("stock")
+        status_value = data.get("status")
+
+        with transaction.atomic():
+            existing_items = {
+                (item.room_type_id, item.date): item
+                for item in RoomInventory.objects.select_for_update().filter(
+                    room_type_id__in=data["room_type_ids"],
+                    date__in=target_dates,
+                )
+            }
+            to_create: list[RoomInventory] = []
+            to_update: list[RoomInventory] = []
+            skipped_count = 0
+
+            for room_type in room_types:
+                for target_date in target_dates:
+                    key = (room_type.id, target_date)
+                    existing = existing_items.get(key)
+                    next_price = weekend_price if target_date.weekday() >= 5 and weekend_price is not None else price
+                    next_stock = stock
+                    next_status = status_value
+
+                    if existing:
+                        changed = False
+                        if next_price is not None and existing.price != next_price:
+                            existing.price = next_price
+                            changed = True
+                        if next_stock is not None and existing.stock != next_stock:
+                            existing.stock = next_stock
+                            changed = True
+                        if next_status is not None and existing.status != next_status:
+                            existing.status = next_status
+                            changed = True
+                        if changed:
+                            to_update.append(existing)
+                        else:
+                            skipped_count += 1
+                        continue
+
+                    # New inventory rows inherit room-type defaults for fields not included in the bulk operation.
+                    to_create.append(
+                        RoomInventory(
+                            room_type=room_type,
+                            date=target_date,
+                            price=next_price if next_price is not None else room_type.base_price,
+                            stock=next_stock if next_stock is not None else room_type.stock,
+                            status=next_status if next_status is not None else RoomInventory.STATUS_AVAILABLE,
+                        )
+                    )
+
+            if to_create:
+                RoomInventory.objects.bulk_create(to_create)
+            if to_update:
+                RoomInventory.objects.bulk_update(to_update, ["price", "stock", "status"])
+
+            AuditLog.objects.create(
+                user=request.user,
+                action="inventory.bulk_update",
+                target="room_inventory",
+                detail={
+                    "room_type_ids": data["room_type_ids"],
+                    "start_date": str(data["start_date"]),
+                    "end_date": str(data["end_date"]),
+                    "weekdays": data["weekdays"],
+                    "updated_fields": [
+                        field
+                        for field, value in {
+                            "price": price,
+                            "weekend_price": weekend_price,
+                            "stock": stock,
+                            "status": status_value,
+                        }.items()
+                        if value is not None
+                    ],
+                    "created_count": len(to_create),
+                    "updated_count": len(to_update),
+                    "skipped_count": skipped_count,
+                    "request_ip": self._request_ip(request),
+                },
+            )
+
+        return api_response(
+            message="库存批量设置成功",
+            data={
+                "room_type_count": len(room_types),
+                "date_count": len(target_dates),
+                "created_count": len(to_create),
+                "updated_count": len(to_update),
+                "skipped_count": skipped_count,
+                "total_touched": len(to_create) + len(to_update),
+            },
+        )
+
+
 class AdminOrdersView(APIView):
     """管理员订单列表接口：支持关键词与状态筛选。"""
     permission_classes = [IsAuthenticated, IsAdminRole]
@@ -3316,11 +3798,35 @@ class AdminOrdersCheckOutView(APIView):
 
             previous_status = order.status
             manual_remark = (data.get("operator_remark", "") or "").strip()
+            consume_amount = Decimal(data.get("consume_amount") or Decimal("0.00")).quantize(Decimal("0.01"))
+            deposit_deduction = Decimal(data.get("deposit_deduction") or Decimal("0.00")).quantize(Decimal("0.01"))
+            cash_collected = (consume_amount - deposit_deduction).quantize(Decimal("0.01"))
             update_fields = ["status", "completed_at", "updated_at"]
             order.status = BookingOrder.STATUS_COMPLETED
             if not order.completed_at:
                 order.completed_at = timezone.now()
             remark_updated = False
+            settlement_payment = None
+            if consume_amount > 0:
+                # Extra checkout consumption is recorded as a paid settlement flow, not just a remark.
+                order.original_amount = order.original_amount + consume_amount
+                order.pay_amount = order.pay_amount + consume_amount
+                update_fields.extend(["original_amount", "pay_amount"])
+                settlement_note = f"退房额外消费 ¥{consume_amount}，押金抵扣 ¥{deposit_deduction}，现场补收 ¥{cash_collected}"
+                if append_order_operator_remark(order, settlement_note):
+                    remark_updated = True
+                settlement_payment = create_frontdesk_payment_record(
+                    order=order,
+                    amount=consume_amount,
+                    label="退房结算",
+                    scene="checkout_extra",
+                    payload={
+                        "consume_amount": str(consume_amount),
+                        "deposit_deduction": str(deposit_deduction),
+                        "cash_collected": str(cash_collected),
+                        "operator_id": request.user.id,
+                    },
+                )
             if manual_remark and append_order_operator_remark(order, manual_remark):
                 remark_updated = True
             if remark_updated:
@@ -3336,7 +3842,17 @@ class AdminOrdersCheckOutView(APIView):
         # 退房完成后奖励积分
         if previous_status == BookingOrder.STATUS_CHECKED_IN:
             add_points(order.user, 20, PointsLog.TYPE_CONSUME_REWARD, f"订单 {order.order_no} 入住奖励", order=order)
-        return api_response(message="退房办理成功", data={"order_id": order.id, "status": order.status})
+        return api_response(
+            message="退房办理成功",
+            data={
+                "order_id": order.id,
+                "status": order.status,
+                "consume_amount": f"{consume_amount:.2f}",
+                "deposit_deduction": f"{deposit_deduction:.2f}",
+                "cash_collected": f"{cash_collected:.2f}",
+                "settlement_payment_id": settlement_payment.id if settlement_payment else None,
+            },
+        )
 
 
 class AdminOrdersExtendStayView(APIView):
@@ -3417,6 +3933,20 @@ class AdminOrdersExtendStayView(APIView):
                 base_note = f"{base_note}；备注：{operator_remark}"
             if append_order_operator_remark(order, base_note):
                 update_fields.append("operator_remark")
+            # Front-desk extensions are settled immediately and must leave an auditable payment record.
+            extension_payment = create_frontdesk_payment_record(
+                order=order,
+                amount=extra_pay,
+                label="续住补款",
+                scene="extend_stay",
+                payload={
+                    "extra_days": extra_days,
+                    "extra_amount": str(extra_amount),
+                    "member_discount": str(extra_member_discount),
+                    "extra_pay": str(extra_pay),
+                    "operator_id": request.user.id,
+                },
+            )
             order.save(update_fields=update_fields)
 
         SystemNotice.objects.create(
@@ -3432,6 +3962,8 @@ class AdminOrdersExtendStayView(APIView):
                 "order_id": order.id,
                 "check_out_date": order.check_out_date,
                 "status": order.status,
+                "extra_pay": f"{extra_pay:.2f}",
+                "payment_id": extension_payment.id if extension_payment else None,
             }
         )
 
@@ -3819,6 +4351,52 @@ class AdminSettingsView(APIView):
                 setattr(cfg, field, data[field])
         cfg.save()
         return api_response(message="平台设置已更新", data=self._serialize_config(cfg))
+
+
+class AdminAuditLogsView(APIView):
+    """审计日志查询接口：供系统管理员追踪关键后台操作。"""
+
+    permission_classes = [IsAuthenticated, IsSystemAdminRole]
+
+    def get(self, request):
+        queryset = AuditLog.objects.select_related("user").order_by("-created_at")
+        keyword = str(request.query_params.get("keyword") or "").strip()
+        action = str(request.query_params.get("action") or "").strip()
+        target = str(request.query_params.get("target") or "").strip()
+        user_id = request.query_params.get("user_id")
+        start_date = parse_date(str(request.query_params.get("start_date") or ""))
+        end_date = parse_date(str(request.query_params.get("end_date") or ""))
+
+        if start_date and end_date and start_date > end_date:
+            return api_response(code=4001, message="开始日期不能晚于结束日期", data=None, status_code=400)
+        if keyword:
+            queryset = queryset.filter(
+                Q(action__icontains=keyword)
+                | Q(target__icontains=keyword)
+                | Q(user__username__icontains=keyword)
+            )
+        if action:
+            queryset = queryset.filter(action__icontains=action)
+        if target:
+            queryset = queryset.filter(target__icontains=target)
+        if user_id:
+            try:
+                queryset = queryset.filter(user_id=int(user_id))
+            except (TypeError, ValueError):
+                return api_response(code=4001, message="user_id 必须为数字", data=None, status_code=400)
+        if start_date:
+            queryset = queryset.filter(created_at__date__gte=start_date)
+        if end_date:
+            queryset = queryset.filter(created_at__date__lte=end_date)
+
+        page, page_size = get_page_params(request)
+        page_queryset, total = paginate_queryset(queryset, page, page_size)
+        return paginated_response(
+            items=AuditLogSerializer(page_queryset, many=True).data,
+            page=page,
+            page_size=page_size,
+            total=total,
+        )
 
 
 class AdminPaymentGatewaySettingsView(APIView):

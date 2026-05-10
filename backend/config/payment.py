@@ -34,6 +34,7 @@ PAYMENT_FIELD_LABELS: dict[str, str] = {
     "gateway_url": "网关地址",
     "checkout_url": "托管收银台地址",
     "notify_url": "异步回调地址",
+    "notify_secret": "回调签名密钥",
     "return_url": "同步返回地址",
     "app_private_key": "应用私钥",
     "alipay_public_key": "支付宝公钥",
@@ -64,6 +65,7 @@ BUILTIN_PAYMENT_TEMPLATES: dict[str, dict[str, Any]] = {
             "app_id",
             "merchant_id",
             "notify_url",
+            "notify_secret",
             "api_v3_key",
             "merchant_private_key",
             "merchant_cert_serial_no",
@@ -82,6 +84,7 @@ BUILTIN_PAYMENT_TEMPLATES: dict[str, dict[str, Any]] = {
             "app_id",
             "gateway_url",
             "notify_url",
+            "notify_secret",
             "app_private_key",
             "alipay_public_key",
         ],
@@ -97,13 +100,14 @@ BUILTIN_PAYMENT_TEMPLATES: dict[str, dict[str, Any]] = {
         "payment_method": "custom",
         "description": "适合预留聚合支付、银联或企业内部支付平台接入。",
         "supported_scenes": ["redirect", "app", "h5"],
-        "required_fields": ["gateway_url", "notify_url"],
+        "required_fields": ["gateway_url", "notify_url", "notify_secret"],
         "default_values": {},
     },
 }
 
 _SENSITIVE_FIELDS: dict[str, tuple[str, ...]] = {
     "wechat": (
+        "notify_secret",
         "api_v3_key",
         "merchant_private_key",
         "merchant_certificate",
@@ -111,10 +115,11 @@ _SENSITIVE_FIELDS: dict[str, tuple[str, ...]] = {
         "platform_public_key",
     ),
     "alipay": (
+        "notify_secret",
         "app_private_key",
         "alipay_public_key",
     ),
-    "custom": (),
+    "custom": ("notify_secret",),
 }
 
 
@@ -148,6 +153,7 @@ class PaymentGatewayConfig:
     gateway_url: str = ""
     checkout_url: str = ""
     notify_url: str = ""
+    notify_secret: str = ""
     return_url: str = ""
     app_id: str = ""
     merchant_id: str = ""
@@ -259,6 +265,7 @@ class PaymentGatewayConfig:
             "gateway_url": self.gateway_url,
             "checkout_url": self.checkout_url,
             "notify_url": self.notify_url,
+            "notify_secret": self.notify_secret,
             "return_url": self.return_url,
             "app_id": self.app_id,
             "merchant_id": self.merchant_id,
@@ -445,6 +452,7 @@ def _gateway_from_dict(data: dict[str, Any]) -> PaymentGatewayConfig | None:
         gateway_url=str(data.get("gateway_url") or defaults.get("gateway_url") or "").strip(),
         checkout_url=str(data.get("checkout_url") or "").strip(),
         notify_url=str(data.get("notify_url") or "").strip(),
+        notify_secret=str(data.get("notify_secret") or "").strip(),
         return_url=str(data.get("return_url") or "").strip(),
         app_id=str(data.get("app_id") or "").strip(),
         merchant_id=str(data.get("merchant_id") or "").strip(),

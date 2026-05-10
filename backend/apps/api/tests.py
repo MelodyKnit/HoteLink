@@ -19,11 +19,12 @@ from rest_framework import serializers as drf_serializers
 from rest_framework.test import APITestCase
 
 from apps.api import serializers as api_serializers
+from apps.api.views import build_payment_notify_signature
 from apps.bookings.models import BookingOrder
-from apps.bookings.tasks import sweep_order_lifecycle_anomalies
-from apps.crm.models import ChatMessage, ChatSession, CouponTemplate, InvoiceTitle, PointsLog, Review, UserCoupon
+from apps.bookings.tasks import send_upcoming_checkin_reminders, sweep_order_lifecycle_anomalies
+from apps.crm.models import ChatMessage, ChatSession, CouponTemplate, InvoiceRequest, InvoiceTitle, PointsLog, Review, UserCoupon
 from apps.hotels.models import Hotel, RoomInventory, RoomType
-from apps.operations.models import AICallLog, SystemNotice
+from apps.operations.models import AICallLog, AuditLog, SystemNotice
 from apps.operations.services.prompt_service import PromptTemplateService
 from apps.payments.models import PaymentRecord
 from apps.users.models import UserProfile
@@ -304,6 +305,7 @@ class UserApiTests(ApiBaseTestCase):
             "scenes": ["jsapi"],
             "gateway_url": "https://api.mch.weixin.qq.com/v3",
             "notify_url": "https://pay.example.com/wechat/notify",
+            "notify_secret": "wechat-notify-secret",
             "return_url": "https://pay.example.com/payment/result",
             "app_id": "wx1234567890",
             "merchant_id": "1900000109",
@@ -347,6 +349,7 @@ class UserApiTests(ApiBaseTestCase):
             "scenes": ["page"],
             "gateway_url": "https://openapi.alipay.com/gateway.do",
             "notify_url": "https://pay.example.com/alipay/notify",
+            "notify_secret": "alipay-notify-secret",
             "return_url": "https://pay.example.com/payment/result",
             "app_id": "2021000118630000",
             "app_private_key": "alipay-private-key",
@@ -374,6 +377,130 @@ class UserApiTests(ApiBaseTestCase):
         payment = PaymentRecord.objects.get(id=payload["payment_id"])
         self.assertEqual(payment.status, PaymentRecord.STATUS_UNPAID)
         self.assertEqual(payment.gateway_label, "支付宝直营")
+
+    def test_payment_notify_should_settle_real_gateway_order(self):
+        """验证真实支付网关回调会校验签名并完成订单支付闭环。"""
+        notify_secret = "alipay-notify-secret"
+        save_payment_gateway({
+            "name": "alipay_live",
+            "label": "支付宝直营",
+            "provider_type": "alipay",
+            "enabled": True,
+            "sandbox": False,
+            "scenes": ["page"],
+            "gateway_url": "https://openapi.alipay.com/gateway.do",
+            "notify_url": "https://pay.example.com/alipay/notify",
+            "notify_secret": notify_secret,
+            "return_url": "https://pay.example.com/payment/result",
+            "app_id": "2021000118630000",
+            "app_private_key": "alipay-private-key",
+            "alipay_public_key": "alipay-public-key",
+            "sign_type": "RSA2",
+            "charset": "utf-8",
+        })
+        update_payment_settings(mock_enabled=False)
+        self.login_user()
+
+        pay_response = self.client.post(
+            "/api/v1/user/orders/pay",
+            {"order_id": self.order.id, "payment_method": "alipay"},
+            format="json",
+        )
+        self.assertEqual(pay_response.status_code, 200)
+        payment_no = pay_response.json()["data"]["payment_record"]["payment_no"]
+        signature = build_payment_notify_signature(
+            payment_no=payment_no,
+            status="paid",
+            amount=Decimal("798.00"),
+            secret=notify_secret,
+        )
+
+        notify_response = self.client.post(
+            "/api/v1/payments/notify",
+            {
+                "payment_no": payment_no,
+                "status": "paid",
+                "amount": "798.00",
+                "gateway_name": "alipay_live",
+                "external_trade_no": "ALI202605100001",
+                "signature": signature,
+                "notify_payload": {"trade_status": "TRADE_SUCCESS"},
+            },
+            format="json",
+        )
+        self.assertEqual(notify_response.status_code, 200)
+        self.assertEqual(notify_response.json()["data"]["payment_status"], BookingOrder.PAYMENT_PAID)
+
+        self.order.refresh_from_db()
+        payment = PaymentRecord.objects.get(payment_no=payment_no)
+        self.assertEqual(self.order.payment_status, BookingOrder.PAYMENT_PAID)
+        self.assertEqual(self.order.status, BookingOrder.STATUS_PAID)
+        self.assertEqual(payment.status, PaymentRecord.STATUS_PAID)
+        self.assertEqual(payment.external_trade_no, "ALI202605100001")
+        self.assertGreater(self.order.points_earned, 0)
+        self.assertTrue(
+            SystemNotice.objects.filter(
+                user=self.user,
+                notice_type=SystemNotice.TYPE_PAYMENT,
+                related_order=self.order,
+                title="支付成功",
+            ).exists()
+        )
+
+        duplicate_response = self.client.post(
+            "/api/v1/payments/notify",
+            {
+                "payment_no": payment_no,
+                "status": "paid",
+                "amount": "798.00",
+                "gateway_name": "alipay_live",
+                "external_trade_no": "ALI202605100001",
+                "signature": signature,
+            },
+            format="json",
+        )
+        self.assertEqual(duplicate_response.status_code, 200)
+        self.assertEqual(PointsLog.objects.filter(order=self.order, point_type=PointsLog.POINT_TYPE_CONSUME).count(), 1)
+
+    def test_payment_notify_should_reject_invalid_signature(self):
+        """验证支付回调签名错误时不会修改订单状态。"""
+        save_payment_gateway({
+            "name": "alipay_live",
+            "label": "支付宝直营",
+            "provider_type": "alipay",
+            "enabled": True,
+            "sandbox": False,
+            "scenes": ["page"],
+            "gateway_url": "https://openapi.alipay.com/gateway.do",
+            "notify_url": "https://pay.example.com/alipay/notify",
+            "notify_secret": "alipay-notify-secret",
+            "app_id": "2021000118630000",
+            "app_private_key": "alipay-private-key",
+            "alipay_public_key": "alipay-public-key",
+        })
+        update_payment_settings(mock_enabled=False)
+        self.login_user()
+
+        pay_response = self.client.post(
+            "/api/v1/user/orders/pay",
+            {"order_id": self.order.id, "payment_method": "alipay"},
+            format="json",
+        )
+        payment_no = pay_response.json()["data"]["payment_record"]["payment_no"]
+        notify_response = self.client.post(
+            "/api/v1/payments/notify",
+            {
+                "payment_no": payment_no,
+                "status": "paid",
+                "amount": "798.00",
+                "gateway_name": "alipay_live",
+                "signature": "bad-signature",
+            },
+            format="json",
+        )
+        self.assertEqual(notify_response.status_code, 403)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.payment_status, BookingOrder.PAYMENT_UNPAID)
 
     def test_user_pay_timeout_order_should_auto_cancel(self):
         """验证支付超时订单时会被自动取消，避免长期挂起。"""
@@ -446,16 +573,91 @@ class UserApiTests(ApiBaseTestCase):
         )
         self.assertEqual(invoice_apply.status_code, 200)
         self.assertEqual(invoice_apply.json()["data"]["status"], "pending")
+        original_invoice_title = self.invoice_title.title
+        InvoiceTitle.objects.filter(id=self.invoice_title.id).update(title="北京测试科技有限公司变更")
 
         invoices_response = self.client.get("/api/v1/user/invoices")
         self.assertEqual(invoices_response.status_code, 200)
         invoices_payload = invoices_response.json()["data"]
         self.assertGreaterEqual(len(invoices_payload["titles"]), 1)
-        self.assertEqual(invoices_payload["titles"][0]["title"], self.invoice_title.title)
+        self.assertEqual(invoices_payload["titles"][0]["title"], "北京测试科技有限公司变更")
         self.assertGreaterEqual(invoices_payload["total"], 1)
         self.assertEqual(invoices_payload["items"][0]["order_id"], self.order.id)
-        self.assertEqual(invoices_payload["items"][0]["title"], self.invoice_title.title)
+        self.assertEqual(invoices_payload["items"][0]["title"], original_invoice_title)
         self.assertEqual(invoices_payload["items"][0]["amount"], "798.00")
+
+    def test_admin_invoice_management_processes_request_and_notifies_user(self):
+        """验证管理端可处理用户发票申请，并同步用户端记录和站内通知。"""
+        BookingOrder.objects.filter(id=self.order.id).update(
+            status=BookingOrder.STATUS_PAID,
+            payment_status=BookingOrder.PAYMENT_PAID,
+        )
+
+        self.login_user()
+        apply_response = self.client.post(
+            "/api/v1/user/invoices/apply",
+            {"order_id": self.order.id, "invoice_title_id": self.invoice_title.id},
+            format="json",
+        )
+        self.assertEqual(apply_response.status_code, 200)
+        invoice_id = apply_response.json()["data"]["id"]
+
+        denied_response = self.client.get("/api/v1/admin/invoices")
+        self.assertEqual(denied_response.status_code, 403)
+
+        self.login_admin()
+        list_response = self.client.get("/api/v1/admin/invoices", {"status": InvoiceRequest.STATUS_PENDING})
+        self.assertEqual(list_response.status_code, 200)
+        payload = list_response.json()["data"]
+        self.assertEqual(payload["summary"]["pending"], 1)
+        self.assertEqual(payload["items"][0]["title"], self.invoice_title.title)
+
+        invalid_response = self.client.post(
+            "/api/v1/admin/invoices/process",
+            {"invoice_id": invoice_id, "action": "issue"},
+            format="json",
+        )
+        self.assertEqual(invalid_response.status_code, 400)
+        self.assertIn("invoice_no", invalid_response.json()["data"]["errors"])
+
+        process_response = self.client.post(
+            "/api/v1/admin/invoices/process",
+            {
+                "invoice_id": invoice_id,
+                "action": "issue",
+                "invoice_code": "044002600111",
+                "invoice_no": "INV202605100001",
+                "invoice_file_url": "https://invoice.example.com/INV202605100001.pdf",
+                "processor_remark": "已通过电子发票平台开具",
+            },
+            format="json",
+        )
+        self.assertEqual(process_response.status_code, 200)
+        process_payload = process_response.json()["data"]
+        self.assertEqual(process_payload["status"], InvoiceRequest.STATUS_ISSUED)
+        self.assertEqual(process_payload["invoice_no"], "INV202605100001")
+        self.assertEqual(process_payload["processed_by_name"], "管理员")
+
+        invoice_request = InvoiceRequest.objects.get(id=invoice_id)
+        self.assertEqual(invoice_request.status, InvoiceRequest.STATUS_ISSUED)
+        self.assertEqual(invoice_request.processor, self.admin_user)
+        self.assertEqual(invoice_request.invoice_no, "INV202605100001")
+        self.assertTrue(
+            SystemNotice.objects.filter(
+                user=self.user,
+                notice_type=SystemNotice.TYPE_INVOICE,
+                related_order=self.order,
+                title="电子发票已开具",
+            ).exists()
+        )
+
+        self.login_user()
+        user_invoice_response = self.client.get("/api/v1/user/invoices")
+        self.assertEqual(user_invoice_response.status_code, 200)
+        item = user_invoice_response.json()["data"]["items"][0]
+        self.assertEqual(item["status"], InvoiceRequest.STATUS_ISSUED)
+        self.assertEqual(item["invoice_no"], "INV202605100001")
+        self.assertEqual(item["invoice_file_url"], "https://invoice.example.com/INV202605100001.pdf")
 
     def test_user_coupon_exchange_uses_consume_points_only(self):
         """验证兑换优惠券只扣消费积分，不影响会员积分成长值。"""
@@ -1586,6 +1788,95 @@ class AdminApiTests(ApiBaseTestCase):
         self.assertEqual(ai_settings.status_code, 200)
         self.assertIn("active_provider", ai_settings.json()["data"])
 
+    def test_admin_inventory_bulk_update_should_create_update_and_audit(self):
+        """验证管理端可按日期范围批量设置价格库存并写入审计日志。"""
+        self.login_admin()
+        saturday = timezone.localdate()
+        while saturday.weekday() != 5:
+            saturday += timedelta(days=1)
+        monday = saturday + timedelta(days=2)
+
+        response = self.client.post(
+            "/api/v1/admin/inventory/bulk-update",
+            {
+                "room_type_ids": [self.room_type.id],
+                "start_date": str(saturday),
+                "end_date": str(monday),
+                "price": "450.00",
+                "weekend_price": "520.00",
+                "stock": 4,
+                "status": RoomInventory.STATUS_OFFLINE,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["date_count"], 3)
+        saturday_inventory = RoomInventory.objects.get(room_type=self.room_type, date=saturday)
+        monday_inventory = RoomInventory.objects.get(room_type=self.room_type, date=monday)
+        self.assertEqual(saturday_inventory.price, Decimal("520.00"))
+        self.assertEqual(monday_inventory.price, Decimal("450.00"))
+        self.assertEqual(monday_inventory.stock, 4)
+        self.assertEqual(monday_inventory.status, RoomInventory.STATUS_OFFLINE)
+        audit = AuditLog.objects.filter(action="inventory.bulk_update").first()
+        self.assertIsNotNone(audit)
+        self.assertEqual(audit.detail["room_type_ids"], [self.room_type.id])
+
+    def test_admin_inventory_bulk_update_should_reject_invalid_range(self):
+        """验证批量库存接口会拒绝反向日期范围。"""
+        self.login_admin()
+        today = timezone.localdate()
+
+        response = self.client.post(
+            "/api/v1/admin/inventory/bulk-update",
+            {
+                "room_type_ids": [self.room_type.id],
+                "start_date": str(today + timedelta(days=3)),
+                "end_date": str(today),
+                "stock": 4,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["code"], 4001)
+
+    def test_admin_audit_logs_should_be_system_admin_only_and_filterable(self):
+        """验证审计日志页面接口仅系统管理员可查，并支持动作筛选。"""
+        AuditLog.objects.create(
+            user=self.admin_user,
+            action="inventory.bulk_update",
+            target="room_inventory",
+            detail={"created_count": 1},
+        )
+        self.login_hotel_admin()
+        denied = self.client.get("/api/v1/admin/audit-logs")
+        self.assertEqual(denied.status_code, 403)
+
+        self.login_admin()
+        response = self.client.get("/api/v1/admin/audit-logs", {"action": "inventory"})
+        self.assertEqual(response.status_code, 200)
+        items = response.json()["data"]["items"]
+        self.assertEqual(items[0]["action"], "inventory.bulk_update")
+        self.assertEqual(items[0]["risk_level"], "medium")
+
+    def test_checkin_reminder_task_should_create_idempotent_notice(self):
+        """验证行前提醒任务会为次日入住订单创建且仅创建一次站内通知。"""
+        BookingOrder.objects.filter(id=self.order.id).update(
+            status=BookingOrder.STATUS_CONFIRMED,
+            payment_status=BookingOrder.PAYMENT_PAID,
+            check_in_date=timezone.localdate() + timedelta(days=1),
+        )
+
+        first = send_upcoming_checkin_reminders(batch_size=10, days_before=1)
+        second = send_upcoming_checkin_reminders(batch_size=10, days_before=1)
+
+        self.assertEqual(first["sent"], 1)
+        self.assertEqual(second["sent"], 0)
+        notice = SystemNotice.objects.get(related_order_id=self.order.id, title="入住提醒")
+        self.assertIn(self.hotel.name, notice.content)
+        self.assertIn(str(timezone.localdate() + timedelta(days=1)), notice.content)
+
     def test_admin_payment_gateway_settings_crud(self):
         """验证管理端可读取、保存并删除支付网关配置。"""
         self.login_admin()
@@ -1610,6 +1901,7 @@ class AdminApiTests(ApiBaseTestCase):
                 "scenes": ["jsapi", "h5"],
                 "gateway_url": "https://api.mch.weixin.qq.com/v3",
                 "notify_url": "https://pay.example.com/wechat/notify",
+                "notify_secret": "wechat-notify-secret",
                 "return_url": "https://pay.example.com/payment/result",
                 "app_id": "wx1234567890",
                 "merchant_id": "1900000109",
@@ -1628,6 +1920,8 @@ class AdminApiTests(ApiBaseTestCase):
         self.assertFalse(settings_payload["mock_enabled"])
         self.assertIn("field_labels", settings_payload)
         target = next(item for item in settings_payload["gateways"] if item["name"] == "wechat_main")
+        self.assertNotIn("notify_secret", target)
+        self.assertTrue(target["secret_flags"]["notify_secret"])
         self.assertTrue(target["secret_flags"]["api_v3_key"])
         self.assertTrue(target["is_configured"])
 
@@ -1698,6 +1992,26 @@ class AdminApiTests(ApiBaseTestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["data"]["role"], "hotel_admin")
+        self.assertIn("user_id", response.json()["data"])
+
+    def test_admin_employee_update_rejects_unimplemented_receptionist_role(self):
+        """回归：员工编辑不能写入未接入登录权限体系的 receptionist 角色。"""
+        self.login_admin()
+        employee_user = User.objects.create_user(username="employee_contract", password="Password123")
+        UserProfile.objects.create(
+            user=employee_user,
+            nickname="员工契约",
+            role=UserProfile.ROLE_HOTEL_ADMIN,
+            status=UserProfile.STATUS_ACTIVE,
+        )
+
+        response = self.client.post(
+            "/api/v1/admin/employees/update",
+            {"user_id": employee_user.id, "role": "receptionist"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("role", response.json()["data"]["errors"])
 
     def test_hotel_admin_cannot_access_system_status_or_ai_settings(self):
         """验证酒店管理员无法读取系统状态和 AI 配置。"""
@@ -2435,9 +2749,18 @@ class AdminApiExtendedTests(ApiBaseTestCase):
         )
         response = self.client.post("/api/v1/admin/orders/check-out", {
             "order_id": self.order.id,
+            "consume_amount": "120.00",
+            "deposit_deduction": "40.00",
         }, format="json")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["data"]["status"], "completed")
+        self.assertEqual(response.json()["data"]["cash_collected"], "80.00")
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.pay_amount, Decimal("918.00"))
+        settlement_payment = PaymentRecord.objects.filter(order=self.order, scene="checkout_extra").first()
+        self.assertIsNotNone(settlement_payment)
+        self.assertEqual(settlement_payment.amount, Decimal("120.00"))
+        self.assertEqual(settlement_payment.request_payload["deposit_deduction"], "40.00")
 
     def test_admin_check_out_non_checked_in_should_validate(self):
         """验证未入住订单的退房限制。"""
@@ -2491,6 +2814,7 @@ class AdminApiExtendedTests(ApiBaseTestCase):
         }, format="json")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["data"]["check_out_date"], str(new_checkout))
+        self.assertTrue(PaymentRecord.objects.filter(order=self.order, scene="extend_stay", status=PaymentRecord.STATUS_PAID).exists())
 
     def test_admin_switch_room(self):
         """验证管理端换房流程。"""
@@ -2683,6 +3007,31 @@ class AdminApiExtendedTests(ApiBaseTestCase):
         response = self.client.get("/api/v1/admin/users", {"keyword": "张三"})
         self.assertEqual(response.status_code, 200)
         self.assertGreaterEqual(response.json()["data"]["total"], 1)
+
+    def test_admin_users_list_exposes_user_id_contract(self):
+        """回归：管理端账号操作必须使用 User.id，而不是 UserProfile.id。"""
+        User.objects.create_user(username="profile-offset", password="Password123")
+        target_user = User.objects.create_user(username="profile_contract", password="Password123")
+        profile = UserProfile.objects.create(
+            user=target_user,
+            nickname="契约用户",
+            role=UserProfile.ROLE_USER,
+            status=UserProfile.STATUS_ACTIVE,
+        )
+        self.assertNotEqual(profile.id, target_user.id)
+
+        self.login_admin()
+        response = self.client.get("/api/v1/admin/users", {"keyword": "profile_contract"})
+        self.assertEqual(response.status_code, 200)
+        item = response.json()["data"]["items"][0]
+        self.assertEqual(item["id"], profile.id)
+        self.assertEqual(item["user_id"], target_user.id)
+
+        wrong_id_response = self.client.post("/api/v1/admin/users/change-status", {
+            "user_id": profile.id,
+            "status": "disabled",
+        }, format="json")
+        self.assertEqual(wrong_id_response.status_code, 404)
 
     def test_admin_user_change_status_disable_and_enable(self):
         """验证管理端禁用/启用用户。"""

@@ -79,7 +79,7 @@
           </div>
 
           <div>
-            <label class="mb-1 block text-sm font-medium">押金抵扣（前端登记）</label>
+            <label class="mb-1 block text-sm font-medium">押金抵扣</label>
             <input
               v-model.number="depositDeduction"
               type="number"
@@ -238,6 +238,10 @@ async function handleCheckOut() {
     showToast('请先选择订单', 'warning')
     return
   }
+  if (depositDeduction.value > consumeAmount.value) {
+    showToast('押金抵扣不能大于额外消费金额', 'warning')
+    return
+  }
   submitting.value = true
   try {
     const mergedRemark = [
@@ -247,6 +251,7 @@ async function handleCheckOut() {
     const res = await orderApi.checkOut({
       order_id: Number(selectedOrder.value.id),
       consume_amount: consumeAmount.value,
+      deposit_deduction: depositDeduction.value,
       operator_remark: mergedRemark || undefined,
     })
     if (res.code === 0) {

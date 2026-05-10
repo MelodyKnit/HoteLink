@@ -195,6 +195,59 @@ def repair_overdue_order_lifecycles(*, user_id=None, batch_size: int = 200, toda
     }
 
 
+def build_checkin_reminder_content(order) -> str:
+    """Build a concise pre-arrival reminder message for an upcoming order.
+
+    Args:
+        order: Booking order that is expected to check in soon.
+
+    Returns:
+        A SystemNotice-safe message containing hotel address, room type, and check-in guidance.
+    """
+    hotel = order.hotel
+    room_type = order.room_type
+    hotel_name = hotel.name if hotel else "预订酒店"
+    address = hotel.address if hotel and hotel.address else "请在订单详情中查看酒店地址"
+    phone = hotel.phone if hotel and hotel.phone else "酒店联系电话以订单详情为准"
+    room_name = room_type.name if room_type else "已订房型"
+    content = (
+        f"您预订的{hotel_name}{order.check_in_date}入住，房型：{room_name}。"
+        f"地址：{address}；联系电话：{phone}。请携带有效证件，建议提前确认交通与到店时间。"
+    )
+    return content[:255]
+
+
+def create_checkin_reminder_notice(order) -> bool:
+    """Create one idempotent pre-arrival notice for an order.
+
+    Args:
+        order: Booking order that should receive a check-in reminder.
+
+    Returns:
+        True when a new notice is created, otherwise False.
+    """
+    from apps.operations.models import SystemNotice
+
+    exists = SystemNotice.objects.filter(
+        user_id=order.user_id,
+        related_order=order,
+        notice_type=SystemNotice.TYPE_ORDER,
+        title="入住提醒",
+    ).exists()
+    if exists:
+        return False
+
+    # Keep the reminder idempotent because Celery Beat may retry or run on multiple workers.
+    SystemNotice.objects.create(
+        user_id=order.user_id,
+        notice_type=SystemNotice.TYPE_ORDER,
+        title="入住提醒",
+        content=build_checkin_reminder_content(order),
+        related_order=order,
+    )
+    return True
+
+
 @shared_task(bind=True, max_retries=2, default_retry_delay=30)
 def auto_cancel_unpaid_order(self, order_id: int):
     """未支付自动取消订单，归还优惠券并发送系统通知。"""
@@ -250,6 +303,46 @@ def sweep_timeout_unpaid_orders(self, batch_size: int = 500):
         deadline.isoformat(),
     )
     return {"checked": len(stale_ids), "cancelled": cancelled_count, "cancel_minutes": cancel_minutes}
+
+
+@shared_task(bind=True)
+def send_upcoming_checkin_reminders(self, batch_size: int = 500, days_before: int = 1):
+    """周期巡检：为即将入住的有效订单发送行前提醒。"""
+    from apps.bookings.models import BookingOrder
+
+    safe_batch_size = max(int(batch_size), 1)
+    safe_days_before = max(int(days_before), 0)
+    target_date = timezone.localdate() + timedelta(days=safe_days_before)
+    order_ids = list(
+        BookingOrder.objects.filter(
+            check_in_date=target_date,
+            status__in=[BookingOrder.STATUS_PAID, BookingOrder.STATUS_CONFIRMED],
+        )
+        .order_by("check_in_date", "id")
+        .values_list("id", flat=True)[:safe_batch_size]
+    )
+
+    sent_count = 0
+    for order_id in order_ids:
+        with transaction.atomic():
+            order = (
+                BookingOrder.objects.select_for_update()
+                .select_related("hotel", "room_type")
+                .filter(pk=order_id)
+                .first()
+            )
+            if not order:
+                continue
+            if create_checkin_reminder_notice(order):
+                sent_count += 1
+
+    logger.info(
+        "send_upcoming_checkin_reminders: checked=%s sent=%s target_date=%s",
+        len(order_ids),
+        sent_count,
+        target_date.isoformat(),
+    )
+    return {"checked": len(order_ids), "sent": sent_count, "target_date": target_date.isoformat()}
 
 
 @shared_task(bind=True)

@@ -99,6 +99,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { userApi } from '@hotelink/api'
+import { resolveAdminUserId } from '@hotelink/utils'
 import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, SelectField, useToast, useConfirm } from '@hotelink/ui'
 
 const { showToast } = useToast()
@@ -130,7 +131,7 @@ const memberLevelMap: Record<string, string> = {
 }
 
 function patchUserRow(userId: number, patch: Record<string, unknown>) {
-  list.value = list.value.map((item) => (Number(item.id) === userId ? { ...item, ...patch } : item))
+  list.value = list.value.map((item) => (resolveAdminUserId(item) === userId ? { ...item, ...patch } : item))
 }
 
 function onSortChange() {
@@ -168,12 +169,17 @@ async function loadList() {
 // 处理 changeStatus 业务流程。
 async function changeStatus(row: Record<string, unknown>, status: string) {
   const label = status === 'active' ? '启用' : '禁用'
+  const userId = resolveAdminUserId(row)
+  if (!userId) {
+    showToast('缺少用户账号 ID，无法执行操作', 'error')
+    return
+  }
   if (!await confirmDialog(`确认${label}该用户？`, { type: status === 'active' ? 'warning' : 'danger' })) return
   try {
-    const res = await userApi.changeStatus({ user_id: row.id as number, status })
+    const res = await userApi.changeStatus({ user_id: userId, status })
     if (res.code === 0) {
       showToast(`用户已${label}`, 'success')
-      patchUserRow(row.id as number, { status })
+      patchUserRow(userId, { status })
     } else {
       showToast(res.message || `${label}失败`, 'error')
     }
@@ -187,7 +193,7 @@ const editSaving = ref(false)
 const editForm = reactive({ user_id: 0, nickname: '', mobile: '', member_level: 'normal' })
 
 function openEdit(row: Record<string, unknown>) {
-  editForm.user_id = row.id as number
+  editForm.user_id = resolveAdminUserId(row)
   editForm.nickname = String(row.nickname || '')
   editForm.mobile = String(row.mobile || '')
   editForm.member_level = String(row.member_level || 'normal')
@@ -224,11 +230,20 @@ async function handleEdit() {
 }
 
 async function resetPassword(row: Record<string, unknown>) {
-  if (!await confirmDialog(`确认将「${row.nickname || row.username}」的密码重置为 Abc123456？`, { type: 'warning' })) return
+  const userId = resolveAdminUserId(row)
+  if (!userId) {
+    showToast('缺少用户账号 ID，无法重置密码', 'error')
+    return
+  }
+  if (!await confirmDialog(`确认为「${row.nickname || row.username}」生成新的随机临时密码？`, { type: 'warning' })) return
   try {
-    const res = await userApi.resetPassword(row.id as number)
+    const res = await userApi.resetPassword(userId)
     if (res.code === 0) {
-      showToast('密码已重置为 Abc123456', 'success')
+      const newPassword = String((res.data as Record<string, unknown> | undefined)?.new_password || '')
+      showToast(newPassword ? `密码已重置，新临时密码：${newPassword}` : '密码已重置', 'success')
+      if (newPassword) {
+        await confirmDialog(`新临时密码：${newPassword}\n请立即交给用户，并提醒对方登录后修改密码。`, { title: '密码重置成功', type: 'info' })
+      }
     } else {
       showToast(res.message || '重置失败', 'error')
     }

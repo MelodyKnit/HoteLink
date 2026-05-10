@@ -178,11 +178,11 @@
             <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
               <div>
                 <label class="mb-1 block text-sm font-medium text-slate-700">支付平台</label>
-                <select v-model="form.provider_type" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-teal-500">
+                <SelectField v-model="form.provider_type" class="w-full">
                   <option value="wechat">微信支付</option>
                   <option value="alipay">支付宝</option>
                   <option value="custom">其它支付平台</option>
-                </select>
+                </SelectField>
               </div>
               <div>
                 <label class="mb-1 block text-sm font-medium text-slate-700">运行状态</label>
@@ -256,6 +256,10 @@
               <div>
                 <label class="mb-1 block text-sm font-medium text-slate-700">异步回调地址</label>
                 <input v-model="form.notify_url" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-teal-500" placeholder="https://domain/api/v1/..." />
+              </div>
+              <div>
+                <label class="mb-1 block text-sm font-medium text-slate-700">回调签名密钥</label>
+                <input v-model="form.notify_secret" type="password" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-teal-500" :placeholder="secretPlaceholder('notify_secret')" />
               </div>
               <div>
                 <label class="mb-1 block text-sm font-medium text-slate-700">同步返回地址</label>
@@ -371,7 +375,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { paymentGatewayApi, type BuiltinPaymentTemplate, type PaymentGatewayItem, type PaymentGatewayProviderType } from '@hotelink/api'
 import { extractApiError, PAYMENT_GATEWAY_SWITCH_META, PAYMENT_METHOD_MAP, suggestUniquePaymentGatewayName } from '@hotelink/utils'
-import { PageHeader, StatusBadge, useConfirm, useToast } from '@hotelink/ui'
+import { PageHeader, SelectField, StatusBadge, useConfirm, useToast } from '@hotelink/ui'
 
 const { showToast } = useToast()
 const { confirm: confirmDialog } = useConfirm()
@@ -399,6 +403,7 @@ const form = reactive({
   gateway_url: '',
   checkout_url: '',
   notify_url: '',
+  notify_secret: '',
   return_url: '',
   app_id: '',
   merchant_id: '',
@@ -485,6 +490,7 @@ function resetForm() {
     gateway_url: '',
     checkout_url: '',
     notify_url: '',
+    notify_secret: '',
     return_url: '',
     app_id: '',
     merchant_id: '',
@@ -534,6 +540,7 @@ function openEditModal(gateway: PaymentGatewayItem) {
     gateway_url: gateway.gateway_url,
     checkout_url: gateway.checkout_url,
     notify_url: gateway.notify_url,
+    notify_secret: '',
     return_url: gateway.return_url,
     app_id: gateway.app_id,
     merchant_id: gateway.merchant_id,
@@ -613,6 +620,7 @@ async function saveGateway() {
     gateway_url: form.gateway_url,
     checkout_url: form.checkout_url,
     notify_url: form.notify_url,
+    notify_secret: form.notify_secret,
     return_url: form.return_url,
     app_id: form.app_id,
     merchant_id: form.merchant_id,

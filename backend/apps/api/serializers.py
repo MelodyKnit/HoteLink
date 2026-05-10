@@ -12,7 +12,7 @@ from urllib.parse import quote, urlparse
 from apps.bookings.models import BookingOrder
 from apps.crm.models import ChatMessage, ChatSession, CouponTemplate, FavoriteHotel, InvoiceRequest, InvoiceTitle, PointsLog, Review, UserCoupon
 from apps.hotels.models import Hotel, RoomInventory, RoomType
-from apps.operations.models import AICallLog, SystemNotice
+from apps.operations.models import AICallLog, AuditLog, SystemNotice
 from apps.payments.models import PaymentRecord
 from apps.reports.models import ReportTask
 from apps.users.models import UserProfile
@@ -40,6 +40,7 @@ def build_thumb_proxy_url(url: str | None, width: int = 56, height: int = 40) ->
 
 class UserProfileSerializer(serializers.ModelSerializer):
     """UserProfile 序列化器：用于接口参数校验或响应数据转换。"""
+    user_id = serializers.IntegerField(read_only=True)
     username = serializers.CharField(source="user.username", read_only=True)
     email = serializers.EmailField(source="user.email", read_only=True)
 
@@ -47,6 +48,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
         model = UserProfile
         fields = [
             "id",
+            "user_id",
             "username",
             "email",
             "nickname",
@@ -539,6 +541,60 @@ class InventoryUpdateSerializer(serializers.Serializer):
     status = serializers.ChoiceField(choices=RoomInventory.STATUS_CHOICES)
 
 
+class InventoryBulkUpdateSerializer(serializers.Serializer):
+    """库存批量更新序列化器。"""
+
+    room_type_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        min_length=1,
+        max_length=50,
+    )
+    start_date = serializers.DateField()
+    end_date = serializers.DateField()
+    price = serializers.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        min_value=Decimal("0.00"),
+        required=False,
+        allow_null=True,
+    )
+    weekend_price = serializers.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        min_value=Decimal("0.00"),
+        required=False,
+        allow_null=True,
+    )
+    stock = serializers.IntegerField(min_value=0, required=False, allow_null=True)
+    status = serializers.ChoiceField(choices=RoomInventory.STATUS_CHOICES, required=False)
+    weekdays = serializers.ListField(
+        child=serializers.IntegerField(min_value=0, max_value=6),
+        required=False,
+        allow_empty=True,
+    )
+
+    def validate(self, attrs):
+        """Validate date range and changed fields for bulk inventory updates."""
+        if attrs["start_date"] > attrs["end_date"]:
+            raise serializers.ValidationError({"end_date": ["结束日期不能早于开始日期"]})
+
+        date_count = (attrs["end_date"] - attrs["start_date"]).days + 1
+        if date_count > 366:
+            raise serializers.ValidationError({"end_date": ["批量设置日期范围不能超过 366 天"]})
+
+        has_change = any(attrs.get(field) not in (None, "") for field in ("price", "weekend_price", "stock", "status"))
+        if not has_change:
+            raise serializers.ValidationError("至少需要设置价格、周末价、库存或状态中的一项")
+
+        attrs["room_type_ids"] = list(dict.fromkeys(attrs["room_type_ids"]))
+        weekdays = attrs.get("weekdays")
+        if weekdays is None or len(weekdays) == 0:
+            attrs["weekdays"] = list(range(7))
+        else:
+            attrs["weekdays"] = sorted(set(weekdays))
+        return attrs
+
+
 class OrderStatusSerializer(serializers.Serializer):
     """OrderStatus 序列化器：用于接口参数校验或响应数据转换。"""
     order_id = serializers.IntegerField(min_value=1)
@@ -557,7 +613,22 @@ class CheckOutSerializer(serializers.Serializer):
     """CheckOut 序列化器：用于接口参数校验或响应数据转换。"""
     order_id = serializers.IntegerField(min_value=1)
     consume_amount = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, default=0)
+    deposit_deduction = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, default=0)
     operator_remark = serializers.CharField(max_length=255, required=False, allow_blank=True)
+
+    def validate(self, attrs):
+        """Validate settlement amounts submitted by the front desk."""
+        consume_amount = attrs.get("consume_amount") or Decimal("0.00")
+        deposit_deduction = attrs.get("deposit_deduction") or Decimal("0.00")
+        if consume_amount < 0:
+            raise serializers.ValidationError({"consume_amount": ["额外消费金额不能为负数"]})
+        if deposit_deduction < 0:
+            raise serializers.ValidationError({"deposit_deduction": ["押金抵扣金额不能为负数"]})
+        if deposit_deduction > consume_amount:
+            raise serializers.ValidationError({"deposit_deduction": ["押金抵扣不能大于额外消费金额"]})
+        attrs["consume_amount"] = consume_amount
+        attrs["deposit_deduction"] = deposit_deduction
+        return attrs
 
 
 class OrderExtendStaySerializer(serializers.Serializer):
@@ -688,16 +759,59 @@ class InvoiceRequestSerializer(serializers.ModelSerializer):
     """InvoiceRequest 序列化器：用于接口参数校验或响应数据转换。"""
     invoice_title = InvoiceTitleSerializer(read_only=True)
     order_no = serializers.CharField(source="order.order_no", read_only=True)
-    amount = serializers.DecimalField(source="order.pay_amount", max_digits=10, decimal_places=2, read_only=True)
-    title = serializers.CharField(source="invoice_title.title", read_only=True)
-    invoice_type = serializers.CharField(source="invoice_title.invoice_type", read_only=True)
-    tax_no = serializers.CharField(source="invoice_title.tax_no", read_only=True)
-    email = serializers.EmailField(source="invoice_title.email", read_only=True)
+    amount = serializers.SerializerMethodField()
+    title = serializers.SerializerMethodField()
+    invoice_type = serializers.SerializerMethodField()
+    tax_no = serializers.SerializerMethodField()
+    email = serializers.SerializerMethodField()
     status_label = serializers.SerializerMethodField()
+    username = serializers.SerializerMethodField()
+    guest_name = serializers.CharField(source="order.guest_name", read_only=True)
+    guest_mobile = serializers.CharField(source="order.guest_mobile", read_only=True)
+    hotel_name = serializers.CharField(source="order.hotel.name", read_only=True)
+    room_type_name = serializers.CharField(source="order.room_type.name", read_only=True)
+    check_in_date = serializers.DateField(source="order.check_in_date", read_only=True)
+    check_out_date = serializers.DateField(source="order.check_out_date", read_only=True)
+    processed_by_name = serializers.SerializerMethodField()
+
+    def get_amount(self, obj):
+        """Return the immutable invoiceable amount with a safe fallback for old rows."""
+        amount = obj.amount or getattr(obj.order, "pay_amount", Decimal("0.00"))
+        return f"{Decimal(amount):.2f}"
+
+    def get_title(self, obj):
+        """Return the buyer title snapshot shown on the invoice request."""
+        return obj.title_snapshot or getattr(obj.invoice_title, "title", "")
+
+    def get_invoice_type(self, obj):
+        """Return the buyer invoice type snapshot."""
+        return obj.invoice_type_snapshot or getattr(obj.invoice_title, "invoice_type", "")
+
+    def get_tax_no(self, obj):
+        """Return the buyer tax number snapshot."""
+        return obj.tax_no_snapshot or getattr(obj.invoice_title, "tax_no", "")
+
+    def get_email(self, obj):
+        """Return the invoice receiving email snapshot."""
+        return obj.email_snapshot or getattr(obj.invoice_title, "email", "")
 
     def get_status_label(self, obj):
         """Return the display label for an invoice request status."""
         return dict(InvoiceRequest.STATUS_CHOICES).get(obj.status, obj.status)
+
+    def get_username(self, obj):
+        """Return the account display name for admin invoice tables."""
+        user = getattr(obj.order, "user", None)
+        profile = getattr(user, "profile", None)
+        return getattr(profile, "nickname", "") or getattr(user, "username", "")
+
+    def get_processed_by_name(self, obj):
+        """Return the admin display name that processed the invoice."""
+        processor = getattr(obj, "processor", None)
+        if not processor:
+            return ""
+        profile = getattr(processor, "profile", None)
+        return getattr(profile, "nickname", "") or getattr(processor, "username", "")
 
     class Meta:
         model = InvoiceRequest
@@ -713,8 +827,56 @@ class InvoiceRequestSerializer(serializers.ModelSerializer):
             "invoice_type",
             "tax_no",
             "email",
+            "username",
+            "guest_name",
+            "guest_mobile",
+            "hotel_name",
+            "room_type_name",
+            "check_in_date",
+            "check_out_date",
+            "invoice_code",
+            "invoice_no",
+            "invoice_file_url",
+            "processor_remark",
+            "processed_by_name",
+            "issued_at",
+            "processed_at",
             "created_at",
+            "updated_at",
         ]
+
+
+class AdminInvoiceProcessSerializer(serializers.Serializer):
+    """管理端发票处理参数：开票或取消待处理申请。"""
+    ACTION_ISSUE = "issue"
+    ACTION_CANCEL = "cancel"
+    ACTION_CHOICES = [
+        (ACTION_ISSUE, "开票"),
+        (ACTION_CANCEL, "取消"),
+    ]
+
+    invoice_id = serializers.IntegerField(min_value=1)
+    action = serializers.ChoiceField(choices=ACTION_CHOICES)
+    invoice_code = serializers.CharField(max_length=64, required=False, allow_blank=True, default="")
+    invoice_no = serializers.CharField(max_length=64, required=False, allow_blank=True, default="")
+    invoice_file_url = serializers.CharField(max_length=500, required=False, allow_blank=True, default="")
+    processor_remark = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
+    issued_at = serializers.DateTimeField(required=False, allow_null=True)
+
+    def validate(self, attrs):
+        """Validate required fields for the requested invoice operation."""
+        action = attrs["action"]
+        invoice_no = (attrs.get("invoice_no") or "").strip()
+        processor_remark = (attrs.get("processor_remark") or "").strip()
+        if action == self.ACTION_ISSUE and not invoice_no:
+            raise serializers.ValidationError({"invoice_no": ["开票时必须填写发票号码"]})
+        if action == self.ACTION_CANCEL and not processor_remark:
+            raise serializers.ValidationError({"processor_remark": ["取消申请时必须填写处理原因"]})
+        attrs["invoice_code"] = (attrs.get("invoice_code") or "").strip()
+        attrs["invoice_no"] = invoice_no
+        attrs["invoice_file_url"] = (attrs.get("invoice_file_url") or "").strip()
+        attrs["processor_remark"] = processor_remark
+        return attrs
 
 
 class UserCouponSerializer(serializers.ModelSerializer):
@@ -813,9 +975,27 @@ class EmployeeUpdateSerializer(serializers.Serializer):
     nickname = serializers.CharField(max_length=100, required=False)
     mobile = serializers.CharField(max_length=20, required=False, allow_blank=True)
     role = serializers.ChoiceField(
-        choices=[("hotel_admin", "酒店管理员"), ("receptionist", "前台")],
+        choices=[(UserProfile.ROLE_HOTEL_ADMIN, "酒店管理员")],
         required=False,
     )
+
+
+class PaymentNotifySerializer(serializers.Serializer):
+    """支付网关异步通知参数。"""
+    STATUS_PAID = "paid"
+    STATUS_FAILED = "failed"
+    STATUS_CHOICES = [
+        (STATUS_PAID, "支付成功"),
+        (STATUS_FAILED, "支付失败"),
+    ]
+
+    payment_no = serializers.CharField(max_length=64)
+    status = serializers.ChoiceField(choices=STATUS_CHOICES)
+    amount = serializers.DecimalField(max_digits=10, decimal_places=2)
+    gateway_name = serializers.CharField(max_length=50, required=False, allow_blank=True, default="")
+    external_trade_no = serializers.CharField(max_length=100, required=False, allow_blank=True, default="")
+    signature = serializers.CharField(max_length=128)
+    notify_payload = serializers.DictField(required=False, default=dict)
 
 
 class AdminUserUpdateSerializer(serializers.Serializer):
@@ -902,6 +1082,7 @@ class PaymentGatewayProviderSerializer(serializers.Serializer):
     gateway_url = serializers.URLField(required=False, allow_blank=True)
     checkout_url = serializers.URLField(required=False, allow_blank=True)
     notify_url = serializers.URLField(required=False, allow_blank=True)
+    notify_secret = serializers.CharField(max_length=255, required=False, allow_blank=True)
     return_url = serializers.URLField(required=False, allow_blank=True)
     app_id = serializers.CharField(max_length=100, required=False, allow_blank=True)
     merchant_id = serializers.CharField(max_length=100, required=False, allow_blank=True)
@@ -1101,6 +1282,50 @@ class AICallLogSerializer(serializers.ModelSerializer):
 
     def get_username(self, obj):
         return obj.user.username if obj.user_id else ""
+
+
+class AuditLogSerializer(serializers.ModelSerializer):
+    """审计日志序列化器。"""
+
+    username = serializers.SerializerMethodField()
+    risk_level = serializers.SerializerMethodField()
+    action_label = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AuditLog
+        fields = [
+            "id",
+            "user_id",
+            "username",
+            "action",
+            "action_label",
+            "target",
+            "detail",
+            "risk_level",
+            "created_at",
+        ]
+
+    def get_username(self, obj):
+        """Return the operator username shown in admin audit tables."""
+        return obj.user.username if obj.user_id else "系统"
+
+    def get_risk_level(self, obj):
+        """Classify audit actions for visual emphasis without changing persisted data."""
+        action = str(obj.action or "").lower()
+        if any(word in action for word in ("delete", "reset", "cancel", "disabled", "refund")):
+            return "high"
+        if any(word in action for word in ("update", "change", "issue", "bulk", "switch")):
+            return "medium"
+        return "low"
+
+    def get_action_label(self, obj):
+        """Return a stable Chinese label for common audit actions."""
+        label_map = {
+            "invoice.issued": "发票开具",
+            "invoice.cancelled": "发票取消",
+            "inventory.bulk_update": "库存批量设置",
+        }
+        return label_map.get(obj.action, obj.action)
 
 
 class ChatSessionSerializer(serializers.ModelSerializer):

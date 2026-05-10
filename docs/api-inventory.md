@@ -1,7 +1,7 @@
 # HoteLink API 路由清单（源码自动生成）
 
 - 来源文件：`backend/apps/api/urls.py` + `backend/apps/api/views.py`
-- 总路由数：**122**
+- 总路由数：**127**
 
 > 本文件由 `scripts/docs/generate_api_inventory.py` 生成，请勿手工编辑。
 
@@ -107,6 +107,7 @@
 | `GET,POST` | `/api/v1/admin/ai/settings/update` | `AdminAISettingsView` | `admin-ai-settings-update` |
 | `POST` | `/api/v1/admin/ai/test` | `AdminAITestView` | `admin-ai-test` |
 | `GET` | `/api/v1/admin/ai/usage-stats` | `AdminAIUsageStatsView` | `admin-ai-usage-stats` |
+| `GET` | `/api/v1/admin/audit-logs` | `AdminAuditLogsView` | `admin-audit-logs` |
 | `GET,POST` | `/api/v1/admin/coupons` | `AdminCouponTemplatesView` | `admin-coupons` |
 | `GET,POST` | `/api/v1/admin/coupons/create` | `AdminCouponTemplatesView` | `admin-coupons-create` |
 | `POST` | `/api/v1/admin/coupons/delete` | `AdminCouponTemplateDeleteView` | `admin-coupons-delete` |
@@ -123,8 +124,11 @@
 | `GET,POST` | `/api/v1/admin/hotels/create` | `AdminHotelsView` | `admin-hotels-create` |
 | `GET,POST` | `/api/v1/admin/hotels/delete` | `AdminHotelsView` | `admin-hotels-delete` |
 | `GET,POST` | `/api/v1/admin/hotels/update` | `AdminHotelsView` | `admin-hotels-update` |
+| `POST` | `/api/v1/admin/inventory/bulk-update` | `AdminInventoryBulkUpdateView` | `admin-inventory-bulk-update` |
 | `GET,POST` | `/api/v1/admin/inventory/calendar` | `AdminInventoryView` | `admin-inventory-calendar` |
 | `GET,POST` | `/api/v1/admin/inventory/update` | `AdminInventoryView` | `admin-inventory-update` |
+| `GET` | `/api/v1/admin/invoices` | `AdminInvoicesView` | `admin-invoices` |
+| `POST` | `/api/v1/admin/invoices/process` | `AdminInvoiceProcessView` | `admin-invoices-process` |
 | `GET` | `/api/v1/admin/members/overview` | `AdminMemberOverviewView` | `admin-members-overview` |
 | `GET` | `/api/v1/admin/orders` | `AdminOrdersView` | `admin-orders` |
 | `POST` | `/api/v1/admin/orders/change-status` | `AdminOrdersChangeStatusView` | `admin-orders-change-status` |
@@ -156,3 +160,9 @@
 | `POST` | `/api/v1/admin/users/change-status` | `AdminUsersChangeStatusView` | `admin-users-change-status` |
 | `POST` | `/api/v1/admin/users/reset-password` | `AdminUserResetPasswordView` | `admin-users-reset-password` |
 | `POST` | `/api/v1/admin/users/update` | `AdminUserUpdateView` | `admin-users-update` |
+
+## Other
+
+| Method | Path | View | Name |
+|---|---|---|---|
+| `POST` | `/api/v1/payments/notify` | `PaymentNotifyView` | `payment-notify` |

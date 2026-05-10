@@ -188,6 +188,7 @@ REST_FRAMEWORK = {
         "auth_logout": os.getenv("API_THROTTLE_AUTH_LOGOUT", "150/minute"),
         "system_init": os.getenv("API_THROTTLE_SYSTEM_INIT", "15/hour"),
         "upload": os.getenv("API_THROTTLE_UPLOAD", "100/hour"),
+        "payment_notify": os.getenv("API_THROTTLE_PAYMENT_NOTIFY", "600/hour"),
         "ai_user": os.getenv("API_THROTTLE_AI_USER", "150/hour"),
         "ai_admin": os.getenv("API_THROTTLE_AI_ADMIN", "300/hour"),
     },
@@ -236,6 +237,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.bookings.tasks.sweep_order_lifecycle_anomalies",
         "schedule": timedelta(minutes=max(1, ORDER_LIFECYCLE_SWEEP_INTERVAL_MINUTES)),
         "args": (max(1, ORDER_LIFECYCLE_SWEEP_BATCH_SIZE),),
+    },
+    "checkin-reminder-sweep": {
+        "task": "apps.bookings.tasks.send_upcoming_checkin_reminders",
+        "schedule": timedelta(hours=6),
     },
     "coupon-expire-sweep": {
         "task": "apps.bookings.tasks.sweep_expired_coupons",

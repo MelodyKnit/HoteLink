@@ -9,6 +9,10 @@ HoteLink 是一个面向酒店业务的前后端分离系统，覆盖两类核�
 
 系统采用统一后端、双前端应用的方案，并要求同时兼容 PC 端和移动端。
 
+## 文档入口
+
+如果你是第一次接手这个项目，建议先从 [`docs/README.md`](./docs/README.md) 开始，再按导航进入源码基线、架构、接口、前端设计、AI 和部署文档。
+
 ### 快速命令
 
 后端测试：
@@ -58,6 +62,15 @@ pre-commit run --hook-stage pre-push --all-files
 ```
 
 这样本地提交前能先挡住明显问题，推送到 GitHub 后再由 Actions 做一次完整兜底。
+
+## GitHub Actions 自动测试
+
+仓库已配置 `.github/workflows/ci.yml`，每次 Push 或 Pull Request 会自动执行：
+
+- 后端：`poetry run python manage.py check` 与 `poetry run python manage.py test apps.api.tests -v 2`
+- 前端：`npm run type-check` 与 `npm run test:unit:ci`
+
+如果 Actions 失败，优先在本地运行同一组命令复现，再修复对应后端接口、前端类型或单元测试问题。
 
 ## 文档更新约定
 

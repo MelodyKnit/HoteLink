@@ -17,15 +17,15 @@
         </div>
         <div v-if="titles.length === 0" class="py-6 text-center text-sm text-gray-400">暂无抬头信息</div>
         <div v-else class="mt-3 space-y-2">
-          <div v-for="t in titles" :key="t.id" class="flex items-center justify-between rounded-xl bg-gray-50 p-3">
-            <div>
-              <p class="text-sm font-medium text-gray-800">{{ t.title }}</p>
-              <p class="text-xs text-gray-400">{{ t.tax_no || '个人' }}</p>
+          <div v-for="t in titles" :key="t.id" class="flex items-start justify-between gap-3 rounded-xl bg-gray-50 p-3">
+            <div class="min-w-0 flex-1">
+              <p class="truncate text-sm font-medium text-gray-800">{{ t.title }}</p>
+              <p class="mt-1 truncate text-xs text-gray-400">{{ t.tax_no || '个人' }}</p>
             </div>
-            <div class="flex items-center gap-2">
+            <div class="flex shrink-0 items-center gap-2.5 whitespace-nowrap pl-2">
               <button @click="openEditTitle(t)" class="text-xs text-brand hover:underline">编辑</button>
               <button @click="handleDeleteTitle(t)" class="text-xs text-red-500 hover:underline">删除</button>
-              <span class="rounded bg-brand/10 px-2 py-0.5 text-xs text-brand">{{ t.invoice_type === 'company' ? '企业' : '个人' }}</span>
+              <span class="rounded-full bg-brand/10 px-2 py-0.5 text-xs text-brand">{{ t.invoice_type === 'company' ? '企业' : '个人' }}</span>
             </div>
           </div>
         </div>
@@ -35,14 +35,19 @@
         <h3 class="font-semibold text-gray-800">开票记录</h3>
         <div v-if="invoices.length === 0" class="py-6 text-center text-sm text-gray-400">暂无开票记录</div>
         <div v-else class="mt-3 space-y-2">
-          <div v-for="inv in invoices" :key="inv.id" class="flex items-center justify-between rounded-xl bg-gray-50 p-3">
-            <div>
-              <p class="text-sm font-medium text-gray-800">¥{{ inv.amount }}</p>
-              <p class="text-xs text-gray-400">{{ inv.title }} · {{ inv.created_at }}</p>
+          <div v-for="inv in invoices" :key="inv.id" class="flex items-start justify-between gap-3 rounded-xl bg-gray-50 p-3">
+            <div class="min-w-0 flex-1">
+              <p class="text-base font-semibold text-gray-800">¥{{ formatMoney(inv.amount) }}</p>
+              <p class="mt-1 truncate text-xs text-gray-500">{{ inv.title || '未命名抬头' }}</p>
+              <p v-if="inv.invoice_no" class="mt-1 truncate text-xs text-gray-500">发票号码：{{ inv.invoice_no }}</p>
+              <p v-if="inv.processor_remark && inv.status === 'cancelled'" class="mt-1 text-xs leading-5 text-red-500">{{ inv.processor_remark }}</p>
+              <a v-if="inv.invoice_file_url" :href="inv.invoice_file_url" target="_blank" rel="noreferrer" class="mt-1 inline-flex text-xs font-medium text-brand hover:underline">查看电子发票</a>
+              <p class="mt-0.5 whitespace-nowrap text-xs tabular-nums text-gray-400">{{ formatDateTime(inv.created_at) || '-' }}</p>
+              <p v-if="inv.processed_at" class="mt-0.5 whitespace-nowrap text-xs tabular-nums text-gray-400">处理时间：{{ formatDateTime(inv.processed_at) || '-' }}</p>
             </div>
-            <span class="rounded px-2 py-0.5 text-xs"
-              :class="inv.status === 'issued' ? 'bg-green-100 text-green-700' : inv.status === 'cancelled' ? 'bg-gray-100 text-gray-600' : 'bg-yellow-100 text-yellow-700'">
-              {{ inv.status_label || (inv.status === 'issued' ? '已开票' : inv.status === 'cancelled' ? '已取消' : '待处理') }}
+            <span class="shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-medium leading-none"
+              :class="invoiceStatusClass(inv.status)">
+              {{ invoiceStatusLabel(inv) }}
             </span>
           </div>
         </div>
@@ -62,7 +67,7 @@
           <div>
             <input
               v-model.number="applyForm.order_id"
-              placeholder="订单号"
+              placeholder="订单 ID"
               type="number"
               class="w-full rounded-lg border px-3 py-2 text-sm outline-none transition"
               :class="applyErrors.order_id ? 'border-red-300 bg-red-50/70 focus:border-red-400' : 'border-gray-200 focus:border-brand'"
@@ -70,7 +75,7 @@
               @blur="validateApplyField('order_id')"
             />
             <p v-if="applyErrors.order_id" class="mt-1 text-xs text-red-500">{{ applyErrors.order_id }}</p>
-            <p v-else class="mt-1 text-xs text-gray-400">请输入已完成支付的订单编号，避免重复申请。</p>
+            <p v-else class="mt-1 text-xs text-gray-400">请输入已完成支付的订单 ID，避免重复申请。</p>
           </div>
 
           <button
@@ -198,12 +203,14 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { userInvoiceApi } from '@hotelink/api'
+import type { InvoiceRequestItem, InvoiceTitleItem } from '@hotelink/api'
 import { SelectField, useToast, useConfirm } from '@hotelink/ui'
-import { extractApiError, extractApiFieldErrors, isValidEmailAddress, isValidTaxNumber } from '@hotelink/utils'
+import { INVOICE_STATUS_MAP, extractApiError, extractApiFieldErrors, formatDateTime, formatMoney, isValidEmailAddress, isValidTaxNumber } from '@hotelink/utils'
 import { useRouter } from 'vue-router'
 
 type TitleField = 'title' | 'tax_no' | 'email'
 type ApplyField = 'order_id' | 'invoice_title_id'
+type ApplyForm = { order_id: number | null; invoice_title_id: number }
 
 const { showToast } = useToast()
 const { confirm: confirmDialog } = useConfirm()
@@ -214,15 +221,15 @@ function goBack() {
   else router.push('/my')
 }
 
-const titles = ref<any[]>([])
-const invoices = ref<any[]>([])
+const titles = ref<InvoiceTitleItem[]>([])
+const invoices = ref<InvoiceRequestItem[]>([])
 const showAddModal = ref(false)
 const addingTitle = ref(false)
 const applying = ref(false)
 const pageLoading = ref(true)
 
 const titleForm = ref({ invoice_type: 'personal', title: '', tax_no: '', email: '' })
-const applyForm = ref({ order_id: 0, invoice_title_id: 0 })
+const applyForm = ref<ApplyForm>({ order_id: null, invoice_title_id: 0 })
 const titleErrors = ref<Partial<Record<TitleField, string>>>({})
 const applyErrors = ref<Partial<Record<ApplyField, string>>>({})
 
@@ -230,6 +237,15 @@ function openAddModal() {
   showAddModal.value = true
   titleForm.value = { invoice_type: 'personal', title: '', tax_no: '', email: '' }
   titleErrors.value = {}
+}
+
+function invoiceStatusLabel(invoice: InvoiceRequestItem): string {
+  return invoice.status_label || INVOICE_STATUS_MAP[invoice.status]?.label || invoice.status
+}
+
+function invoiceStatusClass(status: InvoiceRequestItem['status']): string {
+  const meta = INVOICE_STATUS_MAP[status] || INVOICE_STATUS_MAP.pending
+  return `${meta.bg} ${meta.color}`
 }
 
 function clearTitleError(field: TitleField) {
@@ -295,7 +311,7 @@ function getApplyFieldError(field: ApplyField): string {
     case 'invoice_title_id':
       return applyForm.value.invoice_title_id > 0 ? '' : '请选择发票抬头'
     case 'order_id':
-      return applyForm.value.order_id > 0 ? '' : '请输入有效的订单号'
+      return applyForm.value.order_id && applyForm.value.order_id > 0 ? '' : '请输入有效的订单 ID'
     default:
       return ''
   }
@@ -363,11 +379,15 @@ async function handleApply() {
 
   applying.value = true
   try {
-    const res = await userInvoiceApi.apply(applyForm.value)
+    const res = await userInvoiceApi.apply({
+      order_id: Number(applyForm.value.order_id),
+      invoice_title_id: applyForm.value.invoice_title_id,
+    })
     if (res.code === 0) {
       showToast('申请已提交', 'success')
-      applyForm.value = { order_id: 0, invoice_title_id: 0 }
+      applyForm.value = { order_id: null, invoice_title_id: 0 }
       applyErrors.value = {}
+      await loadInvoiceCenter()
     } else {
       applyErrors.value = {
         ...applyErrors.value,
@@ -492,21 +512,23 @@ async function handleDeleteTitle(t: any) {
   }
 }
 
-onMounted(async () => {
+async function loadInvoiceCenter() {
   try {
     const res = await userInvoiceApi.list()
     if (res.code === 0 && res.data) {
-      titles.value = (res.data as any).titles || []
-      invoices.value = (res.data as any).items || []
+      titles.value = res.data.titles || []
+      invoices.value = res.data.items || []
+    } else {
+      showToast(res.message || '发票信息加载失败', 'error')
     }
   } catch {
-    titles.value = [
-      { id: 1, title: '个人', invoice_type: 'personal', tax_no: '' },
-      { id: 2, title: '某某科技有限公司', invoice_type: 'company', tax_no: '91110000MA00XXXXX' },
-    ]
-    invoices.value = [
-      { id: 1, amount: '688.00', title: '个人', status: 'issued', status_label: '已开票', created_at: '2026-03-25' },
-    ]
+    showToast('发票信息加载失败，请稍后重试', 'error')
+  }
+}
+
+onMounted(async () => {
+  try {
+    await loadInvoiceCenter()
   } finally {
     pageLoading.value = false
   }

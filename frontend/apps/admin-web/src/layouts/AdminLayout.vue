@@ -2,38 +2,69 @@
   <div class="h-[100dvh] overflow-hidden bg-slate-100 text-slate-900">
     <!-- Mobile overlay -->
     <Transition name="fade">
-      <div v-if="sidebarOpen" class="fixed inset-0 z-40 bg-black/40 lg:hidden" @click="sidebarOpen = false" />
+      <div v-if="sidebarMobileOpen" class="fixed inset-0 z-40 bg-black/40 lg:hidden" @click="sidebarMobileOpen = false" />
     </Transition>
 
     <div class="flex h-full min-h-0">
       <!-- Sidebar -->
       <aside
         class="admin-sidebar fixed inset-y-0 left-0 z-50 flex h-[100dvh] w-64 flex-col overflow-y-auto overscroll-contain bg-slate-900 text-white transition-transform duration-200 lg:static lg:translate-x-0"
-        :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'"
+        :class="sidebarMobileOpen ? 'translate-x-0' : '-translate-x-full'"
       >
-        <div class="flex h-16 shrink-0 items-center gap-3 px-6">
-          <span class="text-xl font-bold tracking-wide text-teal-400">HoteLink</span>
-          <span class="text-xs text-slate-400">管理端</span>
+        <div class="flex h-16 shrink-0 items-center gap-3 border-b border-slate-800/80 px-5">
+          <div class="flex min-w-0 items-center gap-3">
+            <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-teal-500/15 text-sm font-bold tracking-wide text-teal-300 ring-1 ring-teal-400/20">
+              H
+            </span>
+            <div class="min-w-0">
+              <p class="truncate text-xl font-bold tracking-wide text-teal-400">HoteLink</p>
+              <p class="text-xs text-slate-400">管理端</p>
+            </div>
+          </div>
         </div>
 
         <nav class="flex-1 px-3 py-4">
           <template v-for="group in menuGroups" :key="group.label">
-            <p class="mb-2 mt-4 px-3 text-[10px] font-semibold uppercase tracking-wider text-slate-500">{{ group.label }}</p>
-            <router-link
-              v-for="item in group.items"
-              :key="item.path"
-              :to="item.path"
-              class="mb-0.5 flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors duration-200"
-              :class="isActive(item.path) ? 'bg-teal-500/20 text-teal-100 shadow-[inset_0_0_0_1px_rgba(45,212,191,0.25)]' : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'"
-              @click="sidebarOpen = false"
-            >
-              <span class="w-5 text-center text-base">{{ item.icon }}</span>
-              <span>{{ item.label }}</span>
-            </router-link>
+            <div class="mt-4 first:mt-0">
+              <button
+                v-if="group.collapsible"
+                type="button"
+                class="mb-2 flex w-full items-center justify-between gap-3 px-3 text-[10px] font-semibold uppercase tracking-wider transition-colors"
+                :class="groupHasActiveItem(group) ? 'text-teal-300' : 'text-slate-500 hover:text-slate-300'"
+                :aria-expanded="isGroupExpanded(group)"
+                @click="toggleGroup(group.label)"
+              >
+                <span>{{ group.label }}</span>
+                <svg class="h-3.5 w-3.5 shrink-0 transition-transform duration-200" :class="isGroupExpanded(group) ? 'rotate-90' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m9 5 7 7-7 7" />
+                </svg>
+              </button>
+              <p v-else class="mb-2 px-3 text-[10px] font-semibold uppercase tracking-wider text-slate-500">{{ group.label }}</p>
+
+              <Transition name="sidebar-group">
+                <div v-if="isGroupExpanded(group)" class="overflow-hidden">
+                  <router-link
+                    v-for="item in group.items"
+                    :key="item.path"
+                    :to="item.path"
+                    class="mb-0.5 flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors duration-200"
+                    :class="
+                      isActive(item.path)
+                        ? 'bg-teal-500/20 text-teal-100 shadow-[inset_0_0_0_1px_rgba(45,212,191,0.25)]'
+                        : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+                    "
+                    @click="sidebarMobileOpen = false"
+                  >
+                    <span class="w-5 text-center text-base">{{ item.icon }}</span>
+                    <span>{{ item.label }}</span>
+                  </router-link>
+                </div>
+              </Transition>
+            </div>
           </template>
         </nav>
 
-        <div class="border-t border-slate-700 px-4 py-4">
+        <div class="border-t border-slate-700/90 px-4 py-4">
           <div class="flex items-center gap-3">
             <div class="flex h-8 w-8 shrink-0 overflow-hidden rounded-full bg-teal-600 text-sm font-bold">
               <img v-if="auth.user?.avatar && !sidebarAvatarError" :src="auth.user.avatar" class="h-full w-full object-cover" @error="sidebarAvatarError = true" />
@@ -51,7 +82,7 @@
       <div class="flex h-[100dvh] min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain scroll-smooth">
         <!-- Top bar -->
         <header class="sticky top-0 z-30 flex h-16 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 lg:px-8">
-          <button class="rounded-lg p-2 text-slate-600 hover:bg-slate-100 lg:hidden" @click="sidebarOpen = !sidebarOpen">
+          <button class="rounded-lg p-2 text-slate-600 hover:bg-slate-100 lg:hidden" @click="sidebarMobileOpen = !sidebarMobileOpen">
             <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
           </button>
           <div class="hidden lg:block" />
@@ -71,15 +102,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@hotelink/store'
 import { useConfirm } from '@hotelink/ui'
+import { readAdminSidebarCollapsedGroups, writeAdminSidebarCollapsedGroups } from '../utils/sidebar-state'
 
 const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
-const sidebarOpen = ref(false)
+const sidebarMobileOpen = ref(false)
+const collapsedGroupLabels = ref<string[]>([])
 const sidebarAvatarError = ref(false)
 
 const { confirm: confirmDialog } = useConfirm()
@@ -91,12 +124,37 @@ const todayStr = computed(() => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 })
 
+onMounted(() => {
+  collapsedGroupLabels.value = readAdminSidebarCollapsedGroups()
+})
+
+watch(collapsedGroupLabels, (value) => {
+  writeAdminSidebarCollapsedGroups(value)
+})
+
 // 判断菜单项是否处于 active 状态。
 function isActive(path: string): boolean {
   if (route.path === path) return true
   if (path === '/admin/orders' && route.path.startsWith('/admin/orders/')) return true
   if (path.startsWith('/admin/frontdesk') && route.path.startsWith(path)) return true
   return false
+}
+
+function isGroupExpanded(group: MenuGroup): boolean {
+  return !group.collapsible || !collapsedGroupLabels.value.includes(group.label)
+}
+
+function groupHasActiveItem(group: MenuGroup): boolean {
+  return group.items.some(item => isActive(item.path))
+}
+
+function toggleGroup(label: string) {
+  if (collapsedGroupLabels.value.includes(label)) {
+    collapsedGroupLabels.value = collapsedGroupLabels.value.filter(item => item !== label)
+    return
+  }
+
+  collapsedGroupLabels.value = [...collapsedGroupLabels.value, label]
 }
 
 // 处理 Logout 交互逻辑。
@@ -106,7 +164,20 @@ async function handleLogout() {
   router.push('/admin/login')
 }
 
-const ALL_MENU_GROUPS = [
+type MenuItem = {
+  path: string
+  icon: string
+  label: string
+  systemOnly?: boolean
+}
+
+type MenuGroup = {
+  label: string
+  items: MenuItem[]
+  collapsible?: boolean
+}
+
+const ALL_MENU_GROUPS: MenuGroup[] = [
   {
     label: '总览',
     items: [
@@ -143,6 +214,7 @@ const ALL_MENU_GROUPS = [
     label: '财务与报表',
     items: [
       { path: '/admin/payment-gateways', icon: '💸', label: '支付网关', systemOnly: true },
+      { path: '/admin/invoices', icon: '🧾', label: '发票管理' },
       { path: '/admin/reports', icon: '📈', label: '经营报表' },
     ],
   },
@@ -151,6 +223,7 @@ const ALL_MENU_GROUPS = [
     items: [
       { path: '/admin/employees', icon: '🧑‍💼', label: '员工管理' },
       { path: '/admin/settings', icon: '⚙️', label: '系统配置', systemOnly: true },
+      { path: '/admin/audit-logs', icon: '🧾', label: '审计日志', systemOnly: true },
       { path: '/admin/system-status', icon: '📡', label: '系统状态', systemOnly: true },
     ],
   },
@@ -167,10 +240,14 @@ const ALL_MENU_GROUPS = [
 // 根据角色过滤菜单。
 const menuGroups = computed(() => {
   return ALL_MENU_GROUPS
-    .map(group => ({
-      ...group,
-      items: group.items.filter(item => isSystemAdmin.value || !('systemOnly' in item && item.systemOnly)),
-    }))
+    .map(group => {
+      const items = group.items.filter(item => isSystemAdmin.value || !('systemOnly' in item && item.systemOnly))
+      return {
+        ...group,
+        items,
+        collapsible: items.length > 1,
+      }
+    })
     .filter(group => group.items.length > 0)
 })
 </script>
@@ -178,6 +255,24 @@ const menuGroups = computed(() => {
 <style scoped>
 .fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
+
+.sidebar-group-enter-active,
+.sidebar-group-leave-active {
+  overflow: hidden;
+  transition: max-height 0.2s ease, opacity 0.2s ease;
+}
+
+.sidebar-group-enter-from,
+.sidebar-group-leave-to {
+  max-height: 0;
+  opacity: 0;
+}
+
+.sidebar-group-enter-to,
+.sidebar-group-leave-from {
+  max-height: 360px;
+  opacity: 1;
+}
 
 .admin-sidebar {
   scrollbar-width: thin;

@@ -133,11 +133,37 @@ export interface InvoiceRequestItem {
   invoice_type: 'personal' | 'company'
   tax_no: string
   email: string
+  username: string
+  guest_name: string
+  guest_mobile: string
+  hotel_name: string
+  room_type_name: string
+  check_in_date: string
+  check_out_date: string
+  invoice_code: string
+  invoice_no: string
+  invoice_file_url: string
+  processor_remark: string
+  processed_by_name: string
+  issued_at: string | null
+  processed_at: string | null
   created_at: string
+  updated_at: string
 }
 
 export type InvoiceCenterData = PaginatedData<InvoiceRequestItem> & {
   titles: InvoiceTitleItem[]
+}
+
+export interface AdminInvoiceSummary {
+  pending: number
+  issued: number
+  cancelled: number
+  total_amount: string
+}
+
+export type AdminInvoiceListData = PaginatedData<InvoiceRequestItem> & {
+  summary: AdminInvoiceSummary
 }
 
 export interface PointsLogItem {
@@ -177,6 +203,29 @@ export interface AdminMemberOverviewData {
   total_users: number
   total_member_points: number
   total_consume_points: number
+}
+
+export interface InventoryBulkUpdatePayload {
+  room_type_ids: number[]
+  start_date: string
+  end_date: string
+  price?: string | number | null
+  weekend_price?: string | number | null
+  stock?: number | null
+  status?: string
+  weekdays?: number[]
+}
+
+export interface AuditLogItem {
+  id: number
+  user_id: number | null
+  username: string
+  action: string
+  action_label: string
+  target: string
+  detail: Record<string, unknown>
+  risk_level: 'low' | 'medium' | 'high'
+  created_at: string
 }
 
 export interface UserAiChatStreamEvent {
@@ -366,7 +415,7 @@ async function get<T = unknown>(url: string, params?: Record<string, unknown>): 
   return resp.data
 }
 
-async function post<T = unknown>(url: string, data?: Record<string, unknown>): Promise<ApiResult<T>> {
+async function post<T = unknown>(url: string, data?: object): Promise<ApiResult<T>> {
   const resp = await http.post<ApiResult<T>>(url, data)
   return resp.data
 }
@@ -427,6 +476,14 @@ export const roomTypeApi = {
 export const inventoryApi = {
   calendar: (params: Record<string, unknown>) => get<PaginatedData>('/admin/inventory/calendar', params),
   update: (data: Record<string, unknown>) => post('/admin/inventory/update', data),
+  bulkUpdate: (data: InventoryBulkUpdatePayload) => post<{
+    room_type_count: number
+    date_count: number
+    created_count: number
+    updated_count: number
+    skipped_count: number
+    total_touched: number
+  }>('/admin/inventory/bulk-update', data),
 }
 
 // ========== Orders ==========
@@ -435,7 +492,7 @@ export const orderApi = {
   detail: (order_id: number) => get('/admin/orders/detail', { order_id }),
   changeStatus: (data: { order_id: number; target_status: string; operator_remark?: string }) => post('/admin/orders/change-status', data),
   checkIn: (data: { order_id: number; room_no: string; operator_remark?: string }) => post('/admin/orders/check-in', data),
-  checkOut: (data: { order_id: number; consume_amount?: number; operator_remark?: string }) => post('/admin/orders/check-out', data),
+  checkOut: (data: { order_id: number; consume_amount?: number; deposit_deduction?: number; operator_remark?: string }) => post('/admin/orders/check-out', data),
   extendStay: (data: { order_id: number; new_check_out_date: string; operator_remark?: string }) => post('/admin/orders/extend-stay', data),
   switchRoom: (data: { order_id: number; new_room_no: string; operator_remark?: string }) => post('/admin/orders/switch-room', data),
   roomSuggestions: (params: { hotel_id: number; check_in?: string; check_out?: string }) => get<{ available: string[]; occupied: string[] }>('/admin/orders/room-suggestions', params),
@@ -489,6 +546,7 @@ export const paymentGatewayApi = {
 export const adminSystemApi = {
   reset: (confirm: string) => post<{ reset: boolean; deleted_counts: Record<string, number>; message: string }>('/admin/system/reset', { confirm }),
   status: (params?: Record<string, unknown>) => get('/admin/system/status', params),
+  auditLogs: (params?: Record<string, unknown>) => get<PaginatedData<AuditLogItem>>('/admin/audit-logs', params),
 }
 
 // ========== Admin Coupons ==========
@@ -497,6 +555,20 @@ export const adminCouponApi = {
   create: (data: Record<string, unknown>) => post('/admin/coupons/create', data),
   update: (data: Record<string, unknown>) => post('/admin/coupons/update', data),
   delete: (template_id: number) => post('/admin/coupons/delete', { template_id }),
+}
+
+// ========== Admin Invoices ==========
+export const adminInvoiceApi = {
+  list: (params?: Record<string, unknown>) => get<AdminInvoiceListData>('/admin/invoices', params),
+  process: (data: {
+    invoice_id: number
+    action: 'issue' | 'cancel'
+    invoice_code?: string
+    invoice_no?: string
+    invoice_file_url?: string
+    processor_remark?: string
+    issued_at?: string
+  }) => post<InvoiceRequestItem>('/admin/invoices/process', data as Record<string, unknown>),
 }
 
 // ========== Admin Members ==========
@@ -667,10 +739,10 @@ export const userCouponApi = {
 export const userInvoiceApi = {
   list: () => get<InvoiceCenterData>('/user/invoices'),
   createTitle: (data: { invoice_type: string; title: string; tax_no?: string; email: string }) =>
-    post('/user/invoices/create', data),
+    post<InvoiceTitleItem>('/user/invoices/create', data),
   apply: (data: { order_id: number; invoice_title_id: number }) => post('/user/invoices/apply', data),
   updateTitle: (data: { title_id: number; invoice_type?: string; title?: string; tax_no?: string; email?: string }) =>
-    post('/user/invoices/title/update', data),
+    post<InvoiceTitleItem>('/user/invoices/title/update', data),
   deleteTitle: (title_id: number) => post('/user/invoices/title/delete', { title_id }),
 }
 

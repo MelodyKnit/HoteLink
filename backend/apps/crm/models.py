@@ -244,15 +244,32 @@ class InvoiceRequest(models.Model):
 
     order_id: int
     invoice_title_id: int
+    processor_id: int | None
     order = models.ForeignKey("bookings.BookingOrder", on_delete=models.CASCADE, related_name="invoice_requests")
     invoice_title = models.ForeignKey(InvoiceTitle, on_delete=models.CASCADE, related_name="invoice_requests")
+    amount = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text="申请时订单可开票金额快照")
+    invoice_type_snapshot = models.CharField(max_length=20, choices=InvoiceTitle.TYPE_CHOICES, default=InvoiceTitle.TYPE_PERSONAL)
+    title_snapshot = models.CharField(max_length=150, blank=True)
+    tax_no_snapshot = models.CharField(max_length=50, blank=True)
+    email_snapshot = models.EmailField(blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    invoice_code = models.CharField(max_length=64, blank=True, help_text="发票代码，数电票可为空")
+    invoice_no = models.CharField(max_length=64, blank=True, help_text="发票号码")
+    invoice_file_url = models.CharField(max_length=500, blank=True, help_text="电子发票文件或外部下载地址")
+    processor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="processed_invoice_requests")
+    processor_remark = models.CharField(max_length=255, blank=True)
+    issued_at = models.DateTimeField(null=True, blank=True)
+    processed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         verbose_name = "Invoice Request"
         verbose_name_plural = "Invoice Requests"
         ordering = ["-id"]
+        constraints = [
+            models.UniqueConstraint(fields=["order"], name="uniq_invoice_request_order"),
+        ]
 
     def __str__(self) -> str:
         return f"{self.order_id}-{self.invoice_title_id}"

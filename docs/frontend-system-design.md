@@ -26,6 +26,13 @@
 - 本文档以当前已实现能力和明确的产品规划为基础
 - AI、Docker、工程增强能力会以“扩展功能”形式补充，并与核心业务能力共同维护
 
+### 1.1 怎么看这份文档
+
+- 想看“有哪些页面、哪些已经做了、哪些还只是设计”，优先看页面清单和状态标记。
+- 想看某个页面应该承担什么职责、和其他页面如何闭环，重点看对应章节的交互说明。
+- 想做前端开发，不建议只看这一份；请同时对照 [`api-spec.md`](./api-spec.md) 和 [`source-of-truth.md`](./source-of-truth.md)。
+- 本文会同时保留“已实现”和“设计中”内容，所以落地判断一定要看状态列，不要只看标题。
+
 ## 2. 系统整体定位
 
 HoteLink 不是单一的酒店官网，而是一个完整的酒店数字化系统，包含两大前端应用：
@@ -316,6 +323,7 @@ flowchart TD
 - 风险信息和取消规则清晰
 - 支付方式不能写死，必须根据后端支付网关配置动态展示
 - 真实支付方式需要消费统一支付动作协议（跳转、SDK 参数、待回调提示等），关闭模拟支付后仍要保证结果页和订单详情页能承接“支付中”状态
+- 真实网关支付成功以 `/api/v1/payments/notify` 签名回调为准，前端在待回调期间应展示“支付处理中/稍后刷新”而不是直接判定成功
 
 #### 7. 支付结果页
 
@@ -437,6 +445,7 @@ flowchart TD
 接口补充：
 
 - `GET /api/v1/user/invoices` 同时返回开票记录分页数据与当前用户可用发票抬头，订单详情页和发票管理页共用该数据源。
+- 发票记录项展示申请金额快照、抬头快照、发票号码、电子票链接、处理时间和取消原因，避免后续编辑抬头影响历史申请展示。
 
 #### 16. 收藏与浏览记录页
 
@@ -534,13 +543,13 @@ flowchart TD
 
 ## 8. 管理端界面设计清单
 
-> **管理端页面实现总览（26 路由 / 24 视图）**
+> **管理端页面实现总览（28 路由 / 26 视图）**
 >
 > | # | 设计页面 | 路由 | 视图文件 | 状态 |
 > |---|---------|------|---------|------|
 > | 1 | 登录页 | `/admin/login` | `LoginView.vue` | ✅ 已实现 |
 > | 2 | 工作台 / 首页 | `/admin` | `DashboardView.vue` | ✅ 已实现 |
-> | 3 | 房态总览页 | `/admin/inventory` | `InventoryView.vue` | ✅ 已实现（库存/房态合一） |
+> | 3 | 房态总览页 | `/admin/inventory` | `InventoryView.vue` | ✅ 已实现（库存/房态合一，支持批量设置） |
 > | 3.5 | 酒店管理页 | `/admin/hotels` | `HotelListView.vue` | ✅ 已实现 |
 > | 4 | 房型管理页 | `/admin/room-types` | `RoomTypeListView.vue` | ✅ 已实现 |
 > | 5 | 房间管理页 | — | — | 📐 设计中 |
@@ -556,6 +565,7 @@ flowchart TD
 > | 15 | 会员管理页 | `/admin/members` | `MemberManageView.vue` | ✅ 已实现 |
 > | 16 | 评价与反馈管理页 | `/admin/reviews` | `ReviewListView.vue` | ✅ 已实现（含评价图片预览） |
 > | 17 | 财务总览页 | — | — | 📐 设计中 |
+> | 17.5 | 发票管理页 | `/admin/invoices` | `InvoiceManageView.vue` | ✅ 已实现 |
 > | 18 | 账单管理页 | — | — | 📐 设计中 |
 > | 19 | 支付记录页 | — | — | 📐 设计中 |
 > | 20 | 退款记录页 | — | — | 📐 设计中 |
@@ -568,7 +578,7 @@ flowchart TD
 > | 27 | 系统配置页 | `/admin/settings` | `SettingsView.vue` | ✅ 已实现（含系统重置） |
 > | 27.5 | 支付网关页 | `/admin/payment-gateways` | `PaymentGatewayView.vue` | ✅ 已实现 |
 > | 28 | 通知中心页 | — | — | 📐 设计中 |
-> | 29 | 审计日志页 | — | — | 📐 设计中 |
+> | 29 | 审计日志页 | `/admin/audit-logs` | `AuditLogView.vue` | ✅ 已实现 |
 > | 30 | AI 助手工作台 | `/admin/ai` | `AIAssistantView.vue` | ✅ 已实现 |
 > | 31 | AI 配置页 | `/admin/ai-settings` | `AISettingsView.vue` | ✅ 已实现 |
 > | 32 | AI 调用日志页 | `/admin/ai-logs` | `AICallLogsView.vue` | ✅ 已实现 |
@@ -582,8 +592,14 @@ flowchart TD
 
 - `OrderListView.vue`、`UserListView.vue`、`EmployeeListView.vue`、`ReportView.vue` 已统一接入可复用排序交互：顶部排序下拉 + `DataTable` 表头排序双向同步。
 - 上述页面列表请求均透传 `ordering` 参数，与后端白名单排序保持一致。
+- `InventoryView.vue` 支持单日编辑与批量设置两种路径；批量设置可选择多个房型、日期范围、适用星期、统一价格、周末价格、库存和上下线状态。
+- `AuditLogView.vue` 仅系统管理员可见，用于按操作人、动作、目标与时间范围检索关键后台操作，并支持查看详情 JSON。
 
 管理端要体现“高效率”“强信息密度”“可追踪”“权限清晰”。PC 端为主，移动端保留核心快捷操作。
+
+交互补充：
+
+- 管理端侧栏支持按导航分组展开/收起，收起状态会持久化到本地存储，刷新后保持用户上次的导航浏览偏好；移动端仍保持抽屉式完整菜单。
 
 ### 8.1 认证与门户
 
@@ -750,7 +766,7 @@ flowchart TD
 实现补充：
 
 - 已落地独立流程页：`/admin/frontdesk/check-out`
-- 支持额外消费补录、押金抵扣登记、结算备注
+- 支持额外消费补录、押金抵扣登记、结算备注；后端会校验押金抵扣不大于额外消费金额，并将实际补收金额写入已支付 `checkout_extra` 支付流水
 - 与订单管理页联动：支持从订单列表/详情快捷跳转并自动预选订单
 - 支持退房日期筛选，仅展示当日可退房的订单
 - 退房操作前校验订单资格（必须已入住且未关闭），不允许把已支付/已确认但未入住订单直接退房；此类订单应走“标记未入住”
@@ -769,6 +785,7 @@ flowchart TD
 - 已落地独立流程页：`/admin/frontdesk/extend-switch`
 - 页面内双流程 Tab（续住/换房）
 - 对接后端新增接口：`/api/v1/admin/orders/extend-stay`、`/api/v1/admin/orders/switch-room`
+- 续住会按新增晚数计算补差并写入已支付 `extend_stay` 支付流水，订单详情可通过支付记录追踪补差来源
 - 续住/换房操作仅对 `checked_in` 订单开放，已关闭、未入住、待入住订单在界面和接口层均不可提交
 
 #### 13. 取消与退款处理页
@@ -823,6 +840,23 @@ flowchart TD
 - 退款统计
 - 押金统计
 - 渠道收入占比
+
+#### 17.5 发票管理页
+
+核心模块：
+
+- 发票申请列表
+- 订单与用户信息
+- 抬头快照与税号
+- 发票号码 / 电子票链接回写
+- 取消申请与处理备注
+
+实现补充：
+
+- 已落地独立管理页：`/admin/invoices`
+- 页面支持关键词、状态、抬头类型和排序筛选，适合财务人员批量处理待开票申请
+- `GET /api/v1/admin/invoices` 返回分页数据与处理统计概览，列表可直接查看待处理量、已开票量、已取消量和筛选金额
+- `POST /api/v1/admin/invoices/process` 支持开票与取消两种动作；开票时必须填写发票号码，取消时必须填写原因，并同步写入用户站内通知和审计日志
 
 #### 18. 账单管理页
 
@@ -902,6 +936,7 @@ flowchart TD
 - 员工账号
 - 所属门店
 - 状态管理
+- 当前员工编辑仅开放已接入权限体系的 `hotel_admin` 角色；`receptionist` 仍属后续角色模型扩展，不在现有表单中展示
 
 #### 26. 角色权限页
 
@@ -935,6 +970,7 @@ flowchart TD
 - 支付场景配置（如 JSAPI、H5、Native、Page、WAP）
 - 商户/应用信息、回调地址、网关地址
 - 密钥/证书状态提示（不回显明文）
+- 回调签名密钥 `notify_secret` 配置项，用于真实支付异步通知校验；编辑时留空表示保留服务端旧密钥
 - 快捷模板创建与弹窗编辑
 
 设计要求：
@@ -976,7 +1012,15 @@ flowchart TD
 - 操作模块
 - 操作内容
 - 时间
-- IP
+- 风险等级
+- 详情 JSON
+
+实现说明：
+
+- 页面路由：`/admin/audit-logs`
+- 接口：`GET /api/v1/admin/audit-logs`
+- 权限：仅 `system_admin`
+- 支持筛选：`keyword`、`action`、`target`、`user_id`、`start_date`、`end_date`
 
 ### 8.8 AI 能力与配置
 
@@ -1243,7 +1287,7 @@ Composable：
 
 `packages/api` 统一封装所有前后端交互，按业务域划分模块：
 
-- **管理端**：`systemApi`、`authApi`、`dashboardApi`、`hotelApi`、`roomTypeApi`、`inventoryApi`、`orderApi`、`reviewApi`、`userApi`、`employeeApi`、`reportApi`、`settingsApi`、`adminSystemApi`（含 `status()` 系统状态监控）、`adminCouponApi`、`adminMemberApi`、`aiApi`、`commonApi`
+- **管理端**：`systemApi`、`authApi`、`dashboardApi`、`hotelApi`、`roomTypeApi`、`inventoryApi`、`orderApi`、`reviewApi`、`userApi`、`employeeApi`、`reportApi`、`settingsApi`、`adminSystemApi`（含 `status()` 系统状态监控）、`adminCouponApi`、`adminMemberApi`、`adminInvoiceApi`、`aiApi`、`commonApi`
 - **用户端**：`publicApi`、`userAuthApi`、`userProfileApi`、`userOrderApi`、`userReviewApi`、`userFavoriteApi`、`userCouponApi`、`userInvoiceApi`、`userPointsApi`、`userNoticeApi`、`userAiApi`
 - **工具**：`getToken`、`setTokens`、`clearTokens`、`getRefreshToken`、`configureApi`
 
@@ -1259,15 +1303,15 @@ Composable：
 
 ### 14.1 已完成
 
-用户端已实现 22/23 个设计页面（路由 28 条），管理端已实现 15/34 个设计页面（路由 22 条）。
+用户端当前为 `28` 路由 / `25` 视图，管理端当前为 `27` 路由 / `25` 视图。
 
-核心闭环（浏览 → 预订 → 支付 → 订单管理 → 评价）已全部落地。
+核心闭环（浏览 → 预订 → 支付 → 订单管理 → 评价）已全部落地，发票链路已覆盖用户端申请、管理端处理、用户端结果展示与通知回达。
 
 ### 14.2 建议下一步优先级
 
 1. **管理端前台业务**：入住办理、退房结算、续住/换房 — 补齐 PMS 核心流程
 2. **管理端财务**：财务总览、账单管理、支付记录、退款记录 — 补齐资金链路
-3. **管理端运营**：通知中心、审计日志、活动管理 — 补齐运营支撑
+3. **管理端运营**：通知中心、活动管理 — 补齐运营支撑
 4. **管理端权限**：角色权限页、房间管理 — 补齐系统管理
 5. **用户端补充**：活动专题页 — 唯一未实现的用户端设计页面
 

@@ -223,7 +223,7 @@
               </span>
             </div>
             <p class="mt-1 text-sm text-gray-500">
-              {{ invoiceRequestForOrder ? `已提交至「${invoiceRequestForOrder.title}」` : '当前订单已完成，可提交电子发票申请。' }}
+              {{ invoiceRequestForOrder ? `已提交至「${invoiceRequestForOrder.title}」` : '当前订单已支付，可提交电子发票申请。' }}
             </p>
           </div>
           <button
@@ -338,6 +338,14 @@
               <p>接收邮箱：{{ invoiceRequestForOrder.email || '未填写' }}</p>
               <p>提交时间：{{ invoiceRequestForOrder.created_at }}</p>
               <p v-if="invoiceRequestForOrder.tax_no">税号：{{ invoiceRequestForOrder.tax_no }}</p>
+              <p v-if="invoiceRequestForOrder.invoice_no">发票号码：{{ invoiceRequestForOrder.invoice_no }}</p>
+              <p v-if="invoiceRequestForOrder.invoice_code">发票代码：{{ invoiceRequestForOrder.invoice_code }}</p>
+              <p v-if="invoiceRequestForOrder.issued_at">开票时间：{{ invoiceRequestForOrder.issued_at }}</p>
+              <p v-if="invoiceRequestForOrder.processed_by_name">处理人：{{ invoiceRequestForOrder.processed_by_name }}</p>
+              <p v-if="invoiceRequestForOrder.processor_remark && invoiceRequestForOrder.status === 'cancelled'" class="text-red-600">处理说明：{{ invoiceRequestForOrder.processor_remark }}</p>
+              <a v-if="invoiceRequestForOrder.invoice_file_url" :href="invoiceRequestForOrder.invoice_file_url" target="_blank" rel="noreferrer" class="inline-flex text-sm font-medium text-brand hover:underline">
+                查看电子发票
+              </a>
             </div>
           </div>
 
@@ -469,7 +477,7 @@ import { useRoute, useRouter } from 'vue-router'
 import type { LocationQueryRaw } from 'vue-router'
 import { userOrderApi, userReviewApi, commonApi, userInvoiceApi } from '@hotelink/api'
 import type { InvoiceRequestItem, InvoiceTitleItem } from '@hotelink/api'
-import { ORDER_STATUS_MAP, PAYMENT_METHOD_MAP, PAYMENT_STATUS_MAP, buildImageThumbUrl, extractApiError, formatMoney, isBusinessDateOnOrBeforeToday } from '@hotelink/utils'
+import { INVOICE_STATUS_MAP, ORDER_STATUS_MAP, PAYMENT_METHOD_MAP, PAYMENT_STATUS_MAP, buildImageThumbUrl, extractApiError, formatMoney, isBusinessDateOnOrBeforeToday } from '@hotelink/utils'
 import { OrderStepBar, SelectField, useToast } from '@hotelink/ui'
 
 const { showToast } = useToast()
@@ -531,7 +539,10 @@ const canCancel = computed(() => {
   return ['paid', 'confirmed'].includes(status)
     && !isBusinessDateOnOrBeforeToday(order.value.check_in_date)
 })
-const canOpenInvoice = computed(() => order.value.status === 'completed')
+const canOpenInvoice = computed(() => (
+  ['paid', 'confirmed', 'checked_in', 'completed', 'no_show'].includes(String(order.value.status || ''))
+  && String(order.value.payment_status || '') === 'paid'
+))
 const invoiceRequestForOrder = computed(() => invoiceRequests.value.find((item) => Number(item.order_id) === orderId))
 const hotelDetailId = computed(() => {
   const parsed = Number(order.value.hotel_id ?? order.value.hotel ?? 0)
@@ -637,13 +648,12 @@ function askAiCustomerService() {
 function goToPay() { router.push(`/payment/${orderId}`) }
 
 function invoiceStatusLabel(invoice: InvoiceRequestItem): string {
-  return invoice.status_label || (invoice.status === 'issued' ? '已开票' : invoice.status === 'cancelled' ? '已取消' : '待处理')
+  return invoice.status_label || INVOICE_STATUS_MAP[invoice.status]?.label || '待处理'
 }
 
 function invoiceStatusClass(status: InvoiceRequestItem['status']): string {
-  if (status === 'issued') return 'bg-emerald-100 text-emerald-700'
-  if (status === 'cancelled') return 'bg-slate-100 text-slate-600'
-  return 'bg-amber-100 text-amber-700'
+  const meta = INVOICE_STATUS_MAP[status] || INVOICE_STATUS_MAP.pending
+  return `${meta.bg} ${meta.color}`
 }
 
 async function loadInvoiceCenter(options: { silent?: boolean } = {}) {

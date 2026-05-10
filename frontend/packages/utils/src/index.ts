@@ -59,6 +59,16 @@ export function formatMoney(amount: number | string): string {
   return n.toFixed(2)
 }
 
+/**
+ * Resolves the backend User.id used by admin account-operation APIs.
+ *
+ * @param row - UserProfile row returned by admin user or employee lists.
+ * @returns Backend user id, preferring the explicit user_id contract.
+ */
+export function resolveAdminUserId(row: Record<string, unknown>): number {
+  return Number(row.user_id ?? row.id ?? 0)
+}
+
 export function buildImageThumbUrl(url: string | null | undefined, width = 56, height = 40): string {
   const raw = String(url || '').trim()
   if (!raw) return ''
@@ -223,6 +233,12 @@ export const PAYMENT_STATUS_MAP: Record<string, string> = {
   failed: '支付失败',
   refunding: '退款中',
   refunded: '已退款',
+}
+
+export const INVOICE_STATUS_MAP: Record<string, { label: string; color: string; bg: string }> = {
+  pending: { label: '待处理', color: 'text-amber-700', bg: 'bg-amber-100' },
+  issued: { label: '已开票', color: 'text-emerald-700', bg: 'bg-emerald-100' },
+  cancelled: { label: '已取消', color: 'text-slate-600', bg: 'bg-slate-100' },
 }
 
 export const POINT_TYPE_MAP: Record<string, string> = {
