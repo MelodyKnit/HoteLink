@@ -30,4 +30,3 @@ class ReviewAdmin(admin.ModelAdmin):
     list_display = ("id", "user_id", "hotel_id", "order_id", "score", "created_at")
     list_filter = ("score",)
     search_fields = ("content",)
-

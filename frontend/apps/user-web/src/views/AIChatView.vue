@@ -943,7 +943,7 @@ function restoreHistory(idx: number) {
   assistantTraceExpanded.value = {}
   showHistoryPanel.value = false
   scrollBottom()
-  
+
   // 关闭菜单
   showMenu.value = false
 }
@@ -1217,7 +1217,7 @@ function handleChatScroll() {
 
 // 将列表滚动到容器底部
 function scrollBottom(behavior: ScrollBehavior = 'smooth') {
-  nextTick(() => { 
+  nextTick(() => {
     if (chatBox.value) {
       chatBox.value.scrollTo({ top: chatBox.value.scrollHeight, behavior })
       showScrollToBottom.value = false
@@ -1296,7 +1296,7 @@ async function sendMessage(text?: string, contextPatch?: Record<string, unknown>
     scrollBottom()
   }
   activeUserMessageId.value = userMessageId
-  
+
   const carryBookingContext = isBookingMode.value && shouldCarryBookingContext(msg, contextPatch)
   const nextBookingContext = carryBookingContext ? mergeBookingContext(contextPatch) : undefined
   input.value = ''

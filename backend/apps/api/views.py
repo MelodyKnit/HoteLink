@@ -6332,4 +6332,3 @@ class UserAISessionMessagesView(APIView):
         page_messages, total = paginate_queryset(messages, page, page_size)
         items = ChatMessageSerializer(page_messages, many=True).data
         return paginated_response(items=items, page=page, page_size=page_size, total=total)
-

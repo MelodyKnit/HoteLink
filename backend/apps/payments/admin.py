@@ -10,4 +10,3 @@ class PaymentRecordAdmin(admin.ModelAdmin):
     list_filter = ("status", "method")
     search_fields = ("payment_no", "order__order_no")
     readonly_fields = ("payment_no", "order", "method", "amount", "paid_at", "created_at")
-

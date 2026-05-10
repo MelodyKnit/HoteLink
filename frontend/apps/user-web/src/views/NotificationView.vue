@@ -590,4 +590,3 @@ onBeforeUnmount(() => {
 .swap-enter-from { opacity: 0; transform: scale(0.7); }
 .swap-leave-to  { opacity: 0; transform: scale(0.7); }
 </style>
-

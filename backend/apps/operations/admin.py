@@ -35,4 +35,3 @@ class AICallLogAdmin(admin.ModelAdmin):
 class RuntimeConfigAdmin(admin.ModelAdmin):
     list_display = ("id", "key", "updated_at")
     search_fields = ("key",)
-
