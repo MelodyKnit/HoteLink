@@ -187,6 +187,11 @@ export const PAYMENT_STATUS_MAP: Record<string, string> = {
   refunded: '已退款',
 }
 
+export const POINT_TYPE_MAP: Record<string, string> = {
+  consume: '消费积分',
+  member: '会员积分',
+}
+
 export function suggestUniquePaymentGatewayName(base: string, existingNames: string[]): string {
   const normalizedBase = base.toLowerCase().trim().replace(/[^a-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '') || 'gateway'
   let candidate = normalizedBase
@@ -436,3 +441,5 @@ export function extractApiError(
   if (parts.length) return parts.join('；')
   return translateApiMessage(res.message || fallback)
 }
+
+export * from './ai-chat'

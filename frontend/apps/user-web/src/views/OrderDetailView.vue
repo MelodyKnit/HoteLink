@@ -197,6 +197,14 @@
             <p class="text-xs text-gray-400">优惠</p>
             <p class="mt-1 font-medium text-slate-800">¥{{ formatMoney((Number(order.member_discount_amount || 0) + Number(order.coupon_discount_amount || 0)) || order.discount_amount || 0) }}</p>
           </div>
+          <div v-if="Number(order.points_earned || 0) > 0" class="rounded-xl bg-teal-50 px-3 py-2.5">
+            <p class="text-xs text-teal-600/70">本单消费积分</p>
+            <p class="mt-1 font-medium text-teal-700">+{{ Number(order.points_earned || 0).toLocaleString() }}</p>
+          </div>
+          <div v-if="Number(order.member_points_earned || 0) > 0" class="rounded-xl bg-amber-50 px-3 py-2.5">
+            <p class="text-xs text-amber-600/70">本单会员积分</p>
+            <p class="mt-1 font-medium text-amber-700">+{{ Number(order.member_points_earned || 0).toLocaleString() }}</p>
+          </div>
         </div>
         <div v-if="order.latest_payment?.payment_no" class="mt-3 rounded-xl border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-500">
           最近支付单号：{{ order.latest_payment.payment_no }}<span v-if="order.latest_payment.scene"> · 场景：{{ order.latest_payment.scene }}</span>
@@ -399,7 +407,7 @@
               </span>
             </div>
             <textarea v-model="reviewContent" rows="4" maxlength="500"
-              placeholder="分享您的入住体验，50字以上可获得积分奖励…"
+              placeholder="分享您的入住体验，50字以上可获得消费积分奖励…"
               class="mt-1.5 w-full resize-none rounded-xl border border-gray-200 px-3 py-2.5 text-sm outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/20" />
             <div class="mt-1 flex items-center justify-between">
               <div class="h-1 flex-1 overflow-hidden rounded-full bg-gray-100">
@@ -435,9 +443,9 @@
             </div>
           </div>
 
-          <!-- 积分预览 -->
+          <!-- 消费积分预览 -->
           <div class="mt-4 rounded-xl bg-teal-50 px-3 py-2.5 text-xs text-teal-700">
-            <p class="font-medium">可获积分：<span class="text-base font-bold text-brand">+{{ reviewPointsPreview }}</span> 分</p>
+            <p class="font-medium">可获消费积分：<span class="text-base font-bold text-brand">+{{ reviewPointsPreview }}</span> 分</p>
             <p class="mt-0.5 text-teal-600/70">50字→5分 · +图片→7分 · 100字+图片→10分（首次评价可奖励）</p>
           </div>
 
@@ -786,10 +794,10 @@ async function handleReview() {
       reviewImages.value = []
       const pts = (res.data as any)?.points_awarded ?? 0
       if (pts > 0) {
-        reviewSuccessMsg.value = `评价成功！奖励 +${pts} 积分`
+        reviewSuccessMsg.value = `评价成功！奖励 +${pts} 消费积分`
         setTimeout(() => { reviewSuccessMsg.value = '' }, 4000)
       }
-      showToast(pts > 0 ? `评价成功，奖励 +${pts} 积分` : '评价提交成功', 'success')
+      showToast(pts > 0 ? `评价成功，奖励 +${pts} 消费积分` : '评价提交成功', 'success')
     } else {
       showToast(res.message || '评价提交失败，请稍后重试', 'error')
     }

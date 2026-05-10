@@ -37,7 +37,7 @@ class UserProfile(models.Model):
         (MEMBER_DIAMOND, "钻石会员"),
     ]
 
-    # 会员等级积分阈值（每消费10元=1积分）
+    # 会员等级积分阈值（基于不可消费的会员积分）
     MEMBER_THRESHOLDS = {
         MEMBER_NORMAL: 0,
         MEMBER_SILVER: 1000,
@@ -82,7 +82,9 @@ class UserProfile(models.Model):
     role = models.CharField(max_length=32, choices=ROLE_CHOICES, default=ROLE_USER)
     status = models.CharField(max_length=32, choices=STATUS_CHOICES, default=STATUS_ACTIVE)
     member_level = models.CharField(max_length=32, choices=MEMBER_LEVEL_CHOICES, default=MEMBER_NORMAL)
-    points = models.PositiveIntegerField(default=0)
+    points = models.PositiveIntegerField(default=0, help_text="兼容旧接口的消费积分余额")
+    member_points = models.PositiveIntegerField(default=0, help_text="会员成长积分，只增不减，用于等级升级")
+    consume_points = models.PositiveIntegerField(default=0, help_text="消费积分余额，可用于兑换优惠券或礼品")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -94,15 +96,15 @@ class UserProfile(models.Model):
         return self.nickname or self.user.username
 
     def compute_level(self) -> str:
-        """根据当前积分计算应有的会员等级。"""
+        """根据会员积分计算应有的会员等级。"""
         level = self.MEMBER_NORMAL
         for lv, threshold in sorted(self.MEMBER_THRESHOLDS.items(), key=lambda x: x[1]):
-            if self.points >= threshold:
+            if self.member_points >= threshold:
                 level = lv
         return level
 
     def refresh_level(self) -> bool:
-        """根据积分刷新会员等级，只升不降，返回是否发生了升级。"""
+        """根据会员积分刷新会员等级，只升不降，返回是否发生了升级。"""
         new_level = self.compute_level()
         current_threshold = self.MEMBER_THRESHOLDS.get(self.member_level, 0)
         new_threshold = self.MEMBER_THRESHOLDS.get(new_level, 0)

@@ -29,15 +29,21 @@
             <h2 class="text-lg font-bold">{{ authStore.user?.nickname || authStore.user?.username || '用户' }}</h2>
             <p class="text-sm opacity-90">{{ levelInfo.label }}</p>
           </div>
-          <div class="ml-auto text-right">
-            <p class="text-2xl font-bold">{{ points.toLocaleString() }}</p>
-            <p class="text-xs opacity-80">积分</p>
+          <div class="ml-auto grid grid-cols-2 gap-3 text-right">
+            <div>
+              <p class="text-xl font-bold">{{ memberPoints.toLocaleString() }}</p>
+              <p class="text-xs opacity-80">会员积分</p>
+            </div>
+            <div>
+              <p class="text-xl font-bold">{{ consumePoints.toLocaleString() }}</p>
+              <p class="text-xs opacity-80">消费积分</p>
+            </div>
           </div>
         </div>
         <div class="mt-5">
           <div class="flex items-center justify-between text-xs opacity-80">
             <span>{{ currentBenefitText }}</span>
-            <span v-if="levelInfo.next">升级还需 {{ (levelInfo.next.threshold - points).toLocaleString() }} 积分</span>
+            <span v-if="levelInfo.next">升级还需 {{ (levelInfo.next.threshold - memberPoints).toLocaleString() }} 会员积分</span>
             <span v-else>已达最高等级</span>
           </div>
           <div class="mt-1.5 h-2 overflow-hidden rounded-full bg-white/30">
@@ -68,7 +74,7 @@
             <div class="flex h-10 w-10 items-center justify-center rounded-full text-lg" :class="lv.bg">{{ lv.icon }}</div>
             <div class="flex-1">
               <p class="text-sm font-semibold text-gray-800">{{ lv.name }}</p>
-              <p class="text-xs text-gray-400">{{ lv.threshold.toLocaleString() }} 积分 · 消费{{ lv.discountText }} · 积分{{ lv.multiplier }}x</p>
+              <p class="text-xs text-gray-400">{{ lv.threshold.toLocaleString() }} 会员积分 · 消费{{ lv.discountText }} · 消费积分{{ lv.multiplier }}x</p>
             </div>
             <span v-if="lv.name === levelInfo.label" class="rounded-full bg-brand/10 px-2 py-0.5 text-xs font-medium text-brand">当前</span>
             <span v-else class="text-xs text-gray-300">查看 ›</span>
@@ -81,8 +87,8 @@
         <h3 class="mb-3 font-semibold text-gray-800">积分兑换</h3>
         <div class="rounded-2xl bg-white p-5 shadow-sm">
           <div class="mb-3 flex items-center justify-between">
-            <p class="text-sm text-gray-600">当前积分余额：<span class="font-bold text-brand">{{ points.toLocaleString() }}</span></p>
-            <p class="text-xs text-gray-400">兑换比例 100积分 = ¥1</p>
+            <p class="text-sm text-gray-600">可用消费积分：<span class="font-bold text-brand">{{ consumePoints.toLocaleString() }}</span></p>
+            <p class="text-xs text-gray-400">仅消费积分可用于兑换</p>
           </div>
           <div v-if="exchangeTemplates.length === 0" class="py-6 text-center text-sm text-gray-400">暂无可兑换的优惠券</div>
           <div v-else class="space-y-3">
@@ -95,10 +101,10 @@
                 <p class="text-sm font-medium text-gray-800">{{ tpl.name }}</p>
                 <p class="text-xs text-gray-400">{{ tpl.min_amount > 0 ? `满¥${tpl.min_amount}可用` : '无门槛' }} · 剩余{{ tpl.remaining }}张</p>
               </div>
-              <button @click="exchangeCoupon(tpl)" :disabled="exchangingTemplateId !== null || points < tpl.points_cost"
+              <button @click="exchangeCoupon(tpl)" :disabled="exchangingTemplateId !== null || consumePoints < tpl.points_cost"
                 class="rounded-lg px-3 py-1.5 text-xs font-medium transition"
-                :class="points >= tpl.points_cost ? 'bg-brand text-white hover:bg-brand-dark' : 'bg-gray-100 text-gray-400 cursor-not-allowed'">
-                {{ exchangingTemplateId === tpl.id ? '兑换中...' : `${tpl.points_cost} 积分兑换` }}
+                :class="consumePoints >= tpl.points_cost ? 'bg-brand text-white hover:bg-brand-dark' : 'bg-gray-100 text-gray-400 cursor-not-allowed'">
+                {{ exchangingTemplateId === tpl.id ? '兑换中...' : `${tpl.points_cost} 消费积分兑换` }}
               </button>
             </div>
           </div>
@@ -107,18 +113,24 @@
 
       <!-- Points Log -->
       <div class="mt-6">
-        <h3 class="mb-3 font-semibold text-gray-800">积分记录</h3>
-        <div v-if="pointLogs.length === 0" class="rounded-2xl bg-white p-8 text-center text-sm text-gray-400">暂无积分记录</div>
+        <div class="mb-3 flex items-center justify-between">
+          <h3 class="font-semibold text-gray-800">积分记录</h3>
+          <div class="flex rounded-xl bg-white p-1 text-xs shadow-sm">
+            <button v-for="tab in pointLogTabs" :key="tab.value" class="rounded-lg px-2.5 py-1.5" :class="activePointLogType === tab.value ? 'bg-brand text-white' : 'text-gray-500'" @click="activePointLogType = tab.value">{{ tab.label }}</button>
+          </div>
+        </div>
+        <div v-if="visiblePointLogs.length === 0" class="rounded-2xl bg-white p-8 text-center text-sm text-gray-400">暂无积分记录</div>
         <div v-else class="space-y-2">
-          <div v-for="log in pointLogs" :key="log.id" class="flex items-center justify-between rounded-2xl bg-white px-4 py-3 shadow-sm">
+          <div v-for="log in visiblePointLogs" :key="log.id" class="flex items-center justify-between rounded-2xl bg-white px-4 py-3 shadow-sm">
             <div>
               <p class="text-sm font-medium text-gray-800">{{ logTypeLabel(log.log_type) }}</p>
+              <p class="mt-0.5 text-xs font-medium" :class="log.point_type === 'member' ? 'text-amber-600' : 'text-brand'">{{ pointTypeLabel(log.point_type) }}</p>
               <p class="text-xs text-gray-400">{{ log.description }}</p>
               <p class="text-xs text-gray-300">{{ formatTime(log.created_at) }}</p>
             </div>
             <div class="text-right">
               <span class="text-sm font-bold" :class="log.points > 0 ? 'text-brand' : 'text-orange-500'">{{ log.points > 0 ? '+' : '' }}{{ log.points }}</span>
-              <p class="text-xs text-gray-300">余额 {{ log.balance }}</p>
+              <p class="text-xs text-gray-300">{{ pointTypeLabel(log.point_type) }}余额 {{ log.balance }}</p>
             </div>
           </div>
         </div>
@@ -128,10 +140,10 @@
       <div class="mt-6 rounded-2xl bg-white p-5 shadow-sm">
         <h3 class="mb-2 font-semibold text-gray-800">积分规则</h3>
         <ul class="space-y-1 text-xs text-gray-500">
-          <li>📌 每消费 10 元获得 1 积分（受会员倍率加成）</li>
-          <li>📌 评价订单额外获得 10 积分</li>
-          <li>📌 积分可兑换优惠券，兑换比例 100积分 = ¥1</li>
-          <li>📌 达到积分门槛自动升级，等级不会降级</li>
+          <li>📌 会员积分来自订单消费成长值，只用于升级且不会因兑换扣减</li>
+          <li>📌 消费积分支付成功后到账，可兑换优惠券或后续礼品</li>
+          <li>📌 评价订单额外奖励消费积分</li>
+          <li>📌 达到会员积分门槛自动升级，等级不会降级</li>
         </ul>
       </div>
     </div>
@@ -145,7 +157,7 @@
               <span class="text-3xl">{{ previewLevel.icon }}</span>
               <div>
                 <h3 class="text-lg font-bold">{{ previewLevel.name }}</h3>
-                <p class="text-sm opacity-80">{{ previewLevel.threshold.toLocaleString() }} 积分解锁</p>
+                <p class="text-sm opacity-80">{{ previewLevel.threshold.toLocaleString() }} 会员积分解锁</p>
               </div>
             </div>
           </div>
@@ -160,9 +172,9 @@
             </div>
             <div class="mt-4 rounded-xl bg-gray-50 p-3">
               <p class="text-xs text-gray-600">💰 消费折扣：<strong>{{ previewLevel.discountText }}</strong></p>
-              <p class="mt-1 text-xs text-gray-600">⭐ 积分倍率：<strong>{{ previewLevel.multiplier }}x</strong></p>
-              <p v-if="previewLevel.threshold > points" class="mt-2 text-xs text-orange-500">
-                还需 {{ (previewLevel.threshold - points).toLocaleString() }} 积分即可解锁
+              <p class="mt-1 text-xs text-gray-600">⭐ 消费积分倍率：<strong>{{ previewLevel.multiplier }}x</strong></p>
+              <p v-if="previewLevel.threshold > memberPoints" class="mt-2 text-xs text-orange-500">
+                还需 {{ (previewLevel.threshold - memberPoints).toLocaleString() }} 会员积分即可解锁
               </p>
               <p v-else class="mt-2 text-xs text-brand">✅ 已解锁</p>
             </div>
@@ -179,6 +191,8 @@
 import { ref, computed, onMounted } from 'vue'
 import { useUserAuthStore } from '@hotelink/store'
 import { userPointsApi, userCouponApi } from '@hotelink/api'
+import type { PointsLogItem } from '@hotelink/api'
+import { POINT_TYPE_MAP } from '@hotelink/utils'
 import { useToast, useConfirm } from '@hotelink/ui'
 import { useRouter } from 'vue-router'
 
@@ -192,22 +206,54 @@ function goBack() {
   else router.push('/my')
 }
 
-const points = ref(0)
-const memberLevel = ref('normal')
-const pointLogs = ref<any[]>([])
+type PointLogType = 'all' | PointsLogItem['point_type']
+
+interface LevelConfig {
+  key: string
+  name: string
+  threshold: number
+  icon: string
+  bg: string
+  gradient: string
+  discountRate: number
+  discountText: string
+  multiplier: number
+}
+
+interface ExchangeTemplate {
+  id: number
+  name: string
+  coupon_type: 'cash' | 'discount'
+  amount: number
+  discount: number
+  min_amount: number
+  remaining: number
+  points_cost: number
+}
+
+const memberPoints = ref(0)
+const consumePoints = ref(0)
+const pointLogs = ref<PointsLogItem[]>([])
 const error = ref('')
 const avatarError = ref(false)
 const pageLoading = ref(true)
-const previewLevel = ref<(typeof levels)[number] | null>(null)
-const exchangeTemplates = ref<any[]>([])
+const previewLevel = ref<LevelConfig | null>(null)
+const exchangeTemplates = ref<ExchangeTemplate[]>([])
 const exchangingTemplateId = ref<number | null>(null)
+const activePointLogType = ref<PointLogType>('all')
+
+const pointLogTabs: { label: string; value: PointLogType }[] = [
+  { label: '全部', value: 'all' },
+  { label: '消费积分', value: 'consume' },
+  { label: '会员积分', value: 'member' },
+]
 
 const userInitial = computed(() =>
   (authStore.user?.nickname || authStore.user?.username || 'U').charAt(0).toUpperCase()
 )
 
 // 会员等级配置，需与后端 UserProfile.MEMBER_THRESHOLDS / MEMBER_DISCOUNT_RATE / MEMBER_POINTS_MULTIPLIER 保持一致
-const levels = [
+const levels: LevelConfig[] = [
   { key: 'normal', name: '普通会员', threshold: 0, icon: '🌱', bg: 'bg-gray-100', gradient: 'bg-gradient-to-r from-gray-500 to-gray-600', discountRate: 1.00, discountText: '无折扣', multiplier: 1.0 },
   { key: 'silver', name: '银卡会员', threshold: 1000, icon: '🥈', bg: 'bg-gray-200', gradient: 'bg-gradient-to-r from-gray-400 to-gray-500', discountRate: 0.98, discountText: '98折', multiplier: 1.2 },
   { key: 'gold', name: '金卡会员', threshold: 10000, icon: '🥇', bg: 'bg-yellow-100', gradient: 'bg-gradient-to-r from-yellow-600 to-amber-500', discountRate: 0.95, discountText: '95折', multiplier: 1.5 },
@@ -218,7 +264,7 @@ const levels = [
 function getBenefitsForLevel(lv: (typeof levels)[number]) {
   const list = [
     { icon: '💰', title: '消费积分', desc: `每10元得${lv.multiplier}积分` },
-    { icon: '📦', title: '积分兑券', desc: '100积分=¥1' },
+    { icon: '📦', title: '积分兑券', desc: '100消费积分=¥1' },
   ]
   if (lv.discountRate < 1) {
     list.unshift({ icon: '🎁', title: '消费折扣', desc: `全场${lv.discountText}` })
@@ -239,7 +285,7 @@ function getBenefitsForLevel(lv: (typeof levels)[number]) {
 const levelInfo = computed(() => {
   let current = levels[0], next: (typeof levels)[0] | null = levels[1]
   for (let i = levels.length - 1; i >= 0; i--) {
-    if (points.value >= levels[i].threshold) { current = levels[i]; next = levels[i + 1] || null; break }
+    if (memberPoints.value >= levels[i].threshold) { current = levels[i]; next = levels[i + 1] || null; break }
   }
   return { label: current.name, next, current }
 })
@@ -254,16 +300,21 @@ const progressPct = computed(() => {
   const nxt = levelInfo.value.next
   if (!nxt) return 100
   const prevThreshold = levelInfo.value.current.threshold
-  return Math.min(100, ((points.value - prevThreshold) / (nxt.threshold - prevThreshold)) * 100)
+  return Math.min(100, ((memberPoints.value - prevThreshold) / (nxt.threshold - prevThreshold)) * 100)
 })
 
 const currentBenefitText = computed(() => {
   const lv = levelInfo.value.current
-  if (lv.discountRate >= 1) return '消费累计积分升级享专属折扣'
+  if (lv.discountRate >= 1) return '累计会员积分升级享专属折扣'
   return `享${lv.discountText}优惠 · ${lv.multiplier}x积分加成`
 })
 
 const currentBenefits = computed(() => getBenefitsForLevel(levelInfo.value.current))
+
+const visiblePointLogs = computed(() => {
+  if (activePointLogType.value === 'all') return pointLogs.value
+  return pointLogs.value.filter((log) => log.point_type === activePointLogType.value)
+})
 
 const logTypeLabels: Record<string, string> = {
   consume_reward: '消费奖励',
@@ -274,6 +325,7 @@ const logTypeLabels: Record<string, string> = {
   points_exchange: '积分兑换',
 }
 function logTypeLabel(type: string) { return logTypeLabels[type] || type }
+function pointTypeLabel(type?: string) { return POINT_TYPE_MAP[type || 'consume'] || '消费积分' }
 function formatTime(t: string) { return t ? t.replace('T', ' ').slice(0, 19) : '' }
 
 async function loadExchangeTemplates() {
@@ -281,8 +333,10 @@ async function loadExchangeTemplates() {
     const res = await userCouponApi.available()
     if (res.code === 0 && res.data) {
       // 只显示需要积分的（积分兑换区）
-      const all = (res.data as any).items || []
-      exchangeTemplates.value = all.filter((t: any) => t.points_cost > 0)
+      consumePoints.value = res.data.consume_points ?? consumePoints.value
+      memberPoints.value = res.data.member_points ?? memberPoints.value
+      const all = (res.data.items || []) as ExchangeTemplate[]
+      exchangeTemplates.value = all.filter((t) => t.points_cost > 0)
     } else {
       showToast(res.message || '加载可兑换优惠券失败，请稍后重试', 'error')
     }
@@ -291,19 +345,21 @@ async function loadExchangeTemplates() {
   }
 }
 
-async function exchangeCoupon(tpl: any) {
+async function exchangeCoupon(tpl: ExchangeTemplate) {
   if (exchangingTemplateId.value !== null) return
-  if (points.value < tpl.points_cost) {
-    showToast(`积分不足，需要 ${tpl.points_cost} 积分`, 'warning')
+  if (consumePoints.value < tpl.points_cost) {
+    showToast(`消费积分不足，需要 ${tpl.points_cost} 消费积分`, 'warning')
     return
   }
-  if (!await confirmDialog(`确定用 ${tpl.points_cost} 积分兑换「${tpl.name}」？`)) return
+  if (!await confirmDialog(`确定用 ${tpl.points_cost} 消费积分兑换「${tpl.name}」？`)) return
   exchangingTemplateId.value = tpl.id
   try {
     const res = await userCouponApi.claim(tpl.id)
     if (res.code === 0) {
       showToast('兑换成功，优惠券已发放到卡包', 'success')
-      points.value -= tpl.points_cost
+      const data = res.data as { consume_points?: number; member_points?: number } | undefined
+      consumePoints.value = data?.consume_points ?? Math.max(0, consumePoints.value - tpl.points_cost)
+      memberPoints.value = data?.member_points ?? memberPoints.value
       await loadExchangeTemplates()
     } else {
       showToast(res.message || '兑换失败，请稍后重试', 'error')
@@ -319,13 +375,14 @@ onMounted(async () => {
   try {
     const res = await userPointsApi.logs()
     if (res.code === 0 && res.data) {
-      const data = res.data as any
-      points.value = data.current_points ?? 0
-      memberLevel.value = data.member_level ?? 'normal'
+      const data = res.data
+      consumePoints.value = data.consume_points ?? data.current_points ?? authStore.user?.consume_points ?? authStore.user?.points ?? 0
+      memberPoints.value = data.member_points ?? authStore.user?.member_points ?? consumePoints.value
       pointLogs.value = data.items || []
     }
   } catch {
-    points.value = authStore.user?.points || 0
+    consumePoints.value = authStore.user?.consume_points ?? authStore.user?.points ?? 0
+    memberPoints.value = authStore.user?.member_points ?? consumePoints.value
     error.value = '积分记录加载失败，请稍后重试'
   }
   await loadExchangeTemplates()

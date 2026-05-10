@@ -18,6 +18,16 @@
         </div>
         <router-link to="/my/profile" class="rounded-full bg-white/20 px-3 py-1.5 text-xs backdrop-blur hover:bg-white/30">编辑资料</router-link>
       </div>
+      <router-link to="/my/membership" class="mt-5 grid grid-cols-2 gap-3 rounded-2xl bg-white/15 p-3 backdrop-blur transition hover:bg-white/20">
+        <div>
+          <p class="text-xl font-bold">{{ memberPoints.toLocaleString() }}</p>
+          <p class="mt-0.5 text-xs text-teal-50/80">会员积分 · 升级成长</p>
+        </div>
+        <div>
+          <p class="text-xl font-bold">{{ consumePoints.toLocaleString() }}</p>
+          <p class="mt-0.5 text-xs text-teal-50/80">消费积分 · 兑券礼品</p>
+        </div>
+      </router-link>
     </div>
 
     <!-- Order quick links -->
@@ -59,7 +69,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserAuthStore } from '@hotelink/store'
 import { useConfirm } from '@hotelink/ui'
@@ -68,6 +78,9 @@ const auth = useUserAuthStore()
 const router = useRouter()
 const avatarError = ref(false)
 const { confirm: confirmDialog } = useConfirm()
+
+const memberPoints = computed(() => auth.user?.member_points ?? auth.user?.points ?? 0)
+const consumePoints = computed(() => auth.user?.consume_points ?? auth.user?.points ?? 0)
 
 const memberLevelMap: Record<string, string> = {
   normal: '普通会员',

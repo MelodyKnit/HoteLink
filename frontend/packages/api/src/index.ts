@@ -140,6 +140,55 @@ export type InvoiceCenterData = PaginatedData<InvoiceRequestItem> & {
   titles: InvoiceTitleItem[]
 }
 
+export interface PointsLogItem {
+  id: number
+  point_type: 'consume' | 'member'
+  point_type_label: string
+  log_type: string
+  points: number
+  balance: number
+  description: string
+  created_at: string
+}
+
+export interface UserPointsData {
+  current_points: number
+  points: number
+  member_points: number
+  consume_points: number
+  member_level: string
+  next_level: { level: string; label: string; threshold: number; remaining: number } | null
+  items: PointsLogItem[]
+  total: number
+}
+
+export interface AdminMemberLevelOverview {
+  level: string
+  label: string
+  count: number
+  threshold: number
+  member_points_threshold: number
+  discount_rate: number
+  points_multiplier: number
+}
+
+export interface AdminMemberOverviewData {
+  levels: AdminMemberLevelOverview[]
+  total_users: number
+  total_member_points: number
+  total_consume_points: number
+}
+
+export interface UserAiChatStreamEvent {
+  type?: 'meta' | 'chunk' | 'done' | string
+  content?: string
+  done?: boolean
+  scene?: string
+  session_id?: number
+  booking_assistant?: Record<string, unknown> | null
+  agent_state?: Record<string, unknown> | null
+}
+
 const TOKEN_KEY_PREFIX = 'hotelink_access_token'
 const REFRESH_KEY_PREFIX = 'hotelink_refresh_token'
 
@@ -343,7 +392,7 @@ export const authApi = {
   logout: (refresh_token: string) =>
     post('/user/auth/logout', { refresh_token }),
   me: () =>
-    get<{ id: number; username: string; nickname: string; mobile: string; email: string; role: string; status: string; member_level: string; avatar?: string }>('/user/auth/me'),
+    get<{ id: number; username: string; nickname: string; mobile: string; email: string; role: string; status: string; member_level: string; points: number; member_points: number; consume_points: number; avatar?: string }>('/user/auth/me'),
 }
 
 // ========== Dashboard ==========
@@ -452,7 +501,7 @@ export const adminCouponApi = {
 
 // ========== Admin Members ==========
 export const adminMemberApi = {
-  overview: () => get<{ levels: unknown[]; total_users: number }>('/admin/members/overview'),
+  overview: () => get<AdminMemberOverviewData>('/admin/members/overview'),
 }
 
 // ========== AI ==========
@@ -560,16 +609,16 @@ export const publicApi = {
 // ========== User Auth ==========
 export const userAuthApi = {
   login: (data: { username: string; password: string }) =>
-    post<{ access_token: string; refresh_token: string; token_type: string; expires_in: number; user: { id: number; username: string; role: string; nickname?: string; member_level?: string; avatar?: string; points?: number } }>('/public/auth/login', data),
+    post<{ access_token: string; refresh_token: string; token_type: string; expires_in: number; user: { id: number; username: string; role: string; nickname?: string; member_level?: string; avatar?: string; points?: number; member_points?: number; consume_points?: number } }>('/public/auth/login', data),
   register: (data: { username: string; password: string; confirm_password: string; mobile: string; email?: string }) =>
     post<{ user_id: number; username: string }>('/public/auth/register', data),
-  me: () => get<{ id: number; username: string; nickname: string; mobile: string; email: string; role: string; status: string; member_level: string; avatar?: string; gender?: string; birthday?: string }>('/user/auth/me'),
+  me: () => get<{ id: number; username: string; nickname: string; mobile: string; email: string; role: string; status: string; member_level: string; points: number; member_points: number; consume_points: number; avatar?: string; gender?: string; birthday?: string }>('/user/auth/me'),
   logout: (refresh_token: string) => post('/user/auth/logout', { refresh_token }),
 }
 
 // ========== User Profile ==========
 export const userProfileApi = {
-  get: () => get<{ id: number; username: string; nickname: string; mobile: string; email: string; gender: string; birthday: string; avatar: string; member_level: string; points: number }>('/user/profile'),
+  get: () => get<{ id: number; username: string; nickname: string; mobile: string; email: string; gender: string; birthday: string; avatar: string; member_level: string; points: number; member_points: number; consume_points: number }>('/user/profile'),
   update: (data: Record<string, unknown>) => post('/user/profile/update', data),
   uploadAvatar: (file: File) => {
     const fd = new FormData()
@@ -609,8 +658,8 @@ export const userFavoriteApi = {
 // ========== User Coupons ==========
 export const userCouponApi = {
   list: (params?: Record<string, unknown>) => get<PaginatedData>('/user/coupons', params),
-  available: () => get<{ items: unknown[] }>('/user/coupons/available'),
-  claim: (template_id: number) => post('/user/coupons/claim', { template_id }),
+  available: () => get<{ items: unknown[]; consume_points: number; member_points: number }>('/user/coupons/available'),
+  claim: (template_id: number) => post<{ coupon_id: number; consume_points: number; member_points: number }>('/user/coupons/claim', { template_id }),
   forOrder: (amount: number) => get<{ items: unknown[] }>('/user/orders/available-coupons', { amount }),
 }
 
@@ -627,7 +676,7 @@ export const userInvoiceApi = {
 
 // ========== User Points ==========
 export const userPointsApi = {
-  logs: (params?: Record<string, unknown>) => get<PaginatedData>('/user/points/logs', params),
+  logs: (params?: Record<string, unknown>) => get<UserPointsData>('/user/points/logs', params),
 }
 
 // ========== User Notices ==========
@@ -654,7 +703,7 @@ export const userAiApi = {
   async *chatStream(
     data: { scene: string; question: string; hotel_id?: number; order_id?: number; session_id?: number; booking_context?: Record<string, unknown>; conversation_summary?: string },
     options?: { signal?: AbortSignal },
-  ): AsyncGenerator<Record<string, unknown>> {
+  ): AsyncGenerator<UserAiChatStreamEvent> {
     const token = getToken()
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
     if (token) {
@@ -673,12 +722,12 @@ export const userAiApi = {
       if (options?.signal?.aborted) {
         throw error
       }
-      yield { content: '', done: true }
+      yield { type: 'done', content: '', done: true }
       return
     }
 
     if (!resp.ok || !resp.body) {
-      yield { content: '', done: true }
+      yield { type: 'done', content: '', done: true }
       return
     }
 
@@ -710,7 +759,7 @@ export const userAiApi = {
             }
 
             try {
-              const event = JSON.parse(line.slice(6)) as Record<string, unknown>
+              const event = JSON.parse(line.slice(6)) as UserAiChatStreamEvent
               yield event
               if (event.done) {
                 return
@@ -726,7 +775,7 @@ export const userAiApi = {
 
       if (buffer.trim().startsWith('data: ')) {
         try {
-          const event = JSON.parse(buffer.trim().slice(6)) as { content: string; done: boolean }
+          const event = JSON.parse(buffer.trim().slice(6)) as UserAiChatStreamEvent
           yield event
         } catch {
           // ignore malformed tail event
@@ -736,7 +785,7 @@ export const userAiApi = {
       if (options?.signal?.aborted) {
         throw error
       }
-      yield { content: '', done: true }
+      yield { type: 'done', content: '', done: true }
     } finally {
       options?.signal?.removeEventListener('abort', onAbort)
     }

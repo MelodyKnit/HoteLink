@@ -137,6 +137,56 @@ class AIChatService:
         booking_context: dict[str, Any] | None = None,
         conversation_summary: str = "",
     ) -> dict[str, Any]:
+        """Return a complete user-facing AI reply for the chat endpoint."""
+
+        prepared = self.prepare_user_chat_reply(
+            user=user,
+            scene=scene,
+            question=question,
+            hotel_id=hotel_id,
+            order_id=order_id,
+            booking_context=booking_context,
+            conversation_summary=conversation_summary,
+        )
+        result = {
+            "scene": prepared["scene"],
+            "answer": prepared.get("answer", ""),
+            "booking_assistant": prepared.get("booking_assistant"),
+            "agent_state": prepared.get("agent_state"),
+        }
+        if prepared.get("call_mode") != "llm":
+            return result
+
+        try:
+            llm_result = self.create_chat_completion(
+                prepared["messages"],
+                temperature=float(prepared.get("temperature") or 0.2),
+            )
+            result.update(llm_result)
+            result["answer"] = llm_result.get("content") or ""
+        except Exception:
+            logger.exception("AI chat reply fallback triggered")
+            result["answer"] = ""
+        return result
+
+    def prepare_user_chat_reply(
+        self,
+        *,
+        user: Any,
+        scene: str,
+        question: str,
+        hotel_id: int | None = None,
+        order_id: int | None = None,
+        booking_context: dict[str, Any] | None = None,
+        conversation_summary: str = "",
+    ) -> dict[str, Any]:
+        """Plan a user chat response for sync or streaming execution.
+
+        Returns:
+            A planning payload that either contains a deterministic answer or the
+            prompt messages required for a streamed LLM completion.
+        """
+
         requested_scene = self._normalize_requested_scene(scene)
         chat_mode = self._resolve_chat_mode(
             requested_scene=requested_scene,
@@ -160,6 +210,13 @@ class AIChatService:
                     "scene": chat_mode,
                     "answer": booking_assistant["answer"],
                     "booking_assistant": booking_assistant,
+                    "agent_state": self._build_user_chat_agent_state(
+                        scene=chat_mode,
+                        question=question,
+                        booking_assistant=booking_assistant,
+                        order_id=order_id,
+                    ),
+                    "call_mode": "deterministic",
                 }
 
         if chat_mode == "customer_service":
@@ -188,20 +245,19 @@ class AIChatService:
                 conversation_summary=conversation_summary,
             )
 
-        try:
-            if self.is_available():
-                result = self.create_chat_completion(messages, temperature=0.2)
-                answer = result["content"]
-            else:
-                answer = ""
-        except Exception:
-            logger.exception("AI chat reply fallback triggered")
-            answer = ""
-
         return {
             "scene": chat_mode,
-            "answer": answer,
+            "answer": "",
             "booking_assistant": booking_assistant,
+            "agent_state": self._build_user_chat_agent_state(
+                scene=chat_mode,
+                question=question,
+                booking_assistant=booking_assistant,
+                order_id=order_id,
+            ),
+            "call_mode": "llm" if self.is_available() else "fallback",
+            "messages": messages,
+            "temperature": 0.25 if chat_mode == "customer_service" else 0.2,
         }
 
     def iter_text_chunks(self, text: str, chunk_size: int = 24) -> Iterator[str]:
@@ -323,6 +379,26 @@ class AIChatService:
             temperature=temperature,
             stream=True,
         )
+
+    def extract_stream_text_delta(self, chunk: Any) -> str:
+        """Extract assistant text content from a streamed completion chunk."""
+
+        choices = getattr(chunk, "choices", None) or []
+        if not choices:
+            return ""
+        delta = getattr(choices[0], "delta", None)
+        content = getattr(delta, "content", "") if delta is not None else ""
+        if isinstance(content, str):
+            return content
+        return ""
+
+    def is_stream_finished(self, chunk: Any) -> bool:
+        """Return whether a streamed completion chunk marks the end of output."""
+
+        choices = getattr(chunk, "choices", None) or []
+        if not choices:
+            return False
+        return getattr(choices[0], "finish_reason", None) is not None
 
     def _build_customer_service_prompt_context(
         self,
@@ -482,6 +558,197 @@ class AIChatService:
             "unpaid_orders": unpaid_orders[:5],
             "recent_notice_count": len(recent_notices),
             "suggested_actions": suggested_actions,
+        }
+
+    def _build_user_chat_agent_state(
+        self,
+        *,
+        scene: str,
+        question: str,
+        booking_assistant: dict[str, Any] | None,
+        order_id: int | None,
+    ) -> dict[str, Any]:
+        """Build the user-facing agent trace shown in the chat UI."""
+
+        if scene == "booking_assistant":
+            return self._build_booking_agent_state(
+                question=question,
+                booking_assistant=booking_assistant,
+            )
+        return self._build_customer_service_agent_state(
+            question=question,
+            booking_assistant=booking_assistant,
+            order_id=order_id,
+        )
+
+    def _build_customer_service_agent_state(
+        self,
+        *,
+        question: str,
+        booking_assistant: dict[str, Any] | None,
+        order_id: int | None,
+    ) -> dict[str, Any]:
+        """Build safe trace metadata for the customer-service assistant."""
+
+        context = booking_assistant.get("context", {}) if isinstance(booking_assistant, dict) else {}
+        detected_intent = str(context.get("detected_intent") or self._detect_customer_service_intent(question))
+        preferred_order_id = context.get("preferred_order_id") or order_id
+        summary = "我会先核对当前账号可用的订单与通知，再给出解释，并把可安全执行的页面入口整理到消息卡片中。"
+        if detected_intent == "cancel_order":
+            summary = "我会先确认当前订单是否处于可取消状态，再说明影响范围，并只提供需要用户确认的取消入口。"
+        elif detected_intent == "pay_order":
+            summary = "我会先核对待支付订单，再解释支付路径与注意事项，并把继续支付入口放到消息卡片中。"
+        elif detected_intent == "invoice":
+            summary = "我会先判断是否具备开票条件，再说明申请流程，并把发票入口整理到消息卡片中。"
+        elif detected_intent == "review":
+            summary = "我会优先结合当前账号的评价与订单上下文回答，并把相关页面入口整理到消息卡片中。"
+
+        order_scope_detail = (
+            f"已锁定当前会话关联订单 #{preferred_order_id}，仅结合该订单和当前账号最近订单说明。"
+            if preferred_order_id
+            else "未指定订单时，只读取当前账号最近订单、通知与评价作为参考。"
+        )
+        return {
+            "mode": "customer_service",
+            "display_name": "AI 智能客服",
+            "summary": summary,
+            "thinking": [
+                {
+                    "id": "classify-request",
+                    "title": "识别问题类型",
+                    "content": "先判断这是订单、支付、发票、会员还是评价问题，再决定回答路径和需要的确认步骤。",
+                },
+                {
+                    "id": "scope-data",
+                    "title": "限制查询范围",
+                    "content": "只结合当前登录账号自己的订单、通知、评价与当前会话上下文，不读取其他用户的数据。",
+                },
+            ],
+            "tool_steps": [
+                {
+                    "id": "load-user-context",
+                    "label": "读取当前账号上下文",
+                    "detail": order_scope_detail,
+                    "status": "completed",
+                    "read_only": True,
+                },
+                {
+                    "id": "prepare-safe-actions",
+                    "label": "整理安全操作入口",
+                    "detail": "只返回跳转、查看和确认提示，不直接执行取消订单、支付或开票等写操作。",
+                    "status": "completed",
+                    "read_only": True,
+                },
+                {
+                    "id": "compose-answer",
+                    "label": "生成自然回复",
+                    "detail": "基于系统真实数据组织可执行说明，并提示用户可直接使用消息中的快捷卡片。",
+                    "status": "completed",
+                    "read_only": True,
+                },
+            ],
+            "guardrails": self._build_user_chat_guardrails(scene="customer_service"),
+            "safety_policy": self._build_user_chat_safety_policy(scene="customer_service"),
+        }
+
+    def _build_booking_agent_state(
+        self,
+        *,
+        question: str,
+        booking_assistant: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Build safe trace metadata for the booking assistant."""
+
+        phase = str((booking_assistant or {}).get("phase") or "")
+        summary = "我会先识别城市、酒店和偏好条件，再只基于系统在线酒店与房型数据给出下一步。"
+        if phase == "switch_to_customer_service":
+            summary = "我识别到这是售后或账户类问题，因此不会误导您进入订房流程，而是引导切换到客服助手继续。"
+        elif phase == "select_room_type":
+            summary = "酒店已经定位完成，我会直接整理当前在线房型和下单入口，减少重复确认。"
+        elif phase == "select_hotel":
+            summary = "城市或筛选条件已经明确，我会先返回当前系统内符合条件的酒店，再让您继续选房型。"
+
+        return {
+            "mode": "booking_assistant",
+            "display_name": "AI 订房助手",
+            "summary": summary,
+            "thinking": [
+                {
+                    "id": "extract-booking-slots",
+                    "title": "提取订房条件",
+                    "content": "识别城市、酒店关键词、预算、评分和地理位置偏好，尽量少重复追问已经明确的信息。",
+                },
+                {
+                    "id": "confirm-online-data",
+                    "title": "核对在线可售数据",
+                    "content": "只根据系统当前在线酒店、房型和公开价格信息引导，不编造库存、价格或政策。",
+                },
+            ],
+            "tool_steps": [
+                {
+                    "id": "parse-booking-context",
+                    "label": "解析订房上下文",
+                    "detail": "结合当前消息与历史订房上下文，判断是否需要重置城市、酒店或筛选偏好。",
+                    "status": "completed",
+                    "read_only": True,
+                },
+                {
+                    "id": "load-online-hotels",
+                    "label": "查询在线酒店与房型",
+                    "detail": "仅读取系统公开展示的在线酒店、房型与参考价格信息，不访问其他用户订单数据。",
+                    "status": "completed",
+                    "read_only": True,
+                },
+                {
+                    "id": "return-structured-options",
+                    "label": "返回结构化操作卡片",
+                    "detail": "将可点击的城市、酒店、房型或跳转入口整理为消息卡片，便于继续完成预订。",
+                    "status": "completed",
+                    "read_only": True,
+                },
+            ],
+            "guardrails": self._build_user_chat_guardrails(scene="booking_assistant"),
+            "safety_policy": self._build_user_chat_safety_policy(scene="booking_assistant"),
+        }
+
+    def _build_user_chat_guardrails(self, *, scene: str) -> list[dict[str, str]]:
+        """Return the user-facing guardrails for chat and agent mode."""
+
+        ownership_detail = (
+            "只读取当前登录用户自己的订单、通知、评价与当前会话上下文，不会查询其他用户的信息。"
+            if scene == "customer_service"
+            else "只读取当前登录用户的订房上下文，以及系统公开展示的在线酒店、房型和价格信息。"
+        )
+        return [
+            {
+                "id": "ownership",
+                "label": "查询范围受限",
+                "description": ownership_detail,
+            },
+            {
+                "id": "write-guard",
+                "label": "不直接执行写操作",
+                "description": "取消订单、支付、开票等动作只提供说明、按钮和确认提示，最终仍由业务接口执行。",
+            },
+            {
+                "id": "non-fabrication",
+                "label": "禁止编造业务结果",
+                "description": "价格、库存、退款结果、会员权益和订单状态只以系统真实数据和业务规则为准。",
+            },
+        ]
+
+    def _build_user_chat_safety_policy(self, *, scene: str) -> dict[str, Any]:
+        """Return machine-readable guardrails for frontend display and tests."""
+
+        return {
+            "allow_write_operations": False,
+            "write_requires_user_confirmation": True,
+            "cross_user_access_forbidden": True,
+            "allowed_data_scope": (
+                "current_user_context_and_public_online_hotels"
+                if scene == "booking_assistant"
+                else "current_user_orders_notices_reviews"
+            ),
         }
 
     def _build_customer_service_action_response(

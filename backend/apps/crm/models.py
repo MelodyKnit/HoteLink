@@ -72,6 +72,13 @@ class Review(models.Model):
 
 class PointsLog(models.Model):
     """积分变动日志模型。"""
+    POINT_TYPE_CONSUME = "consume"
+    POINT_TYPE_MEMBER = "member"
+    POINT_TYPE_CHOICES = [
+        (POINT_TYPE_CONSUME, "消费积分"),
+        (POINT_TYPE_MEMBER, "会员积分"),
+    ]
+
     TYPE_CONSUME_REWARD = "consume_reward"
     TYPE_REVIEW_REWARD = "review_reward"
     TYPE_COUPON_EXCHANGE = "coupon_exchange"
@@ -88,9 +95,10 @@ class PointsLog(models.Model):
     user_id: int
     order_id: int
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="points_logs")
+    point_type = models.CharField(max_length=20, choices=POINT_TYPE_CHOICES, default=POINT_TYPE_CONSUME)
     log_type = models.CharField(max_length=30, choices=TYPE_CHOICES)
     points = models.IntegerField(help_text="正值为获得，负值为消耗")
-    balance = models.PositiveIntegerField(help_text="变动后积分余额")
+    balance = models.PositiveIntegerField(help_text="变动后对应类型积分余额")
     description = models.CharField(max_length=200)
     order = models.ForeignKey("bookings.BookingOrder", on_delete=models.SET_NULL, null=True, blank=True, related_name="points_logs")
     created_at = models.DateTimeField(auto_now_add=True)

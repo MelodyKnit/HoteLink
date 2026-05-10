@@ -186,8 +186,17 @@ def ensure_profile(user: User) -> UserProfile:
     return profile
 
 
-def add_points(user, points: int, log_type: str, description: str, order=None):
-    """给用户增加积分并记录日志，自动触发会员升级。"""
+def add_points(
+    user,
+    points: int,
+    log_type: str,
+    description: str,
+    order=None,
+    *,
+    point_type: str = PointsLog.POINT_TYPE_CONSUME,
+    also_member_points: bool = False,
+):
+    """Adjust split point balances and record the resulting ledger entries."""
     if points == 0:
         return
     with transaction.atomic():
@@ -198,18 +207,47 @@ def add_points(user, points: int, log_type: str, description: str, order=None):
             "status": UserProfile.STATUS_ACTIVE,
         }
         profile, _ = UserProfile.objects.select_for_update().get_or_create(user=user, defaults=defaults)
-        profile.points = max(0, profile.points + points)
-        profile.save(update_fields=["points", "updated_at"])
-        PointsLog.objects.create(
-            user=user,
-            log_type=log_type,
-            points=points,
-            balance=profile.points,
-            description=description,
-            order=order,
-        )
         old_level = profile.member_level
-        if profile.refresh_level() and old_level != profile.member_level:
+        update_fields = ["updated_at"]
+        logs: list[PointsLog] = []
+
+        if point_type == PointsLog.POINT_TYPE_CONSUME:
+            profile.consume_points = max(0, profile.consume_points + points)
+            profile.points = profile.consume_points
+            update_fields.extend(["consume_points", "points"])
+            logs.append(PointsLog(
+                user=user,
+                point_type=PointsLog.POINT_TYPE_CONSUME,
+                log_type=log_type,
+                points=points,
+                balance=profile.consume_points,
+                description=description,
+                order=order,
+            ))
+
+        member_delta = points if point_type == PointsLog.POINT_TYPE_MEMBER else 0
+        if also_member_points and points > 0:
+            member_delta += points
+        if member_delta > 0:
+            # 会员积分只记录成长值，兑换、取消、过期等消费侧动作不会扣减它。
+            profile.member_points += member_delta
+            update_fields.append("member_points")
+            logs.append(PointsLog(
+                user=user,
+                point_type=PointsLog.POINT_TYPE_MEMBER,
+                log_type=log_type,
+                points=member_delta,
+                balance=profile.member_points,
+                description=description,
+                order=order,
+            ))
+
+        if not logs:
+            return
+
+        profile.save(update_fields=update_fields)
+        PointsLog.objects.bulk_create(logs)
+        if member_delta > 0 and profile.refresh_level() and old_level != profile.member_level:
             level_name = dict(UserProfile.MEMBER_LEVEL_CHOICES).get(profile.member_level, profile.member_level)
             SystemNotice.objects.create(
                 user=user,
@@ -535,17 +573,16 @@ def record_ai_call_log(
         logger.exception("Failed to persist AI call log", extra={"scene": scene, "status": status})
 
 
-def persist_ai_chat_turn(
+def ensure_ai_chat_session(
     *,
     user: User,
     scene: str,
     question: str,
-    answer: str,
     session_id: int | None = None,
 ) -> ChatSession:
-    """持久化一轮 AI 对话（用户问题 + 助手回复），并维护会话统计。"""
+    """Load or create an AI chat session before assistant output is finalized."""
+
     normalized_question = (question or "").strip()
-    normalized_answer = (answer or "").strip()
     now = timezone.now()
 
     session = None
@@ -553,7 +590,7 @@ def persist_ai_chat_turn(
         session = ChatSession.objects.filter(id=session_id, user=user).first()
 
     if session is None:
-        title_source = normalized_question or normalized_answer or "新会话"
+        title_source = normalized_question or "新会话"
         session = ChatSession.objects.create(
             user=user,
             scene=scene,
@@ -572,7 +609,20 @@ def persist_ai_chat_turn(
         if update_fields:
             update_fields.append("updated_at")
             session.save(update_fields=update_fields)
+    return session
 
+
+def append_ai_chat_turn(
+    *,
+    session: ChatSession,
+    question: str,
+    answer: str,
+) -> ChatSession:
+    """Append the finalized user/assistant messages to an AI session."""
+
+    normalized_question = (question or "").strip()
+    normalized_answer = (answer or "").strip()
+    now = timezone.now()
     pending_messages = []
     if normalized_question:
         pending_messages.append(
@@ -598,6 +648,29 @@ def persist_ai_chat_turn(
     session.last_message_at = now
     session.save(update_fields=["message_count", "last_message_at", "updated_at"])
     return session
+
+
+def persist_ai_chat_turn(
+    *,
+    user: User,
+    scene: str,
+    question: str,
+    answer: str,
+    session_id: int | None = None,
+) -> ChatSession:
+    """持久化一轮 AI 对话（用户问题 + 助手回复），并维护会话统计。"""
+
+    session = ensure_ai_chat_session(
+        user=user,
+        scene=scene,
+        question=question,
+        session_id=session_id,
+    )
+    return append_ai_chat_turn(
+        session=session,
+        question=question,
+        answer=answer,
+    )
 
 
 def get_dict_payload() -> dict:
@@ -777,7 +850,9 @@ class BaseLoginView(APIView):
                     "nickname": profile.nickname,
                     "member_level": profile.member_level,
                     "avatar": profile.avatar,
-                    "points": profile.points,
+                    "points": profile.consume_points,
+                    "member_points": profile.member_points,
+                    "consume_points": profile.consume_points,
                 },
             }
         )
@@ -1681,13 +1756,15 @@ class UserOrdersPayView(APIView):
                 earned_points = int(base_points * Decimal(str(profile.points_multiplier))) if base_points > 0 else 0
                 if earned_points > 0:
                     order.points_earned = earned_points
-                    order.save(update_fields=["payment_status", "status", "paid_at", "points_earned", "updated_at"])
+                    order.member_points_earned = earned_points
+                    order.save(update_fields=["payment_status", "status", "paid_at", "points_earned", "member_points_earned", "updated_at"])
                     add_points(
                         request.user,
                         earned_points,
                         PointsLog.TYPE_CONSUME_REWARD,
                         f"订单 {order.order_no} 消费奖励（{profile.points_multiplier}x倍率）",
                         order=order,
+                        also_member_points=True,
                     )
                 else:
                     order.save(update_fields=["payment_status", "status", "paid_at", "updated_at"])
@@ -1811,12 +1888,13 @@ class UserOrdersCancelView(APIView):
                     status=UserCoupon.STATUS_USED,
                     used_order_id=order.id,
                 ).update(status=UserCoupon.STATUS_UNUSED, used_order=None, used_at=None)
-            # 已支付订单取消时回收积分
+            # 已支付订单取消时只回收可兑换的消费积分，会员积分保留成长记录。
             if was_paid and order.points_earned > 0:
                 add_points(
                     order.user, -order.points_earned, PointsLog.TYPE_CONSUME_REWARD,
                     f"订单 {order.order_no} 取消，回收消费积分",
                     order=order,
+                    point_type=PointsLog.POINT_TYPE_CONSUME,
                 )
                 order.points_earned = 0
                 order.save(update_fields=["points_earned"])
@@ -1862,13 +1940,13 @@ class UserReviewsCreateView(APIView):
             else:
                 points_earned = 0
             if points_earned > 0:
-                add_points(request.user, points_earned, PointsLog.TYPE_REVIEW_REWARD, f"评价订单 {order.order_no} 奖励", order=order)
+                add_points(request.user, points_earned, PointsLog.TYPE_REVIEW_REWARD, f"评价订单 {order.order_no} 消费积分奖励", order=order)
                 points_awarded = points_earned
                 SystemNotice.objects.create(
                     user=request.user,
                     notice_type=SystemNotice.TYPE_MEMBER,
                     title="评价积分奖励",
-                    content=f"感谢您对「{order.hotel.name}」的评价，已奖励 {points_earned} 积分！",
+                    content=f"感谢您对「{order.hotel.name}」的评价，已奖励 {points_earned} 消费积分！",
                 )
         return api_response(message="评价提交成功", data={"review_id": review.id, "score": review.score, "points_awarded": points_awarded})
 
@@ -1903,17 +1981,30 @@ class UserReviewsListView(APIView):
 
 
 class UserPointsLogsView(APIView):
-    """用户积分日志接口：返回真实积分变动记录。"""
+    """用户积分日志接口：返回会员积分与消费积分变动记录。"""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         profile = ensure_profile(request.user)
         queryset = PointsLog.objects.filter(user=request.user).order_by("-created_at")
+        point_type = request.query_params.get("point_type")
+        if point_type in {PointsLog.POINT_TYPE_CONSUME, PointsLog.POINT_TYPE_MEMBER}:
+            queryset = queryset.filter(point_type=point_type)
         page, page_size = get_page_params(request)
         page_queryset, total = paginate_queryset(queryset, page, page_size)
+        next_level = None
+        for code, label in sorted(UserProfile.MEMBER_LEVEL_CHOICES, key=lambda item: UserProfile.MEMBER_THRESHOLDS.get(item[0], 0)):
+            threshold = UserProfile.MEMBER_THRESHOLDS.get(code, 0)
+            if threshold > profile.member_points:
+                next_level = {"level": code, "label": label, "threshold": threshold, "remaining": threshold - profile.member_points}
+                break
         return api_response(data={
-            "current_points": profile.points,
+            "current_points": profile.consume_points,
+            "points": profile.consume_points,
+            "member_points": profile.member_points,
+            "consume_points": profile.consume_points,
             "member_level": profile.member_level,
+            "next_level": next_level,
             "items": PointsLogSerializer(page_queryset, many=True).data,
             "total": total,
         })
@@ -2021,8 +2112,14 @@ class UserAvailableCouponsView(APIView):
             result.append({
                 **CouponTemplateSerializer(tpl).data,
                 "already_claimed": claimed,
+                "can_exchange": profile.consume_points >= tpl.points_cost,
+                "point_type": PointsLog.POINT_TYPE_CONSUME if tpl.points_cost else "",
             })
-        return api_response(data={"items": result})
+        return api_response(data={
+            "items": result,
+            "consume_points": profile.consume_points,
+            "member_points": profile.member_points,
+        })
 
 
 class UserClaimCouponView(APIView):
@@ -2056,9 +2153,15 @@ class UserClaimCouponView(APIView):
                 return api_response(code=4001, message="已达领取上限", data=None, status_code=400)
 
             if tpl.points_cost > 0:
-                if profile.points < tpl.points_cost:
-                    return api_response(code=4001, message=f"积分不足，需要 {tpl.points_cost} 积分", data=None, status_code=400)
-                add_points(request.user, -tpl.points_cost, PointsLog.TYPE_COUPON_EXCHANGE, f"兑换优惠券「{tpl.name}」")
+                if profile.consume_points < tpl.points_cost:
+                    return api_response(code=4001, message=f"消费积分不足，需要 {tpl.points_cost} 消费积分", data=None, status_code=400)
+                add_points(
+                    request.user,
+                    -tpl.points_cost,
+                    PointsLog.TYPE_COUPON_EXCHANGE,
+                    f"兑换优惠券「{tpl.name}」",
+                    point_type=PointsLog.POINT_TYPE_CONSUME,
+                )
 
             valid_start = today
             valid_end = today + timedelta(days=tpl.valid_days)
@@ -2084,7 +2187,15 @@ class UserClaimCouponView(APIView):
                 title=f"优惠券已到账",
                 content=f"您已成功领取「{tpl.name}」{coupon_type_name}，有效期至 {valid_end.strftime('%Y-%m-%d')}，快去使用吧！",
             )
-            return api_response(message="领取成功", data=UserCouponSerializer(coupon).data)
+            profile.refresh_from_db()
+            return api_response(
+                message="领取成功",
+                data={
+                    **UserCouponSerializer(coupon).data,
+                    "consume_points": profile.consume_points,
+                    "member_points": profile.member_points,
+                },
+            )
 
 
 class UserOrderAvailableCouponsView(APIView):
@@ -2274,7 +2385,7 @@ class UserAIChatStreamView(APIView):
         service = AIChatService()
         started_at = time.perf_counter()
         try:
-            result = service.reply_customer_service(
+            prepared = service.prepare_user_chat_reply(
                 user=request.user,
                 scene=data["scene"],
                 question=data["question"],
@@ -2286,41 +2397,100 @@ class UserAIChatStreamView(APIView):
         except PromptSceneError as exc:
             return api_response(code=4002, message=str(exc), data=None, status_code=400)
 
-        scene = result["scene"]
-        answer = result["answer"] or fallback_ai_reply(scene)
-        ai_status = AICallLog.STATUS_SUCCESS if result["answer"] else AICallLog.STATUS_FAILED
-        latency_ms = int((time.perf_counter() - started_at) * 1000)
-        record_ai_call_log(
-            user=request.user,
-            scene=scene,
-            service=service,
-            result=result,
-            status=ai_status,
-            latency_ms=latency_ms,
-        )
-        booking_assistant = result.get("booking_assistant")
-        session = persist_ai_chat_turn(
+        scene = prepared["scene"]
+        booking_assistant = prepared.get("booking_assistant")
+        agent_state = prepared.get("agent_state")
+        if isinstance(agent_state, dict):
+            # Only expose the display-safe trace fields needed by the chat UI.
+            agent_state = {
+                key: agent_state[key]
+                for key in ("mode", "display_name", "summary", "thinking", "tool_steps", "guardrails")
+                if key in agent_state
+            } or None
+        session = ensure_ai_chat_session(
             user=request.user,
             scene=scene,
             question=data["question"],
-            answer=answer,
             session_id=data.get("session_id"),
         )
 
         def event_stream():
+            answer = ""
+            ai_status = AICallLog.STATUS_SUCCESS
+            error_message = ""
+
+            def emit(payload: dict) -> str:
+                return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
             try:
                 meta_payload = {"type": "meta", "scene": scene, "session_id": session.id}
                 if booking_assistant is not None:
                     meta_payload["booking_assistant"] = booking_assistant
-                yield f"data: {json.dumps(meta_payload, ensure_ascii=False)}\n\n"
+                if agent_state is not None:
+                    meta_payload["agent_state"] = agent_state
+                yield emit(meta_payload)
 
-                for chunk in service.iter_text_chunks(answer):
-                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk, 'done': False}, ensure_ascii=False)}\n\n"
-                yield f"data: {json.dumps({'type': 'done', 'content': '', 'done': True, 'session_id': session.id}, ensure_ascii=False)}\n\n"
-            except Exception:
-                fallback = fallback_ai_reply(scene)
-                yield f"data: {json.dumps({'type': 'chunk', 'content': fallback, 'done': False}, ensure_ascii=False)}\n\n"
-                yield f"data: {json.dumps({'type': 'done', 'content': '', 'done': True}, ensure_ascii=False)}\n\n"
+                call_mode = prepared.get("call_mode")
+                if call_mode == "llm":
+                    stream = service.stream_chat_completion(
+                        prepared["messages"],
+                        temperature=float(prepared.get("temperature") or 0.2),
+                    )
+                    for chunk in stream:
+                        token = service.extract_stream_text_delta(chunk)
+                        if token:
+                            answer += token
+                            yield emit({"type": "chunk", "content": token, "done": False})
+                        if service.is_stream_finished(chunk):
+                            break
+                    if not answer.strip():
+                        ai_status = AICallLog.STATUS_FAILED
+                        answer = fallback_ai_reply(scene)
+                        yield emit({"type": "chunk", "content": answer, "done": False})
+                else:
+                    planned_answer = str(prepared.get("answer") or "")
+                    if not planned_answer:
+                        ai_status = AICallLog.STATUS_FAILED
+                        planned_answer = fallback_ai_reply(scene)
+                    answer = planned_answer
+                    for chunk in service.iter_text_chunks(answer):
+                        yield emit({"type": "chunk", "content": chunk, "done": False})
+
+                yield emit({"type": "done", "content": "", "done": True, "session_id": session.id})
+            except Exception as exc:
+                logger.exception("AI chat stream failed", extra={"scene": scene})
+                ai_status = AICallLog.STATUS_FAILED
+                error_message = str(exc)
+                if not answer.strip():
+                    answer = fallback_ai_reply(scene)
+                    yield emit({"type": "chunk", "content": answer, "done": False})
+                yield emit({"type": "done", "content": "", "done": True, "session_id": session.id})
+            finally:
+                latency_ms = int((time.perf_counter() - started_at) * 1000)
+                try:
+                    record_ai_call_log(
+                        user=request.user,
+                        scene=scene,
+                        service=service,
+                        result={
+                            "scene": scene,
+                            "answer": answer,
+                            "booking_assistant": booking_assistant,
+                        },
+                        status=ai_status,
+                        error_message=error_message,
+                        latency_ms=latency_ms,
+                    )
+                except Exception:
+                    logger.exception("Failed to persist AI stream call log", extra={"scene": scene})
+                try:
+                    append_ai_chat_turn(
+                        session=session,
+                        question=data["question"],
+                        answer=answer,
+                    )
+                except Exception:
+                    logger.exception("Failed to persist AI stream chat turn", extra={"scene": scene, "session_id": session.id})
 
         response = StreamingHttpResponse(event_stream(), content_type="text/event-stream; charset=utf-8")
         response["Cache-Control"] = "no-cache"
@@ -2869,7 +3039,7 @@ class AdminOrdersChangeStatusView(APIView):
                 if append_order_operator_remark(order, note):
                     update_fields.append("operator_remark")
 
-            # 管理员取消订单时归还库存、优惠券、处理退款
+            # 管理员取消订单时归还库存、优惠券、处理退款，并回收消费积分。
             if target_status == BookingOrder.STATUS_CANCELLED:
                 nights = (order.check_out_date - order.check_in_date).days
                 date_range = [order.check_in_date + timedelta(days=i) for i in range(nights)]
@@ -2893,6 +3063,7 @@ class AdminOrdersChangeStatusView(APIView):
                             order.user, -order.points_earned, PointsLog.TYPE_CONSUME_REWARD,
                             f"订单 {order.order_no} 管理员取消，回收消费积分",
                             order=order,
+                            point_type=PointsLog.POINT_TYPE_CONSUME,
                         )
                         order.points_earned = 0
                         update_fields.append("points_earned")
@@ -3311,6 +3482,8 @@ class AdminUsersView(APIView):
         "role", "-role",
         "member_level", "-member_level",
         "points", "-points",
+        "member_points", "-member_points",
+        "consume_points", "-consume_points",
         "status", "-status",
         "created_at", "-created_at",
         "updated_at", "-updated_at",
@@ -3486,13 +3659,11 @@ class AdminUserUpdateView(APIView):
         if "member_level" in data:
             new_level = data["member_level"]
             new_threshold = UserProfile.MEMBER_THRESHOLDS.get(new_level, 0)
-            old_threshold = UserProfile.MEMBER_THRESHOLDS.get(profile.member_level, 0)
             profile.member_level = new_level
             update_fields.append("member_level")
-            # 降级时将积分调整到新等级的阈值，防止 refresh_level 自动恢复
-            if new_threshold < old_threshold and profile.points >= old_threshold:
-                profile.points = new_threshold
-                update_fields.append("points")
+            if profile.member_points < new_threshold:
+                profile.member_points = new_threshold
+                update_fields.append("member_points")
         profile.save(update_fields=update_fields)
         return api_response(message="用户信息已更新", data=UserProfileSerializer(profile).data)
 
@@ -4296,8 +4467,9 @@ class AdminMemberOverviewView(APIView):
 
     def get(self, request):
         from django.db.models import Count
+        member_queryset = UserProfile.objects.filter(role=UserProfile.ROLE_USER)
         level_counts = dict(
-            UserProfile.objects.filter(role=UserProfile.ROLE_USER)
+            member_queryset
             .values("member_level")
             .annotate(cnt=Count("id"))
             .values_list("member_level", "cnt")
@@ -4309,11 +4481,21 @@ class AdminMemberOverviewView(APIView):
                 "label": label,
                 "count": level_counts.get(code, 0),
                 "threshold": UserProfile.MEMBER_THRESHOLDS.get(code, 0),
+                "member_points_threshold": UserProfile.MEMBER_THRESHOLDS.get(code, 0),
                 "discount_rate": UserProfile.MEMBER_DISCOUNT_RATE.get(code, 1.0),
                 "points_multiplier": UserProfile.MEMBER_POINTS_MULTIPLIER.get(code, 1.0),
             })
-        total_users = UserProfile.objects.filter(role=UserProfile.ROLE_USER).count()
-        return api_response(data={"levels": levels, "total_users": total_users})
+        totals = member_queryset.aggregate(
+            total_member_points=Sum("member_points"),
+            total_consume_points=Sum("consume_points"),
+        )
+        total_users = member_queryset.count()
+        return api_response(data={
+            "levels": levels,
+            "total_users": total_users,
+            "total_member_points": totals["total_member_points"] or 0,
+            "total_consume_points": totals["total_consume_points"] or 0,
+        })
 
 
 class AdminSystemResetView(APIView):

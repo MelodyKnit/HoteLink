@@ -108,6 +108,8 @@
             <div class="flex justify-between"><dt class="text-slate-400">原价</dt><dd>¥{{ formatMoney(order.original_amount as number) }}</dd></div>
             <div class="flex justify-between"><dt class="text-slate-400">优惠</dt><dd class="text-red-500">-¥{{ formatMoney(order.discount_amount as number) }}</dd></div>
             <div class="flex justify-between font-semibold"><dt class="text-slate-600">实付</dt><dd class="text-teal-700">¥{{ formatMoney(order.pay_amount as number) }}</dd></div>
+            <div v-if="Number(order.points_earned || 0) > 0" class="flex justify-between"><dt class="text-slate-400">本单消费积分</dt><dd class="font-medium text-teal-700">+{{ Number(order.points_earned || 0).toLocaleString() }}</dd></div>
+            <div v-if="Number(order.member_points_earned || 0) > 0" class="flex justify-between"><dt class="text-slate-400">本单会员积分</dt><dd class="font-medium text-amber-700">+{{ Number(order.member_points_earned || 0).toLocaleString() }}</dd></div>
             <div class="flex justify-between"><dt class="text-slate-400">支付状态</dt><dd><StatusBadge :label="PAYMENT_STATUS_MAP[order.payment_status as string] || String(order.payment_status)" :type="order.payment_status === 'paid' ? 'success' : order.payment_status === 'refunded' ? 'danger' : order.payment_status === 'refunding' ? 'warning' : 'warning'" /></dd></div>
           </dl>
         </div>

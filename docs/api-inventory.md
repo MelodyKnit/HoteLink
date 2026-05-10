@@ -1,6 +1,5 @@
 # HoteLink API 路由清单（源码自动生成）
 
-- 生成时间：2026-05-10 00:59:42
 - 来源文件：`backend/apps/api/urls.py` + `backend/apps/api/views.py`
 - 总路由数：**122**
 

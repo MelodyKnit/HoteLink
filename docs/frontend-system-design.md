@@ -17,7 +17,7 @@
 > - AI 集成：[ai-integration.md](./ai-integration.md)
 > - 功能规划：[feature-improvements.md](./feature-improvements.md)
 
-> 状态说明（2026-05-10）：本文件包含“已实现 + 设计中”两类内容。路由与接口的最新实现口径请同时参考 [source-of-truth.md](./source-of-truth.md) 与 [api-inventory.md](./api-inventory.md)。
+> 状态说明：本文件包含“已实现 + 设计中”两类内容。路由与接口的最新实现口径请同时参考 [source-of-truth.md](./source-of-truth.md) 与 [api-inventory.md](./api-inventory.md)。
 
 实现状态标记：已实现 = 页面与路由均已落地，设计中 = 仅有设计规划
 
@@ -351,6 +351,7 @@ flowchart TD
 
 - 用户头像与昵称
 - 会员等级
+- 会员积分与消费积分概览入口
 - 待支付 / 待入住 / 已完成订单入口
 - 优惠券入口
 - 发票入口
@@ -381,6 +382,7 @@ flowchart TD
 - 入住人信息
 - 费用明细
 - 支付信息
+- 本单获得的消费积分与会员积分
 - 退款信息
 - 发票状态与已完成订单开票入口
 
@@ -404,7 +406,10 @@ flowchart TD
 核心模块：
 
 - 会员等级
-- 成长值
+- 会员积分成长值
+- 消费积分余额
+- 双类型积分流水筛选
+- 消费积分兑换优惠券
 - 可用权益
 - 会员专属价格
 - 升级说明
@@ -416,6 +421,7 @@ flowchart TD
 - 可用优惠券
 - 已使用优惠券
 - 已过期优惠券
+- 消费积分余额与兑券成本提示
 - 权益包
 
 #### 15. 发票管理页
@@ -569,7 +575,7 @@ flowchart TD
 > | — | 初始化设置页 | `/admin/setup` | `InitSetupView.vue` | ✅ 已实现（文档未列设计） |
 > | — | 404 页 | `/admin/404` | `NotFoundView.vue` | ✅ 已实现 |
 
-补充（2026-04）：
+补充：
 
 - `OrderListView.vue`、`UserListView.vue`、`EmployeeListView.vue`、`ReportView.vue` 已统一接入可复用排序交互：顶部排序下拉 + `DataTable` 表头排序双向同步。
 - 上述页面列表请求均透传 `ordering` 参数，与后端白名单排序保持一致。
@@ -606,7 +612,7 @@ flowchart TD
 - 这是管理端最核心的总览页
 - 要有图表、统计卡片、待办模块和快捷入口
 
-实现补充（2026-04）：
+实现补充：
 
 - 图表日期选择器已提取到页面共享区域，ECharts 实例在组件卸载时正确销毁以避免内存泄漏
 - 入住率计算已修正为按实际在住房间数 / 总库存计算
@@ -718,7 +724,7 @@ flowchart TD
 - 押金收取
 - 入住确认
 
-实现补充（2026-04）：
+实现补充：
 
 - 已落地独立流程页：`/admin/frontdesk/check-in`
 - 与订单管理页联动：支持从订单列表/详情快捷跳转并自动预选订单
@@ -736,7 +742,7 @@ flowchart TD
 - 发票处理
 - 退款或补差
 
-实现补充（2026-04）：
+实现补充：
 
 - 已落地独立流程页：`/admin/frontdesk/check-out`
 - 支持额外消费补录、押金抵扣登记、结算备注
@@ -753,7 +759,7 @@ flowchart TD
 - 房间切换
 - 差价结算
 
-实现补充（2026-04）：
+实现补充：
 
 - 已落地独立流程页：`/admin/frontdesk/extend-switch`
 - 页面内双流程 Tab（续住/换房）
@@ -777,6 +783,7 @@ flowchart TD
 - 客户搜索
 - 历史入住记录
 - 消费记录
+- 会员积分 / 消费积分分列展示与排序
 - 偏好信息
 - 黑名单 / 风险标记
 
@@ -785,7 +792,8 @@ flowchart TD
 核心模块：
 
 - 会员等级
-- 成长值
+- 会员积分成长值与等级门槛
+- 消费积分余额运营汇总
 - 权益配置
 - 会员行为分析
 
@@ -867,7 +875,7 @@ flowchart TD
 
 - 券模板
 - 发放策略
-- 使用规则
+- 使用规则与消费积分成本
 - 核销统计
 
 #### 24. 内容管理页
@@ -1066,7 +1074,7 @@ flowchart LR
 - 在线支付
 - 订单状态追踪
 - 发票与报销支持
-- 会员与优惠券体系
+- 会员积分与消费积分分离的会员、优惠券体系
 - 评价与反馈机制
 - 客服与帮助中心
 - 地图与交通信息
@@ -1104,8 +1112,11 @@ flowchart LR
 - 调用方式：
 - 标准接口：`POST /api/v1/user/ai/chat`
 - 流式接口：`POST /api/v1/user/ai/chat/stream`
-- 流式协议：SSE，前端先消费 `meta` 事件中的结构化订房数据，再按 `chunk/done` 逐段拼接回答文本
+- 流式协议：SSE，事件顺序为 `meta -> chunk -> done`
+- 元数据消费：前端先消费 `meta` 事件中的 `booking_assistant`、`scene`、`session_id` 与可选 `agent_state`，再按后续 `chunk/done` 事件拼接正文
 - 展示能力：AI 回复支持 Markdown 渲染（加粗、列表、代码块、引用等）
+- 流式体验：在正文 chunk 到达后由前端继续拆成细粒度字符，形成更接近 ChatGPT/OpenClaw 的连续打字机输出，同时保留业务动作卡片的即时可用性
+- 过程卡片：当 `meta.agent_state` 存在时，消息顶部展示“分析中 / 已完成分析”卡片；只展示可理解的摘要、阶段说明与安全边界，不展示系统提示词或原始内部推理
 - 订房交互：支持在聊天消息中直接渲染城市、酒店、房型动作卡片，点击后继续对话或直接跳转 `/booking`
 - 客服交互：客服场景支持结构化快捷动作（订单详情、去支付、取消引导、发票、通知、帮助中心、切换订房助手）
 - 评价交互：客服场景识别“评价/点评”问题时，会返回“查看我的评价”动作（`/my/reviews`）
@@ -1114,10 +1125,11 @@ flowchart LR
 - 问题续聊：跨助手跳转时通过 `query.ask` 透传原问题，目标页面自动发送该问题并移除一次性参数
 - 页面联动：当 AI 动作跳转到订单详情并携带 `source=ai&action=cancel` 时，会自动打开取消弹窗并清理一次性参数
 - 长对话压缩：前端自动压缩早期消息，生成 `conversation_summary` 并随聊天请求传给后端
+- 安全边界：前端不展示内部推理或系统提示词；查询范围控制、写操作限制与敏感动作确认由后端规则和业务按钮共同约束
 
 交互原则：
 
-- 优先显示流式回答，降低等待感
+- 优先显示过程卡片和流式回答，降低等待感
 - 渲染前进行基础 HTML 转义，避免将原始 HTML 直接注入页面
 - 对异常场景保留兜底提示文案，避免界面停留在“加载中”
 - 订房上下文由前端随对话一起携带，支持用户先选城市，再选酒店，再一键进入订单填写页
@@ -1181,7 +1193,7 @@ const { toastVisible, toastMessage, toastType, showToast, closeToast } = useToas
 </template>
 ```
 
-前端错误处理已全面加固（2026-04-20）：
+前端错误处理补充：
 
 - **user-web**: 6 个视图增加 API 错误反馈（NotificationView, ProfileView, OrderListView, ReviewListView, HomeView, HotelCompareView），统一使用 useToast 或 error.value 展示失败信息
 - **admin-web**: 3 个视图增加 API 错误反馈（AISettingsView, UserListView, ReportView），统一使用 showToast 展示失败信息

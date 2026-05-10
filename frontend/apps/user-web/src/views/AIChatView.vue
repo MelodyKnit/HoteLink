@@ -88,15 +88,87 @@
         class="flex animate-fadeIn" :class="msg.role === 'user' ? 'justify-end' : 'justify-start'">
         <div class="max-w-[85%] rounded-2xl px-4 py-3 text-sm"
           :class="msg.role === 'user' ? 'bg-brand text-white rounded-br-sm shadow-md' : 'bg-white text-gray-700 shadow-md rounded-bl-sm'">
-          <!-- Loading State -->
-          <div v-if="msg.loading" class="flex gap-1">
-            <span class="inline-block h-2 w-2 animate-bounce rounded-full bg-gray-400" style="animation-delay: 0ms" />
-            <span class="inline-block h-2 w-2 animate-bounce rounded-full bg-gray-400" style="animation-delay: 100ms" />
-            <span class="inline-block h-2 w-2 animate-bounce rounded-full bg-gray-400" style="animation-delay: 200ms" />
-          </div>
           <!-- Assistant Response -->
-          <template v-else-if="msg.role === 'assistant'">
-            <div class="ai-markdown space-y-2" v-html="renderMd(msg.content)" />
+          <template v-if="msg.role === 'assistant'">
+            <div v-if="msg.trace" class="mb-3">
+              <button
+                v-if="!msg.loading && !isAssistantTraceExpanded(msg.id)"
+                @click="toggleAssistantTrace(msg.id)"
+                class="inline-flex items-center gap-2 text-sm font-medium text-slate-400 transition hover:text-slate-600"
+              >
+                <span>已完成分析</span>
+                <span class="text-lg leading-none">›</span>
+              </button>
+              <div
+                v-else
+                class="rounded-[24px] border border-slate-200/80 bg-gradient-to-br from-slate-50 via-white to-slate-100 p-4 shadow-sm"
+              >
+                <div class="flex items-start justify-between gap-3">
+                  <div class="min-w-0">
+                    <p class="text-[11px] font-medium uppercase tracking-[0.12em] text-slate-400">{{ msg.trace.title }}</p>
+                    <p class="mt-1 text-lg font-semibold leading-8 text-slate-900">
+                      {{ msg.loading ? msg.trace.statusTitle : '已完成分析' }}
+                    </p>
+                    <p v-if="msg.trace.summary" class="mt-2 text-sm leading-6 text-slate-600">
+                      {{ msg.trace.summary }}
+                    </p>
+                  </div>
+                  <button
+                    v-if="!msg.loading"
+                    @click="toggleAssistantTrace(msg.id)"
+                    class="shrink-0 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-500 transition hover:border-slate-300 hover:text-slate-700"
+                  >
+                    收起
+                  </button>
+                  <span
+                    v-else
+                    class="shrink-0 rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-xs font-medium text-violet-600"
+                  >
+                    分析中
+                  </span>
+                </div>
+                <div v-if="msg.trace.stages.length" class="mt-4 space-y-3">
+                  <section
+                    v-for="stage in msg.trace.stages"
+                    :key="stage.id"
+                    class="rounded-2xl border border-white/80 bg-white/70 p-3"
+                  >
+                    <div class="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                      <span
+                        class="flex h-7 w-7 items-center justify-center rounded-full border text-sm"
+                        :class="resolveTraceStageBadgeClass(stage.tone)"
+                      >
+                        {{ resolveTraceStageIcon(stage.tone) }}
+                      </span>
+                      <span>{{ stage.title }}</span>
+                    </div>
+                    <div class="mt-3 border-l border-slate-200/80 pl-3 space-y-2">
+                      <p
+                        v-for="(item, itemIndex) in stage.items"
+                        :key="`${stage.id}-${itemIndex}`"
+                        class="rounded-full border border-white/90 bg-white px-3 py-2 text-sm leading-6 text-slate-600 shadow-sm break-words"
+                      >
+                        {{ item }}
+                      </p>
+                    </div>
+                  </section>
+                </div>
+              </div>
+            </div>
+            <div v-if="msg.content" class="ai-markdown space-y-2" v-html="renderMd(msg.content)" />
+            <div v-if="msg.loading && !msg.content" class="flex gap-1">
+              <span class="inline-block h-2 w-2 animate-bounce rounded-full bg-gray-400" style="animation-delay: 0ms" />
+              <span class="inline-block h-2 w-2 animate-bounce rounded-full bg-gray-400" style="animation-delay: 100ms" />
+              <span class="inline-block h-2 w-2 animate-bounce rounded-full bg-gray-400" style="animation-delay: 200ms" />
+            </div>
+            <div v-if="msg.loading && msg.content" class="mt-2 inline-flex items-center gap-2 rounded-full bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-600">
+              <span>AI 正在继续整理回复</span>
+              <span class="flex gap-1">
+                <span class="inline-block h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400" style="animation-delay: 0ms" />
+                <span class="inline-block h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400" style="animation-delay: 120ms" />
+                <span class="inline-block h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400" style="animation-delay: 240ms" />
+              </span>
+            </div>
             <div v-if="msg.stopped" class="mt-2 inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
               已停止回复
             </div>
@@ -252,6 +324,13 @@ import { useRouter } from 'vue-router'
 import { useRoute } from 'vue-router'
 import { marked } from 'marked'
 import { userAiApi } from '@hotelink/api'
+import type { AssistantTrace, AssistantTraceStage } from '@hotelink/utils'
+import {
+  normalizeAssistantTrace,
+  resolveAssistantTypingBurstSize,
+  resolveAssistantTypingDelayMs,
+  splitAssistantStreamText,
+} from '@hotelink/utils'
 import { useConfirm, useToast } from '@hotelink/ui'
 
 const router = useRouter()
@@ -269,11 +348,16 @@ const backendSessionId = ref<number | null>(null)
 const showScrollToBottom = ref(false)
 const quickActionsExpanded = ref(false)
 const assistantOptionsExpanded = ref<Record<string, boolean>>({})
+const assistantTraceExpanded = ref<Record<string, boolean>>({})
 const conversationSummary = ref('')
 const activeStreamController = ref<AbortController | null>(null)
 const activeUserMessageId = ref<string | null>(null)
 const activeAssistantMessageId = ref<string | null>(null)
 const activeStreamToken = ref(0)
+let activeTypingTimer: number | null = null
+let activeTypingQueue: string[] = []
+let activeTypingMessageId: string | null = null
+let activeTypingResolvers: Array<() => void> = []
 
 interface ChatHistory {
   timestamp: number
@@ -322,6 +406,7 @@ interface Msg {
   loading?: boolean
   sendState?: 'sending' | 'failed' | 'sent'
   bookingAssistant?: BookingAssistant | null
+  trace?: AssistantTrace | null
   stopped?: boolean
 }
 
@@ -335,7 +420,13 @@ function createMsgId(role: 'user' | 'assistant'): string {
 function createMessage(
   role: 'user' | 'assistant',
   content: string,
-  extras?: { loading?: boolean; bookingAssistant?: BookingAssistant | null; sendState?: 'sending' | 'failed' | 'sent'; stopped?: boolean }
+  extras?: {
+    loading?: boolean
+    bookingAssistant?: BookingAssistant | null
+    trace?: AssistantTrace | null
+    sendState?: 'sending' | 'failed' | 'sent'
+    stopped?: boolean
+  }
 ): Msg {
   return {
     id: createMsgId(role),
@@ -344,6 +435,7 @@ function createMessage(
     loading: extras?.loading,
     sendState: extras?.sendState,
     bookingAssistant: extras?.bookingAssistant,
+    trace: extras?.trace,
     stopped: extras?.stopped,
   }
 }
@@ -366,6 +458,7 @@ function normalizeMessages(raw: unknown): Msg[] {
         ? record.sendState
         : undefined,
       bookingAssistant: record.bookingAssistant || null,
+      trace: normalizeAssistantTrace((record as Record<string, unknown>).trace, record.bookingAssistant || undefined),
       stopped: record.stopped === true ? true : undefined,
     })
   }
@@ -452,6 +545,45 @@ function toggleAssistantOptions(messageId: string) {
     ...assistantOptionsExpanded.value,
     [messageId]: !isAssistantOptionsExpanded(messageId),
   }
+}
+
+function isAssistantTraceExpanded(messageId: string): boolean {
+  return assistantTraceExpanded.value[messageId] === true
+}
+
+function setAssistantTraceExpanded(messageId: string, expanded: boolean) {
+  assistantTraceExpanded.value = {
+    ...assistantTraceExpanded.value,
+    [messageId]: expanded,
+  }
+}
+
+function toggleAssistantTrace(messageId: string) {
+  setAssistantTraceExpanded(messageId, !isAssistantTraceExpanded(messageId))
+}
+
+function attachAssistantTrace(message: Msg, trace: AssistantTrace | null, options?: { expanded?: boolean }) {
+  if (!trace) return
+  message.trace = trace
+  if (options?.expanded === true) {
+    setAssistantTraceExpanded(message.id, true)
+  }
+}
+
+function resolveTraceStageIcon(tone: AssistantTraceStage['tone']): string {
+  if (tone === 'lookup') return '◌'
+  if (tone === 'guardrail') return '✓'
+  return '◍'
+}
+
+function resolveTraceStageBadgeClass(tone: AssistantTraceStage['tone']): string {
+  if (tone === 'lookup') {
+    return 'border-sky-200 bg-sky-50 text-sky-600'
+  }
+  if (tone === 'guardrail') {
+    return 'border-emerald-200 bg-emerald-50 text-emerald-600'
+  }
+  return 'border-violet-200 bg-violet-50 text-violet-600'
 }
 
 function buildConversationSummarySnippet(items: Msg[]): string {
@@ -637,6 +769,7 @@ function restoreHistory(idx: number) {
   messages.value = normalizeMessages(history.messages).filter(m => !m.loading)
   bookingContext.value = isBookingMode.value ? { ...history.bookingContext } : {}
   backendSessionId.value = Number.isFinite(Number(history.backendSessionId)) ? Number(history.backendSessionId) : null
+  assistantTraceExpanded.value = {}
   showHistoryPanel.value = false
   scrollBottom()
   
@@ -667,6 +800,7 @@ function clearChat() {
   backendSessionId.value = null
   conversationSummary.value = ''
   assistantOptionsExpanded.value = {}
+  assistantTraceExpanded.value = {}
   quickActionsExpanded.value = false
   input.value = ''
   showClearConfirm.value = false
@@ -770,6 +904,87 @@ function getActiveAssistantMessage(): Msg | null {
   return messages.value.find((item) => item.id === messageId && item.role === 'assistant') || null
 }
 
+function flushTypingResolvers() {
+  if (!activeTypingResolvers.length) return
+  const resolvers = [...activeTypingResolvers]
+  activeTypingResolvers = []
+  for (const resolve of resolvers) {
+    resolve()
+  }
+}
+
+function waitForAssistantTypingDrain(): Promise<void> {
+  if (!activeTypingQueue.length && activeTypingTimer === null) {
+    return Promise.resolve()
+  }
+  return new Promise((resolve) => {
+    activeTypingResolvers.push(resolve)
+  })
+}
+
+function clearAssistantTypingState() {
+  if (activeTypingTimer !== null) {
+    window.clearTimeout(activeTypingTimer)
+    activeTypingTimer = null
+  }
+  activeTypingQueue = []
+  activeTypingMessageId = null
+  flushTypingResolvers()
+}
+
+function runAssistantTypingLoop() {
+  if (activeTypingTimer !== null || !activeTypingQueue.length || !activeTypingMessageId) {
+    if (!activeTypingQueue.length && activeTypingTimer === null) {
+      flushTypingResolvers()
+    }
+    return
+  }
+
+  const pendingCount = activeTypingQueue.length
+  activeTypingTimer = window.setTimeout(() => {
+    activeTypingTimer = null
+
+    const messageId = activeTypingMessageId
+    if (!messageId) {
+      flushTypingResolvers()
+      return
+    }
+
+    const assistantMessage = messages.value.find((item) => item.id === messageId && item.role === 'assistant') || null
+    if (!assistantMessage) {
+      clearAssistantTypingState()
+      return
+    }
+
+    const stickToBottom = isNearBottom()
+    const burstSize = resolveAssistantTypingBurstSize(activeTypingQueue.length)
+    const nextText = activeTypingQueue.splice(0, burstSize).join('')
+    assistantMessage.content += nextText
+
+    if (stickToBottom) {
+      scrollBottom('auto')
+    } else {
+      showScrollToBottom.value = true
+    }
+
+    if (activeTypingQueue.length) {
+      runAssistantTypingLoop()
+      return
+    }
+
+    flushTypingResolvers()
+  }, resolveAssistantTypingDelayMs(pendingCount))
+}
+
+// 前端把 SSE chunk 再拆成细粒度字符，模拟类似 ChatGPT 的连续输出体验。
+function queueAssistantTyping(messageId: string, chunk: string) {
+  const segments = splitAssistantStreamText(chunk)
+  if (!segments.length) return
+  activeTypingMessageId = messageId
+  activeTypingQueue.push(...segments)
+  runAssistantTypingLoop()
+}
+
 function finalizeInterruptedMessage() {
   const assistantMessage = getActiveAssistantMessage()
   if (!assistantMessage) return
@@ -788,6 +1003,7 @@ function resetActiveStream(options?: { invalidate?: boolean }) {
   if (options?.invalidate) {
     invalidateActiveStream()
   }
+  clearAssistantTypingState()
   if (activeUserMessageId.value) {
     updateUserSendState(activeUserMessageId.value, 'sent')
   }
@@ -801,6 +1017,7 @@ function resetActiveStream(options?: { invalidate?: boolean }) {
 
 function stopGenerating() {
   if (!sending.value) return
+  clearAssistantTypingState()
   updateUserSendState(activeUserMessageId.value || '', 'sent')
   finalizeInterruptedMessage()
   invalidateActiveStream()
@@ -917,6 +1134,7 @@ async function sendMessage(text?: string, contextPatch?: Record<string, unknown>
   const placeholderMessage = createMessage('assistant', '', { loading: true })
   messages.value.push(placeholderMessage)
   activeAssistantMessageId.value = placeholderMessage.id
+  clearAssistantTypingState()
   scrollBottom()
   sending.value = true
   const requestToken = activeStreamToken.value + 1
@@ -926,6 +1144,8 @@ async function sendMessage(text?: string, contextPatch?: Record<string, unknown>
 
   let receivedAny = false
   let pendingBookingAssistant: BookingAssistant | null = null
+  let pendingAssistantTrace: AssistantTrace | null = null
+
   try {
     for await (const event of userAiApi.chatStream({
       scene: scene.value,
@@ -937,13 +1157,23 @@ async function sendMessage(text?: string, contextPatch?: Record<string, unknown>
     }, { signal: controller.signal })) {
       if (requestToken !== activeStreamToken.value) return
       if (event.type === 'meta') {
-        pendingBookingAssistant = (event.booking_assistant as BookingAssistant) || null
+        // 先消费元数据，保证过程卡片和快捷动作能先于正文显示。
+        pendingBookingAssistant = event.booking_assistant && typeof event.booking_assistant === 'object'
+          ? event.booking_assistant as unknown as BookingAssistant
+          : null
         const incomingSessionId = Number(event.session_id)
         if (Number.isFinite(incomingSessionId) && incomingSessionId > 0) {
           backendSessionId.value = incomingSessionId
         }
         if (isBookingMode.value && pendingBookingAssistant?.context) {
           bookingContext.value = { ...pendingBookingAssistant.context }
+        }
+        pendingAssistantTrace = normalizeAssistantTrace(event.agent_state, pendingBookingAssistant)
+        const assistantMessage = getActiveAssistantMessage()
+        if (assistantMessage) {
+          assistantMessage.bookingAssistant = pendingBookingAssistant
+          attachAssistantTrace(assistantMessage, pendingAssistantTrace, { expanded: assistantMessage.loading === true })
+          scrollBottom('auto')
         }
         continue
       }
@@ -954,31 +1184,32 @@ async function sendMessage(text?: string, contextPatch?: Record<string, unknown>
       if (Number.isFinite(incomingSessionId) && incomingSessionId > 0) {
         backendSessionId.value = incomingSessionId
       }
-      if (!receivedAny) {
-        const stickToBottom = isNearBottom()
-        messages.value.pop()
-        const assistantMessage = createMessage('assistant', '', { bookingAssistant: pendingBookingAssistant })
-        messages.value.push(assistantMessage)
-        activeAssistantMessageId.value = assistantMessage.id
-        receivedAny = true
-        if (stickToBottom) {
-          scrollBottom()
-        } else {
-          showScrollToBottom.value = true
-        }
-      }
+      const assistantMessage = getActiveAssistantMessage()
+      if (!assistantMessage) throw new Error('missing assistant message')
+      assistantMessage.bookingAssistant = pendingBookingAssistant
+      attachAssistantTrace(assistantMessage, pendingAssistantTrace)
       if (chunk) {
-        const stickToBottom = isNearBottom()
-        messages.value[messages.value.length - 1].content += chunk
-        if (stickToBottom) {
-          scrollBottom()
-        } else {
-          showScrollToBottom.value = true
-        }
+        receivedAny = true
+        queueAssistantTyping(assistantMessage.id, chunk)
       }
-      if (isDone) break
+      if (isDone) {
+        await waitForAssistantTypingDrain()
+        assistantMessage.loading = false
+        if (assistantMessage.trace) {
+          setAssistantTraceExpanded(assistantMessage.id, false)
+        }
+        break
+      }
     }
-    if (!receivedAny) throw new Error('no reply')
+    const assistantMessage = getActiveAssistantMessage()
+    const hasInteractivePayload = !!assistantMessage?.bookingAssistant?.options?.length || !!assistantMessage?.trace
+    if ((!receivedAny && !hasInteractivePayload) || !assistantMessage) throw new Error('no reply')
+    assistantMessage.loading = false
+    assistantMessage.bookingAssistant = pendingBookingAssistant
+    attachAssistantTrace(assistantMessage, pendingAssistantTrace)
+    if (!assistantMessage.content.trim() && !assistantMessage.bookingAssistant?.options?.length) {
+      assistantMessage.content = '我先把可确认的信息整理到这里，您可以继续补充问题。'
+    }
     updateUserSendState(userMessageId, 'sent')
     if (!isBookingMode.value || (!pendingBookingAssistant && !carryBookingContext)) {
       bookingContext.value = {}
@@ -991,8 +1222,20 @@ async function sendMessage(text?: string, contextPatch?: Record<string, unknown>
       showToast('已停止 AI 回复', 'info')
       return
     }
+    if (receivedAny) {
+      await waitForAssistantTypingDrain()
+    }
     if (!receivedAny) {
       messages.value.pop()
+    } else {
+      const assistantMessage = getActiveAssistantMessage()
+      if (assistantMessage) {
+        assistantMessage.loading = false
+        attachAssistantTrace(assistantMessage, pendingAssistantTrace)
+        if (!assistantMessage.content.trim()) {
+          assistantMessage.content = '抱歉，这次回复中断了，请重试。'
+        }
+      }
     }
     updateUserSendState(userMessageId, 'failed')
     showToast('消息发送失败，可点击右侧重发', 'warning')
@@ -1004,6 +1247,7 @@ async function sendMessage(text?: string, contextPatch?: Record<string, unknown>
       sending.value = false
     }
     if (activeStreamToken.value === requestToken) {
+      clearAssistantTypingState()
       activeStreamController.value = null
       activeUserMessageId.value = null
       activeAssistantMessageId.value = null
@@ -1025,6 +1269,7 @@ function initializeCurrentModeState() {
     bookingContext.value = {}
   }
   assistantOptionsExpanded.value = {}
+  assistantTraceExpanded.value = {}
   quickActionsExpanded.value = false
   chatHistories.value = loadHistories()
   showScrollToBottom.value = false

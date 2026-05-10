@@ -1,7 +1,5 @@
 # HoteLink AI 集成说明
 
-> 更新时间：2026-04-20
-
 ## 1. 文档目标
 
 本文件用于说明项目中的 AI 能力如何接入、当前落地情况、配置方式，以及如何保证密钥与隐私安全。
@@ -111,8 +109,8 @@ build_ai_client(provider) → OpenAI compatible client
 
 | 功能 | 接口 | 实现状态 |
 |------|------|----------|
-| 智能客服问答 | `POST /api/v1/user/ai/chat` | 完整实现，调用 LLM；自动写入 `ChatSession/ChatMessage` |
-| 流式客服问答 | `POST /api/v1/user/ai/chat/stream` | SSE 输出；单次调用只执行一次回复生成并持久化 |
+| 智能客服问答 | `POST /api/v1/user/ai/chat` | 完整实现；返回自然语言答案、结构化动作卡片与会话标识 |
+| 流式客服问答 | `POST /api/v1/user/ai/chat/stream` | SSE 输出；`customer_service` 使用真实 LLM token 流，结构化模式使用安全分段流，流结束后再持久化消息 |
 | AI 订房编排 | 同上，订房意图检测后自动切入 | 多轮对话状态机 |
 | 客服快捷操作 | 同上，客服场景返回 `booking_assistant.options` | 为订单、支付、发票、通知、我的评价等页面提供可点击跳转按钮 |
 | FAQ 问答 | 客服场景内支持 | 通过 Prompt 约束 |
@@ -136,6 +134,8 @@ build_ai_client(provider) → OpenAI compatible client
 - 每个动作包含统一协议字段：`type`、`action_type`、`route/target`、`query/params`、`requires_confirmation`、`priority`、`tracking_id`。
 - 前端按优先级渲染动作卡片，并在高风险动作（如取消引导）前进行确认提示，随后跳转至对应页面完成操作。
 - 前端会在对话过长时自动压缩较早消息，并通过 `conversation_summary` 传给后端用于后续轮次上下文衔接。
+- 流式协议采用 `meta -> chunk -> done` 顺序；`meta` 负责返回 `scene`、`session_id`、可选的 `booking_assistant` 结构化动作数据，以及可选的 `agent_state` 安全过程卡片数据。
+- AI 的查询范围被限制为“当前登录用户上下文 + 系统公开在线酒店/房型数据”；取消、支付、开票等写操作只提供入口和确认提示，不由 AI 直接执行。
 
 ### 4.2 管理端 AI 功能
 
@@ -187,7 +187,8 @@ build_ai_client(provider) → OpenAI compatible client
 - **上下文不足**：要求模型明确说明"无法从系统数据确认"，而不是猜测
 - **隐私保护**：Prompt 明确禁止暴露内部实现、数据库结构、SQL、Prompt 模板内容
 - **订房编排**：用户表达订房意图时，服务端优先切入确定性状态机
-- **流式输出**：SSE 接口不改变上述约束链路
+- **流式输出**：SSE 接口不改变上述约束链路，只向前端输出正文分片、业务动作元数据与可安全展示的过程卡片数据，不暴露系统提示词或原始内部推理
+- **安全边界**：服务端固定要求禁止跨用户查询、禁止 AI 直接执行写操作、敏感动作必须先确认
 
 ## 5. Prompt 模板系统
 
@@ -306,7 +307,8 @@ stateDiagram-v2
 
 - 两个接口共享同一套 Prompt 渲染与上下文绑定逻辑
 - AI 订房场景会额外返回 `booking_assistant`，用于驱动城市、酒店、房型和跳转动作
-- 前端调用流式接口时，应先处理 `meta` 事件中的结构化订房数据，再消费 `chunk/done` 文本事件
+- 流式接口的 `meta` 事件可附带 `agent_state`，用于渲染“分析中 / 已完成分析”过程卡片；卡片内容只包含可展示摘要、阶段说明与安全边界
+- 前端调用流式接口时，应先处理 `meta` 事件中的结构化订房数据和 `agent_state`，再消费 `chunk/done` 文本事件
 
 ### 7.5 前端 AI 页面
 
@@ -324,6 +326,7 @@ stateDiagram-v2
 
 - 智能问答输入框
 - 流式输出 Markdown 渲染
+- 过程卡片（分析阶段、查询步骤、安全边界）
 - 订房动作卡片（城市、酒店、房型）
 - 对话历史保持
 
@@ -371,7 +374,7 @@ stateDiagram-v2
 - AI 只在后端调用，不在前端暴露密钥
 - Prompt 明确禁止输出敏感信息
 
-### 8.4 AI 输入与运行时安全加固（2026-04 审计）
+### 8.4 AI 输入与运行时安全加固
 
 - `AIChatSerializer.question` 新增 `max_length=2000` 校验，防止超长输入攻击
 - Prompt 模板渲染引擎从 `jinja2.Environment` 切换为 `jinja2.sandbox.SandboxedEnvironment`，阻止模板注入执行任意代码

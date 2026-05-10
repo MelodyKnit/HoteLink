@@ -1,11 +1,10 @@
 # HoteLink API 规范（源码对齐版）
 
-> 更新时间：2026-05-10  
 > 对齐基线：`backend/apps/api/urls.py`、`backend/apps/api/views.py`
 
 ## 1. 文档范围
 
-本文件仅描述仓库**已落地实现**的 HTTP API 规范。  
+本文件仅描述仓库**已落地实现**的 HTTP API 规范。
 完整路由清单请直接查看自动生成文档：
 
 - [`api-inventory.md`](./api-inventory.md)
@@ -166,6 +165,9 @@
 - 收藏、订单、支付、取消、评价、积分、优惠券、发票、通知
 - AI：聊天、流式聊天、推荐、对比、会话管理
 - 支付上下文：`GET /api/v1/user/orders/payment-options` 返回订单支付倒计时、可用支付方式、客服联系方式与统一支付动作入口所需上下文
+- 用户资料与登录态：`/user/auth/me`、`/user/profile` 返回 `points`（兼容旧字段，等同消费积分）、`consume_points`（可兑换余额）与 `member_points`（会员成长积分）
+- 积分流水：`GET /api/v1/user/points/logs` 返回 `current_points/points/consume_points/member_points/member_level/next_level/items/total`；支持 `point_type=consume|member` 过滤，流水项包含 `point_type`、`point_type_label`、`log_type`、`points`、`balance`、`description`、`created_at`
+- 优惠券兑换：`GET /api/v1/user/coupons/available` 返回可领券列表以及当前 `consume_points`、`member_points`；`POST /api/v1/user/coupons/claim` 使用消费积分扣减，成功后返回更新后的两类积分
 - 发票中心：`GET /api/v1/user/invoices` 返回开票记录分页字段 `items/page/page_size/total/total_pages`，并额外返回 `titles` 供订单详情页选择发票抬头
 - 发票抬头编辑/删除：`POST /api/v1/user/invoices/title/update`、`POST /api/v1/user/invoices/title/delete`（有开票记录的抬头不可删除，返回 4091）
 
@@ -177,8 +179,11 @@
 - `/api/v1/user/notices` 的 `GET` 响应项新增 `related_order_id`、`related_order_no`，用于订单通知直达详情页
 - `/api/v1/user/orders` 支持多维筛选参数：`status`、`payment_status`、`keyword`、`check_in_start`、`check_in_end`、`created_start`、`created_end`、`amount_min`、`amount_max`
 - `/api/v1/user/orders/pay` 现返回 `payment_action` 与 `payment_record`：模拟支付会直接成功；真实网关会返回 `pending` 动作协议，由前端继续对接 SDK、跳转收银台或等待回调确认
+- `/api/v1/user/orders/detail` 返回订单积分字段：`points_earned` 表示本单获得消费积分，`member_points_earned` 表示本单累计会员积分
 - `/api/v1/user/ai/chat` 与 `/api/v1/user/ai/chat/stream` 支持可选 `session_id`（续聊）；服务端会自动写入会话消息
 - `/api/v1/user/ai/chat` 与 `/api/v1/user/ai/chat/stream` 支持可选 `conversation_summary`（历史对话压缩摘要，最长 4000 字符）
+- `/api/v1/user/ai/chat` 返回 `answer`、`scene`、`session_id` 以及可选 `booking_assistant`
+- `/api/v1/user/ai/chat/stream` 的 SSE 事件顺序为 `meta -> chunk -> done`
 
 ### 6.5 Admin
 
@@ -188,8 +193,8 @@
 - 系统状态与系统重置
 - AI：配置、供应商管理、摘要、定价、经营报告（含流式）、情感分析、文案与内容生成、异常分析、调用日志、用量统计
 - **员工管理完善**：`POST /api/v1/admin/employees/update`（编辑昵称/手机/角色，仅限 hotel_admin↔receptionist）、`POST /api/v1/admin/employees/change-status`（启用/禁用）、`POST /api/v1/admin/employees/reset-password`（重置为 Abc123456）
-- **用户管理完善**：`POST /api/v1/admin/users/update`（编辑昵称/手机/会员等级）、`POST /api/v1/admin/users/reset-password`（重置为 Abc123456）
-- **优惠券管理完善**：`POST /api/v1/admin/coupons/update` 现支持全字段编辑（名称/类型/面额/折扣/门槛/库存/积分/等级/有效期/状态）；新增 `POST /api/v1/admin/coupons/delete`（已有用户领取则返回 4091 禁止删除）
+- **用户管理完善**：`POST /api/v1/admin/users/update`（编辑昵称/手机/会员等级；上调等级会补足会员积分门槛，不调整消费积分）、`POST /api/v1/admin/users/reset-password`（重置为 Abc123456）
+- **优惠券管理完善**：`POST /api/v1/admin/coupons/update` 现支持全字段编辑（名称/类型/面额/折扣/门槛/库存/消费积分成本/等级/有效期/状态）；新增 `POST /api/v1/admin/coupons/delete`（已有用户领取则返回 4091 禁止删除）
 - **报表任务删除**：`POST /api/v1/admin/reports/tasks/delete`（运行中的任务不可删除，返回 4091）
 - **删除安全**：酒店删除和房型删除前校验是否存在进行中订单（4091 阻断），通知批量删除前端增加二次确认弹窗
 - **评价可见性**：管理端评价接口支持切换 `is_visible` 字段来隐藏/显示评价
@@ -198,6 +203,7 @@
 
 - `GET /api/v1/admin/ai/settings` 仅 `system_admin` 可访问，供应商列表不会回传明文 `api_key`；编辑时若不提交 `api_key`，服务端会保留原密钥。
 - `GET /api/v1/admin/payment-gateways` 仅 `system_admin` 可访问，支付密钥/证书不会明文回传；再次编辑时若留空对应秘密字段，服务端会保留旧值。
+- `GET /api/v1/admin/members/overview` 返回 `total_users`、`total_member_points`、`total_consume_points` 与各等级 `member_points_threshold`，供管理端展示会员成长积分与消费积分余额的运营口径。
 - `POST /api/v1/admin/ai/test` 用于管理端连通性测试，可验证当前或指定供应商是否可用。
 - `GET /api/v1/admin/ai/call-logs` 分页查询 AI 调用历史记录；支持 `scene`、`status` 过滤参数；响应字段包含 `id`、`scene`、`provider`、`model`、`input_tokens`、`output_tokens`、`total_tokens`、`latency_ms`、`cost_estimate`、`status`、`error_message`（完整错误文本，最长 5000 字符）、`username`、`created_at`。
 - `GET /api/v1/admin/ai/usage-stats` 按场景/状态汇总 token 用量与费用；支持 `start_date`、`end_date` 过滤；响应包含 `success_count`、`failed_count`、`total_tokens`、`cost_estimate`、`by_scene`、`by_status`。
@@ -207,7 +213,7 @@
 - `GET /api/v1/admin/orders` 支持筛选参数：`status`、`payment_status`、`keyword`、`check_in_date`（入住日期）、`check_out_date`（退房日期），其中 `check_in_date` / `check_out_date` 为精确日期过滤
 - 管理端列表接口支持 `ordering` 参数（白名单校验，非法值自动回退为 `-id`）：
   - `GET /api/v1/admin/orders`：`id`、`order_no`、`guest_name`、`guest_mobile`、`hotel__name`、`room_type__name`、`check_in_date`、`check_out_date`、`pay_amount`、`status`、`payment_status`、`created_at`、`updated_at`
-  - `GET /api/v1/admin/users`：`id`、`user__username`、`nickname`、`mobile`、`gender`、`role`、`member_level`、`points`、`status`、`created_at`、`updated_at`
+  - `GET /api/v1/admin/users`：`id`、`user__username`、`nickname`、`mobile`、`gender`、`role`、`member_level`、`points`（兼容旧消费积分字段）、`member_points`、`consume_points`、`status`、`created_at`、`updated_at`
   - `GET /api/v1/admin/employees`：`id`、`user__username`、`nickname`、`mobile`、`role`、`status`、`created_at`、`updated_at`
   - `GET /api/v1/admin/reports/tasks`：`id`、`report_type`、`hotel__name`、`start_date`、`end_date`、`status`、`created_at`、`updated_at`
 
@@ -253,6 +259,9 @@
   - `requires_confirmation`：是否建议二次确认
   - `priority`：动作优先级（数值越小越优先）
   - `tracking_id`：动作追踪 ID
+- 流式接口的 `meta` 事件包含 `scene`、`session_id`、可选 `booking_assistant`，以及可选 `agent_state`
+- `meta.agent_state` 仅用于前端渲染安全过程卡片，字段以展示摘要、阶段说明和安全边界为主，不包含系统提示词或原始内部推理
+- AI 查询范围限制在当前登录用户上下文与系统公开在线酒店/房型数据；取消、支付、开票等写操作只返回说明、按钮与确认提示
 
 ---
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   PAYMENT_GATEWAY_SWITCH_META,
+  POINT_TYPE_MAP,
   buildImageThumbList,
   buildImageThumbUrl,
   extractApiFieldErrors,
@@ -88,5 +89,10 @@ describe('utils helpers', () => {
     expect(suggestUniquePaymentGatewayName('Wechat Main', [])).toBe('wechat_main')
     expect(suggestUniquePaymentGatewayName('Wechat Main', ['wechat_main'])).toBe('wechat_main_2')
     expect(suggestUniquePaymentGatewayName('***', [])).toBe('gateway')
+  })
+
+  it('maps split point types to user-facing labels', () => {
+    expect(POINT_TYPE_MAP.consume).toBe('消费积分')
+    expect(POINT_TYPE_MAP.member).toBe('会员积分')
   })
 })

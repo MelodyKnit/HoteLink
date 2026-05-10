@@ -1,8 +1,8 @@
-# HoteLink 源码对齐基线（2026-04-17）
+# HoteLink 源码对齐基线
 
 ## 1. 目的
 
-本文件是“文档与源码对齐”的基线说明。  
+本文件是“文档与源码对齐”的基线说明。
 若其他文档与源码冲突，以以下事实优先：
 
 1. `backend/apps/api/urls.py`
@@ -35,11 +35,11 @@
 - crm: 10（含 `ChatSession`、`ChatMessage`）
 - reports: 1（`ReportTask`）
 - operations: 5（含 `AICallLog`、`PlatformConfig`、`RuntimeConfig`）
-
-补充（2026-05）：
-
 - `PaymentRecord` 已扩展为真实支付预留结构，除基础流水号/金额外，还包含 `gateway_name`、`gateway_label`、`provider_type`、`scene`、`external_trade_no` 与请求/响应载荷字段。
 - `RuntimeConfig` 当前同时承担 AI 供应商配置与支付网关运行时配置持久化。
+- `UserProfile` 使用双积分口径：`member_points` 是会员成长积分，只用于等级升级；`consume_points` 是可兑换消费积分余额；`points` 作为旧接口兼容字段保留并等同消费积分。
+- `PointsLog` 使用 `point_type=consume|member` 区分两类积分流水，`balance` 表示对应类型的变动后余额。
+- `BookingOrder.points_earned` 表示本单发放的消费积分，`BookingOrder.member_points_earned` 表示本单累计的会员积分。
 
 ### 2.3 Celery 与定时任务
 

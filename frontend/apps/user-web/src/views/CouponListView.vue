@@ -25,8 +25,8 @@
       <!-- Claim Section -->
       <div v-if="activeTab === 'claim'">
         <div class="mb-3 flex items-center justify-between rounded-xl bg-brand/5 px-3 py-2">
-          <span class="text-xs text-gray-600">我的积分：<span class="font-bold text-brand">{{ userPoints.toLocaleString() }}</span></span>
-          <span class="text-xs text-gray-400">100积分 = ¥1</span>
+          <span class="text-xs text-gray-600">消费积分：<span class="font-bold text-brand">{{ consumePoints.toLocaleString() }}</span></span>
+          <span class="text-xs text-gray-400">会员积分不扣减，仅消费积分可兑券</span>
         </div>
         <div v-if="availableTemplates.length === 0" class="py-20 text-center">
           <p class="text-4xl">🎫</p>
@@ -44,15 +44,15 @@
               <p class="mt-0.5 text-xs text-gray-400">{{ tpl.min_amount > 0 ? `满¥${tpl.min_amount}可用` : '无门槛' }}</p>
               <p class="mt-1 text-xs text-gray-400">
                 剩余 {{ tpl.remaining }} 张
-                <span v-if="tpl.points_cost > 0" class="ml-1 text-orange-500">需 {{ tpl.points_cost }} 积分</span>
+                <span v-if="tpl.points_cost > 0" class="ml-1 text-orange-500">需 {{ tpl.points_cost }} 消费积分</span>
                 <span v-else class="ml-1 text-brand">免费领取</span>
               </p>
             </div>
             <div class="flex items-center pr-4">
-              <button @click="claimCoupon(tpl)" :disabled="claimingTemplateId !== null || (tpl.points_cost > 0 && userPoints < tpl.points_cost)"
+              <button @click="claimCoupon(tpl)" :disabled="claimingTemplateId !== null || (tpl.points_cost > 0 && consumePoints < tpl.points_cost)"
                 class="rounded-lg px-3 py-1.5 text-xs font-medium transition"
-                :class="(tpl.points_cost > 0 && userPoints < tpl.points_cost) ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-brand text-white hover:bg-brand-dark disabled:opacity-50'">
-                {{ claimingTemplateId === tpl.id ? '处理中…' : (tpl.points_cost > 0 ? (userPoints < tpl.points_cost ? '积分不足' : '兑换') : '领取') }}
+                :class="(tpl.points_cost > 0 && consumePoints < tpl.points_cost) ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-brand text-white hover:bg-brand-dark disabled:opacity-50'">
+                {{ claimingTemplateId === tpl.id ? '处理中…' : (tpl.points_cost > 0 ? (consumePoints < tpl.points_cost ? '消费积分不足' : '兑换') : '领取') }}
               </button>
             </div>
           </div>
@@ -96,7 +96,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
-import { userCouponApi, userPointsApi } from '@hotelink/api'
+import { userCouponApi } from '@hotelink/api'
 import { useToast, useConfirm } from '@hotelink/ui'
 import { useRouter } from 'vue-router'
 
@@ -120,7 +120,7 @@ const loading = ref(true)
 const coupons = ref<any[]>([])
 const availableTemplates = ref<any[]>([])
 const claimingTemplateId = ref<number | null>(null)
-const userPoints = ref(0)
+const consumePoints = ref(0)
 
 const filtered = computed(() => coupons.value.filter(c => c.status === activeTab.value))
 
@@ -134,14 +134,21 @@ async function loadMyCoupons() {
 async function loadAvailable() {
   try {
     const res = await userCouponApi.available()
-    if (res.code === 0 && res.data) availableTemplates.value = (res.data as any).items || []
+    if (res.code === 0 && res.data) {
+      availableTemplates.value = (res.data as any).items || []
+      consumePoints.value = Number((res.data as any).consume_points ?? consumePoints.value)
+    }
   } catch { availableTemplates.value = [] }
 }
 
 async function claimCoupon(tpl: any) {
   const needPoints = Number(tpl.points_cost || 0)
+  if (needPoints > 0 && consumePoints.value < needPoints) {
+    showToast(`消费积分不足，需要 ${needPoints} 消费积分`, 'warning')
+    return
+  }
   const confirmText = needPoints > 0
-    ? `确认使用 ${needPoints} 积分兑换「${tpl.name}」吗？`
+    ? `确认使用 ${needPoints} 消费积分兑换「${tpl.name}」吗？`
     : `确认领取「${tpl.name}」吗？`
   if (!await confirmDialog(confirmText)) return
 
@@ -149,7 +156,8 @@ async function claimCoupon(tpl: any) {
   try {
     const res = await userCouponApi.claim(tpl.id)
     if (res.code === 0) {
-      if (needPoints > 0) userPoints.value = Math.max(0, userPoints.value - needPoints)
+      const data = res.data as { consume_points?: number } | undefined
+      if (needPoints > 0) consumePoints.value = data?.consume_points ?? Math.max(0, consumePoints.value - needPoints)
       await loadAvailable()
       await loadMyCoupons()
       showToast(needPoints > 0 ? '兑换成功' : '领取成功', 'success')
@@ -171,9 +179,6 @@ onMounted(async () => {
   await Promise.all([
     loadMyCoupons(),
     loadAvailable(),
-    userPointsApi.logs().then(res => {
-      if (res.code === 0 && res.data) userPoints.value = (res.data as any).current_points ?? 0
-    }).catch(() => {}),
   ])
   loading.value = false
 })

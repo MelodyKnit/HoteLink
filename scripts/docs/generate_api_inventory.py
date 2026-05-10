@@ -5,7 +5,6 @@ import ast
 import re
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Iterable
 
@@ -107,11 +106,9 @@ def render_markdown(routes: Iterable[RouteItem]) -> str:
         buckets[bucket_key(item.path)].append(item)
 
     order = ["root", "system", "common", "public", "user", "admin", "other"]
-    generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     lines: list[str] = [
         "# HoteLink API 路由清单（源码自动生成）",
         "",
-        f"- 生成时间：{generated_at}",
         "- 来源文件：`backend/apps/api/urls.py` + `backend/apps/api/views.py`",
         f"- 总路由数：**{len(route_list)}**",
         "",

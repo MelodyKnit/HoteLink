@@ -73,7 +73,7 @@ export const useUserAuthStore = defineStore('userAuth', () => {
   const user = ref<{
     id: number; username: string; role: string; nickname?: string
     member_level?: string; mobile?: string; email?: string; avatar?: string
-    gender?: string; birthday?: string; points?: number
+    gender?: string; birthday?: string; points?: number; member_points?: number; consume_points?: number
   } | null>(null)
   const token = ref<string | null>(getToken())
   const isLoggedIn = computed(() => !!token.value)
@@ -92,6 +92,7 @@ export const useUserAuthStore = defineStore('userAuth', () => {
         id: u.id, username: u.username, role: u.role,
         nickname: u.nickname, member_level: u.member_level,
         avatar: u.avatar, points: u.points,
+        member_points: u.member_points, consume_points: u.consume_points,
       }
       // 登录后立即拉取完整用户信息（含 mobile、email 等）
       fetchMe().catch(() => {})
@@ -115,6 +116,7 @@ export const useUserAuthStore = defineStore('userAuth', () => {
           nickname: res.data.nickname, member_level: res.data.member_level,
           mobile: res.data.mobile, email: res.data.email, avatar: res.data.avatar,
           gender: res.data.gender, birthday: res.data.birthday,
+          points: res.data.points, member_points: res.data.member_points, consume_points: res.data.consume_points,
         }
       }
     } catch { /* ignore */ }

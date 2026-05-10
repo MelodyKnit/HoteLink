@@ -67,7 +67,8 @@ class BookingOrder(models.Model):
     discount_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     pay_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     coupon = models.ForeignKey("crm.UserCoupon", on_delete=models.SET_NULL, null=True, blank=True, related_name="orders")
-    points_earned = models.PositiveIntegerField(default=0, help_text="本单获得积分")
+    points_earned = models.PositiveIntegerField(default=0, help_text="本单获得消费积分")
+    member_points_earned = models.PositiveIntegerField(default=0, help_text="本单累计会员积分")
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
 

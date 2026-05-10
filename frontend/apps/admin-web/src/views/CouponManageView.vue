@@ -39,7 +39,7 @@
             <th class="px-4 py-3 text-left">面额/折扣</th>
             <th class="px-4 py-3 text-left">门槛</th>
             <th class="px-4 py-3 text-left">库存</th>
-            <th class="px-4 py-3 text-left">积分成本</th>
+            <th class="px-4 py-3 text-left">消费积分成本</th>
             <th class="px-4 py-3 text-left">等级要求</th>
             <th class="px-4 py-3 text-left">有效期</th>
             <th class="px-4 py-3 text-left">状态</th>
@@ -59,7 +59,7 @@
             </td>
             <td class="px-4 py-3 text-slate-500">{{ tpl.min_amount > 0 ? `满¥${tpl.min_amount}` : '无门槛' }}</td>
             <td class="px-4 py-3">{{ tpl.claimed_count }}/{{ tpl.total_count }}</td>
-            <td class="px-4 py-3">{{ tpl.points_cost > 0 ? `${tpl.points_cost}积分` : '免费' }}</td>
+            <td class="px-4 py-3">{{ tpl.points_cost > 0 ? `${tpl.points_cost}消费积分` : '免费' }}</td>
             <td class="px-4 py-3 text-slate-500">{{ levelLabel(tpl.required_level) }}</td>
             <td class="px-4 py-3 text-xs text-slate-400">{{ tpl.valid_start }} ~ {{ tpl.valid_end }}</td>
             <td class="px-4 py-3">
@@ -120,8 +120,9 @@
         </div>
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="mb-1 block text-xs text-slate-500">积分成本(0=免费)</label>
+            <label class="mb-1 block text-xs text-slate-500">消费积分成本(0=免费)</label>
             <input v-model.number="form.points_cost" type="number" class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-teal-500" />
+            <p class="mt-1 text-xs text-slate-400">用户兑换时只扣消费积分，不影响会员积分成长值。</p>
           </div>
           <div>
             <label class="mb-1 block text-xs text-slate-500">会员等级要求</label>
@@ -194,8 +195,9 @@
         </div>
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="mb-1 block text-xs text-slate-500">积分成本(0=免费)</label>
+            <label class="mb-1 block text-xs text-slate-500">消费积分成本(0=免费)</label>
             <input v-model.number="editFormData.points_cost" type="number" class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-teal-500" />
+            <p class="mt-1 text-xs text-slate-400">用户兑换时只扣消费积分，不影响会员积分成长值。</p>
           </div>
           <div>
             <label class="mb-1 block text-xs text-slate-500">会员等级要求</label>

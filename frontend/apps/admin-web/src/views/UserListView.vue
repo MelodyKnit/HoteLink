@@ -19,8 +19,10 @@
         <option value="-role">角色降序</option>
         <option value="member_level">会员等级升序</option>
         <option value="-member_level">会员等级降序</option>
-        <option value="points">积分从低到高</option>
-        <option value="-points">积分从高到低</option>
+        <option value="member_points">会员积分从低到高</option>
+        <option value="-member_points">会员积分从高到低</option>
+        <option value="consume_points">消费积分从低到高</option>
+        <option value="-consume_points">消费积分从高到低</option>
         <option value="status">状态升序</option>
         <option value="-status">状态降序</option>
       </SelectField>
@@ -42,6 +44,12 @@
         </template>
         <template #col-member_level="{ value }">
           {{ memberLevelMap[String(value)] || value }}
+        </template>
+        <template #col-member_points="{ value }">
+          <span class="font-medium text-amber-700">{{ Number(value || 0).toLocaleString() }}</span>
+        </template>
+        <template #col-consume_points="{ value }">
+          <span class="font-medium text-teal-700">{{ Number(value || 0).toLocaleString() }}</span>
         </template>
         <template #col-status="{ value }">
           <StatusBadge :label="value === 'active' ? '正常' : '禁用'" :type="value === 'active' ? 'success' : 'danger'" />
@@ -77,6 +85,7 @@
             <option value="platinum">铂金会员</option>
             <option value="diamond">钻石会员</option>
           </SelectField>
+          <p class="mt-1 text-xs text-slate-400">上调等级时，系统会把会员积分补足到对应门槛；消费积分不会被调整。</p>
         </div>
       </div>
       <template #footer>
@@ -103,7 +112,8 @@ const columns = [
   { key: 'gender', label: '性别', sortField: 'gender' },
   { key: 'role', label: '角色', sortField: 'role' },
   { key: 'member_level', label: '会员等级', sortField: 'member_level' },
-  { key: 'points', label: '积分', sortField: 'points' },
+  { key: 'member_points', label: '会员积分', sortField: 'member_points' },
+  { key: 'consume_points', label: '消费积分', sortField: 'consume_points' },
   { key: 'status', label: '状态', sortField: 'status' },
 ]
 
@@ -195,10 +205,13 @@ async function handleEdit() {
     if (res.code === 0) {
       showToast('用户信息已更新', 'success')
       showEdit.value = false
+      const updated = (res.data || {}) as Record<string, unknown>
       patchUserRow(editForm.user_id, {
         member_level: editForm.member_level,
         mobile: editForm.mobile,
         nickname: editForm.nickname,
+        ...(updated.member_points !== undefined ? { member_points: updated.member_points } : {}),
+        ...(updated.consume_points !== undefined ? { consume_points: updated.consume_points } : {}),
       })
     } else {
       showToast(res.message || '更新失败', 'error')

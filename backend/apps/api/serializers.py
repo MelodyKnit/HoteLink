@@ -58,6 +58,8 @@ class UserProfileSerializer(serializers.ModelSerializer):
             "status",
             "member_level",
             "points",
+            "member_points",
+            "consume_points",
         ]
 
 
@@ -289,6 +291,8 @@ class BookingOrderSerializer(serializers.ModelSerializer):
             "discount_amount",
             "pay_amount",
             "total_amount",
+            "points_earned",
+            "member_points_earned",
             "latest_payment",
             "has_review",
             "is_lifecycle_anomaly",
@@ -724,9 +728,14 @@ class UserCouponSerializer(serializers.ModelSerializer):
 
 class PointsLogSerializer(serializers.ModelSerializer):
     """积分日志序列化器。"""
+    point_type_label = serializers.SerializerMethodField()
+
+    def get_point_type_label(self, obj):
+        return dict(PointsLog.POINT_TYPE_CHOICES).get(obj.point_type, obj.point_type)
+
     class Meta:
         model = PointsLog
-        fields = ["id", "log_type", "points", "balance", "description", "created_at"]
+        fields = ["id", "point_type", "point_type_label", "log_type", "points", "balance", "description", "created_at"]
 
 
 class CouponTemplateSerializer(serializers.ModelSerializer):

@@ -1,6 +1,5 @@
 # HoteLink 技术架构（源码对齐版）
 
-> 更新时间：2026-04-20  
 > 若与其他文档冲突，请优先参考 [`source-of-truth.md`](./source-of-truth.md)
 
 ## 1. 总体架构
@@ -70,7 +69,7 @@
 
 ### 4.1 users
 
-- `UserProfile`（角色、状态、会员等级、积分、资料）
+- `UserProfile`（角色、状态、会员等级、资料；`member_points` 为会员成长积分，`consume_points` 为可兑换消费积分，`points` 保留为旧接口兼容字段并等同消费积分）
 
 ### 4.2 hotels
 
@@ -80,7 +79,7 @@
 
 ### 4.3 bookings
 
-- `BookingOrder`（新增 `PAYMENT_REFUNDING` 退款中状态；`created_at` 已加 `db_index`）
+- `BookingOrder`（新增 `PAYMENT_REFUNDING` 退款中状态；`created_at` 已加 `db_index`；`points_earned` 记录本单消费积分，`member_points_earned` 记录本单会员积分）
 
 ### 4.4 payments
 
@@ -91,7 +90,7 @@
 - `CustomerProfile`
 - `FavoriteHotel`
 - `Review`（新增 `is_visible` 字段，管理端可控制评价可见性）
-- `PointsLog`
+- `PointsLog`（通过 `point_type=consume|member` 区分消费积分流水与会员积分流水，`balance` 表示对应积分类型的变动后余额）
 - `CouponTemplate`
 - `UserCoupon`
 - `InvoiceTitle`
@@ -121,7 +120,7 @@
 
 ### 5.2 会员与 CRM
 
-已实现会员等级、积分流水、优惠券模板/领取/使用、发票抬头与申请、收藏、评价与回复。
+已实现会员等级、双积分流水、优惠券模板/领取/使用、发票抬头与申请、收藏、评价与回复。会员积分用于成长升级且不因兑换扣减；消费积分用于优惠券兑换，并为后续礼品兑换保留扩展口径。
 
 ### 5.3 AI 能力
 

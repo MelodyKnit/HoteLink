@@ -6,6 +6,7 @@ from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
 import shutil
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -17,7 +18,7 @@ from rest_framework.test import APITestCase
 
 from apps.bookings.models import BookingOrder
 from apps.bookings.tasks import sweep_order_lifecycle_anomalies
-from apps.crm.models import ChatMessage, ChatSession, InvoiceTitle, Review, UserCoupon
+from apps.crm.models import ChatMessage, ChatSession, CouponTemplate, InvoiceTitle, PointsLog, Review, UserCoupon
 from apps.hotels.models import Hotel, RoomInventory, RoomType
 from apps.operations.models import AICallLog, SystemNotice
 from apps.operations.services.prompt_service import PromptTemplateService
@@ -239,6 +240,23 @@ class UserApiTests(ApiBaseTestCase):
         )
         self.assertEqual(pay_response.status_code, 200)
         self.assertEqual(pay_response.json()["data"]["payment_status"], "paid")
+        paid_order = BookingOrder.objects.get(id=order_id)
+        self.assertGreater(paid_order.points_earned, 0)
+        self.assertEqual(paid_order.member_points_earned, paid_order.points_earned)
+
+        self.profile.refresh_from_db()
+        self.assertEqual(self.profile.consume_points, paid_order.points_earned)
+        self.assertEqual(self.profile.member_points, paid_order.member_points_earned)
+        self.assertEqual(self.profile.points, self.profile.consume_points)
+
+        point_types = set(PointsLog.objects.filter(order_id=order_id).values_list("point_type", flat=True))
+        self.assertEqual(point_types, {PointsLog.POINT_TYPE_CONSUME, PointsLog.POINT_TYPE_MEMBER})
+
+        logs_response = self.client.get("/api/v1/user/points/logs")
+        self.assertEqual(logs_response.status_code, 200)
+        logs_payload = logs_response.json()["data"]
+        self.assertEqual(logs_payload["consume_points"], self.profile.consume_points)
+        self.assertEqual(logs_payload["member_points"], self.profile.member_points)
 
     def test_user_payment_options_should_follow_gateway_settings(self):
         """验证用户支付方式列表会严格跟随支付网关配置变化。"""
@@ -403,6 +421,45 @@ class UserApiTests(ApiBaseTestCase):
         self.assertEqual(invoices_payload["items"][0]["order_id"], self.order.id)
         self.assertEqual(invoices_payload["items"][0]["title"], self.invoice_title.title)
         self.assertEqual(invoices_payload["items"][0]["amount"], "798.00")
+
+    def test_user_coupon_exchange_uses_consume_points_only(self):
+        """验证兑换优惠券只扣消费积分，不影响会员积分成长值。"""
+        self.login_user()
+        UserProfile.objects.filter(user=self.user).update(
+            points=120,
+            consume_points=120,
+            member_points=5000,
+        )
+        template = CouponTemplate.objects.create(
+            name="消费积分兑换券",
+            coupon_type=CouponTemplate.TYPE_CASH,
+            amount=Decimal("30.00"),
+            min_amount=Decimal("100.00"),
+            total_count=10,
+            per_user_limit=1,
+            points_cost=80,
+            valid_days=30,
+            valid_start=timezone.localdate(),
+            valid_end=timezone.localdate() + timedelta(days=30),
+        )
+
+        response = self.client.post(
+            "/api/v1/user/coupons/claim",
+            {"template_id": template.id},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["consume_points"], 40)
+        self.assertEqual(response.json()["data"]["member_points"], 5000)
+
+        self.profile.refresh_from_db()
+        self.assertEqual(self.profile.consume_points, 40)
+        self.assertEqual(self.profile.member_points, 5000)
+        self.assertEqual(self.profile.points, 40)
+        log = PointsLog.objects.filter(user=self.user, log_type=PointsLog.TYPE_COUPON_EXCHANGE).first()
+        self.assertIsNotNone(log)
+        self.assertEqual(log.point_type, PointsLog.POINT_TYPE_CONSUME)
+        self.assertEqual(log.points, -80)
 
     def test_user_notices_should_include_related_order_fields(self):
         """验证通知列表会返回订单关联字段，支持前端直达订单详情。"""
@@ -591,7 +648,7 @@ class UserApiTests(ApiBaseTestCase):
         self.assertEqual(option["query"]["room_type_id"], str(shanghai_room.id))
 
     def test_user_ai_chat_stream_returns_booking_meta_events(self):
-        """验证 AI 订房流式接口会先返回结构化 meta 事件。"""
+        """验证 AI 订房流式接口返回过程卡片元数据与正文事件。"""
         self.login_user()
 
         response = self.client.post(
@@ -605,9 +662,14 @@ class UserApiTests(ApiBaseTestCase):
         self.assertEqual(response.status_code, 200)
         payload = b"".join(response.streaming_content).decode("utf-8")
         self.assertIn('"type": "meta"', payload)
+        self.assertIn('"agent_state"', payload)
         self.assertIn('"phase": "select_city"', payload)
         self.assertIn('"type": "chunk"', payload)
         self.assertIn('"type": "done"', payload)
+        self.assertNotIn('"type": "thinking"', payload)
+        self.assertNotIn('"type": "tool"', payload)
+        self.assertNotIn('"type": "guardrail"', payload)
+        self.assertIn('"display_name": "AI 订房助手"', payload)
 
     def test_user_ai_chat_customer_service_should_not_trigger_booking_assistant(self):
         """验证客服场景咨询订单操作时，不会误触发订房助手流程。"""
@@ -811,8 +873,8 @@ class UserApiTests(ApiBaseTestCase):
         self.assertEqual(switch_option["query"]["from"], "ai-booking")
         self.assertEqual(switch_option["query"]["ask"], question)
 
-    def test_user_ai_chat_stream_customer_service_should_not_return_booking_meta(self):
-        """验证客服场景流式接口会返回客服快捷动作 meta 数据。"""
+    def test_user_ai_chat_stream_customer_service_should_return_booking_meta_only(self):
+        """验证客服场景流式接口只返回业务卡片元数据与正文事件。"""
         self.login_user()
         response = self.client.post(
             "/api/v1/user/ai/chat/stream",
@@ -827,8 +889,14 @@ class UserApiTests(ApiBaseTestCase):
         payload = b"".join(response.streaming_content).decode("utf-8")
         self.assertIn('"type": "meta"', payload)
         self.assertIn('"scene": "customer_service"', payload)
+        self.assertIn('"agent_state"', payload)
         self.assertIn('"booking_assistant"', payload)
         self.assertIn('"phase": "quick_actions"', payload)
+        self.assertIn('"type": "chunk"', payload)
+        self.assertIn('"type": "done"', payload)
+        self.assertIn('"display_name": "AI 智能客服"', payload)
+        self.assertNotIn('"cross_user_access_forbidden": true', payload)
+        self.assertNotIn('"type": "guardrail"', payload)
 
     def test_user_ai_chat_should_persist_session_and_messages(self):
         """验证 AI 对话会自动落库会话与消息。"""
@@ -861,27 +929,66 @@ class UserApiTests(ApiBaseTestCase):
         self.assertEqual(messages[1].role, ChatMessage.ROLE_ASSISTANT)
         self.assertEqual(messages[1].content, "这是测试回复")
 
-    def test_user_ai_chat_stream_should_not_invoke_second_llm_call(self):
-        """验证流式接口不会在同一轮对话重复调用模型。"""
+    def test_user_ai_chat_stream_should_use_llm_stream_and_persist_messages(self):
+        """验证客服流式接口会使用真实模型流式输出并在结束后持久化消息。"""
         self.login_user()
+
+        def build_chunk(content: str, *, finished: bool = False) -> SimpleNamespace:
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        delta=SimpleNamespace(content=content),
+                        finish_reason="stop" if finished else None,
+                    )
+                ]
+            )
+
         with patch(
-            "apps.api.views.AIChatService.reply_customer_service",
+            "apps.api.views.AIChatService.prepare_user_chat_reply",
             return_value={
                 "scene": "customer_service",
-                "answer": "流式测试回复",
+                "answer": "",
                 "booking_assistant": None,
+                "agent_state": {
+                    "mode": "customer_service",
+                    "display_name": "AI 智能客服",
+                    "summary": "我会先核对当前账号可用的订单与通知，再给出解释。",
+                    "thinking": [],
+                    "tool_steps": [],
+                    "guardrails": [],
+                },
+                "call_mode": "llm",
+                "messages": [{"role": "system", "content": "test"}, {"role": "user", "content": "帮我查订单"}],
+                "temperature": 0.25,
             },
         ), patch("apps.api.views.AIChatService.stream_chat_completion") as mocked_stream:
+            mocked_stream.return_value = iter([
+                build_chunk("流式"),
+                build_chunk("测试回复", finished=True),
+            ])
             response = self.client.post(
                 "/api/v1/user/ai/chat/stream",
                 {"scene": "general", "question": "帮我查订单"},
                 format="json",
             )
+            payload = b"".join(response.streaming_content).decode("utf-8")
+            mocked_stream.assert_called_once()
         self.assertEqual(response.status_code, 200)
-        payload = b"".join(response.streaming_content).decode("utf-8")
         self.assertIn('"type": "meta"', payload)
+        self.assertIn('"agent_state"', payload)
         self.assertIn('"type": "chunk"', payload)
-        self.assertFalse(mocked_stream.called)
+        self.assertIn('"type": "done"', payload)
+        self.assertIn("流式", payload)
+        self.assertNotIn('"type": "thinking"', payload)
+        self.assertNotIn('"type": "tool"', payload)
+        self.assertNotIn('"type": "guardrail"', payload)
+
+        session = ChatSession.objects.filter(user=self.user).order_by("-id").first()
+        self.assertIsNotNone(session)
+        self.assertEqual(session.message_count, 2)
+        messages = list(ChatMessage.objects.filter(session=session).order_by("id"))
+        self.assertEqual(messages[0].content, "帮我查订单")
+        self.assertEqual(messages[1].content, "流式测试回复")
 
     def test_user_ai_chat_switch_city_overrides_previous_context(self):
         """验证用户改选城市时，订房助手会覆盖历史上下文并返回新城市酒店。"""
@@ -1891,11 +1998,37 @@ class UserApiExtendedTests(ApiBaseTestCase):
     def test_points_logs_should_return_current_points(self):
         """验证积分日志返回当前积分和会员等级。"""
         self.login_user()
+        UserProfile.objects.filter(user=self.user).update(points=30, consume_points=30, member_points=90)
+        PointsLog.objects.create(
+            user=self.user,
+            point_type=PointsLog.POINT_TYPE_CONSUME,
+            log_type=PointsLog.TYPE_REVIEW_REWARD,
+            points=30,
+            balance=30,
+            description="评价消费积分奖励",
+        )
+        PointsLog.objects.create(
+            user=self.user,
+            point_type=PointsLog.POINT_TYPE_MEMBER,
+            log_type=PointsLog.TYPE_CONSUME_REWARD,
+            points=90,
+            balance=90,
+            description="订单会员积分成长",
+        )
         response = self.client.get("/api/v1/user/points/logs")
         self.assertEqual(response.status_code, 200)
         data = response.json()["data"]
         self.assertIn("current_points", data)
+        self.assertEqual(data["consume_points"], 30)
+        self.assertEqual(data["member_points"], 90)
         self.assertIn("member_level", data)
+        self.assertEqual({item["point_type"] for item in data["items"]}, {PointsLog.POINT_TYPE_CONSUME, PointsLog.POINT_TYPE_MEMBER})
+
+        member_response = self.client.get("/api/v1/user/points/logs?point_type=member")
+        self.assertEqual(member_response.status_code, 200)
+        member_items = member_response.json()["data"]["items"]
+        self.assertTrue(member_items)
+        self.assertTrue(all(item["point_type"] == PointsLog.POINT_TYPE_MEMBER for item in member_items))
 
     def test_notice_unread_count(self):
         """验证未读通知数量接口。"""
@@ -2173,6 +2306,7 @@ class AdminApiExtendedTests(ApiBaseTestCase):
         }, format="json")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["data"]["member_level"], "platinum")
+        self.assertEqual(response.json()["data"]["member_points"], UserProfile.MEMBER_THRESHOLDS[UserProfile.MEMBER_PLATINUM])
 
     def test_admin_coupon_template_create_and_list(self):
         """验证管理端优惠券模板创建与列表。"""
@@ -2204,9 +2338,14 @@ class AdminApiExtendedTests(ApiBaseTestCase):
     def test_admin_members_overview(self):
         """验证会员概览接口。"""
         self.login_admin()
+        UserProfile.objects.filter(user=self.user).update(consume_points=320, member_points=880, points=320)
         response = self.client.get("/api/v1/admin/members/overview")
         self.assertEqual(response.status_code, 200)
+        payload = response.json()["data"]
         self.assertEqual(response.json()["code"], 0)
+        self.assertEqual(payload["total_consume_points"], 320)
+        self.assertEqual(payload["total_member_points"], 880)
+        self.assertIn("member_points_threshold", payload["levels"][0])
 
     def test_hotel_admin_cannot_create_coupon(self):
         """验证酒店管理员不能创建优惠券模板。"""

@@ -1,7 +1,8 @@
 .vscode/
 .idea/
+# Local assistant assets and notes
 .codex/
-worknote
+worknote/
 
 # Python
 __pycache__/
