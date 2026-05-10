@@ -16,6 +16,7 @@
         <option value="confirmed">已确认</option>
         <option value="paid">已支付</option>
         <option value="completed">已完成</option>
+        <option value="no_show">未入住</option>
         <option value="cancelled">已取消</option>
       </SelectField>
       <button class="rounded-lg bg-slate-100 px-3 py-2 text-sm hover:bg-slate-200" @click="loadList">搜索</button>
@@ -140,7 +141,7 @@ const isEligibleForAction = computed(() => {
   return String(selectedOrder.value.status) === 'checked_in'
 })
 
-const allowedStatuses = new Set(['pending_payment', 'paid', 'confirmed', 'checked_in', 'completed', 'cancelled'])
+const allowedStatuses = new Set(['pending_payment', 'paid', 'confirmed', 'checked_in', 'completed', 'no_show', 'cancelled'])
 
 function onPageChange(p: number) {
   page.value = p

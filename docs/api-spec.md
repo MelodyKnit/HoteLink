@@ -178,8 +178,10 @@
 - `/api/v1/user/notices` 支持 `GET`/`POST`/`DELETE`
 - `/api/v1/user/notices` 的 `GET` 响应项新增 `related_order_id`、`related_order_no`，用于订单通知直达详情页
 - `/api/v1/user/orders` 支持多维筛选参数：`status`、`payment_status`、`keyword`、`check_in_start`、`check_in_end`、`created_start`、`created_end`、`amount_min`、`amount_max`
+- 订单状态包含 `pending_payment/paid/confirmed/checked_in/completed/no_show/cancelled/refunding/refunded`；`no_show` 表示已支付或已确认订单在未办理入住的情况下超过生命周期窗口，支付状态仍保留为 `paid`，不自动退款
 - `/api/v1/user/orders/pay` 现返回 `payment_action` 与 `payment_record`：模拟支付会直接成功；真实网关会返回 `pending` 动作协议，由前端继续对接 SDK、跳转收银台或等待回调确认
-- `/api/v1/user/orders/detail` 返回订单积分字段：`points_earned` 表示本单获得消费积分，`member_points_earned` 表示本单累计会员积分
+- `/api/v1/user/orders/detail` 返回订单积分字段：`points_earned` 表示本单获得消费积分，`member_points_earned` 表示本单累计会员积分；同时返回 `no_show_at`、`is_lifecycle_anomaly`、`lifecycle_warning`，用于用户端展示“未入住/过期未办理”提示
+- 用户端订单详情、列表和支付上下文读取前会修复过期订单生命周期；用户取消订单时也会先修复生命周期，入住日已开始的已支付/已确认订单不可自助取消，需要联系酒店处理
 - `/api/v1/user/ai/chat` 与 `/api/v1/user/ai/chat/stream` 支持可选 `session_id`（续聊）；服务端会自动写入会话消息
 - `/api/v1/user/ai/chat` 与 `/api/v1/user/ai/chat/stream` 支持可选 `conversation_summary`（历史对话压缩摘要，最长 4000 字符）
 - `/api/v1/user/ai/chat` 返回 `answer`、`scene`、`session_id` 以及可选 `booking_assistant`
@@ -210,7 +212,8 @@
 - `GET /api/v1/admin/hotels` 支持 `type` 查询参数过滤酒店类型
 - `POST /api/v1/admin/hotels/batch-update` 批量更新酒店类型，接受 `hotel_ids`（列表）和 `type`
 - `GET /api/v1/common/dicts` 新增字典项：`hotel_type`（酒店/民宿/短租）、`hotel_facility`（16 项设施枚举）
-- `GET /api/v1/admin/orders` 支持筛选参数：`status`、`payment_status`、`keyword`、`check_in_date`（入住日期）、`check_out_date`（退房日期），其中 `check_in_date` / `check_out_date` 为精确日期过滤
+- `GET /api/v1/admin/orders` 支持筛选参数：`status`、`payment_status`、`keyword`、`check_in_date`（入住日期）、`check_out_date`（退房日期），其中 `check_in_date` / `check_out_date` 为精确日期过滤；列表读取前会修复已过期生命周期，因此可直接用 `status=no_show` 查询未入住订单
+- `POST /api/v1/admin/orders/change-status` 支持将入住日已开始且未入住的 `paid/confirmed` 订单标记为 `no_show`；`completed` 仅允许从 `checked_in` 流转，避免未入住订单被错误完结
 - 管理端列表接口支持 `ordering` 参数（白名单校验，非法值自动回退为 `-id`）：
   - `GET /api/v1/admin/orders`：`id`、`order_no`、`guest_name`、`guest_mobile`、`hotel__name`、`room_type__name`、`check_in_date`、`check_out_date`、`pay_amount`、`status`、`payment_status`、`created_at`、`updated_at`
   - `GET /api/v1/admin/users`：`id`、`user__username`、`nickname`、`mobile`、`gender`、`role`、`member_level`、`points`（兼容旧消费积分字段）、`member_points`、`consume_points`、`status`、`created_at`、`updated_at`
@@ -219,7 +222,8 @@
 
 注意：
 
-- `/api/v1/admin/orders/detail` 返回订单基础信息外，还包含 `payments`（支付记录列表）与订单状态时间字段（如 `paid_at`、`confirmed_at`、`checked_in_at`、`completed_at`、`cancelled_at`）
+- `/api/v1/admin/orders/detail` 返回订单基础信息外，还包含 `payments`（支付记录列表）与订单状态时间字段（如 `paid_at`、`confirmed_at`、`checked_in_at`、`completed_at`、`no_show_at`、`cancelled_at`），以及 `is_lifecycle_anomaly/lifecycle_warning`
+- 管理端入住必须满足订单已支付、状态为 `paid/confirmed`、入住日已开始且未超过离店日；退房、续住、换房只允许 `checked_in` 订单
 - BookingOrder 支付状态新增 `PAYMENT_REFUNDING`（退款中），用于标记已发起退款但尚未到账的中间态
 
 ---
@@ -259,8 +263,13 @@
   - `requires_confirmation`：是否建议二次确认
   - `priority`：动作优先级（数值越小越优先）
   - `tracking_id`：动作追踪 ID
+  - `badges`：可选，动作卡片短标签；订房酒店候选可展示参考距离、交通点或标签命中
+  - `highlights`：可选，动作卡片依据说明；订房酒店候选可展示“距某交通点约 N km（直线参考）”“标签/地址命中近地铁”等用户可理解证据
+  - `match_reason`：可选，本候选最主要的推荐依据，用于过程轨迹和卡片摘要
 - 流式接口的 `meta` 事件包含 `scene`、`session_id`、可选 `booking_assistant`，以及可选 `agent_state`
-- `meta.agent_state` 仅用于前端渲染安全过程卡片，字段以展示摘要、阶段说明和安全边界为主，不包含系统提示词或原始内部推理
+- `meta.agent_state` 仅用于前端渲染安全过程轨迹，字段以展示摘要、真实依据、小指标、阶段说明和安全边界为主，不包含系统提示词或原始内部推理
+- `meta.agent_state.facts[]` 展示本轮已确认的城市、酒店、订单、筛选条件、推荐依据或动作入口；`meta.agent_state.metrics[]` 展示候选酒店数、房型数、入口数、预算、评分、依据条数等轻量指标，均来自当前用户可访问上下文或公开在线酒店/房型数据
+- 前端消费 `agent_state` 时应保持紧凑展示，可对依据、指标与阶段明细做数量限制；该字段不是调试日志，也不应用于展示系统 Prompt、原始思考链或供应商响应原文
 - AI 查询范围限制在当前登录用户上下文与系统公开在线酒店/房型数据；取消、支付、开票等写操作只返回说明、按钮与确认提示
 
 ---

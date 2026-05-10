@@ -298,7 +298,7 @@ function handleSearch() {
 }
 
 function goAiBooking(question = '我想订酒店') {
-  router.push({ path: '/ai-booking', query: { ask: question } })
+  router.push({ path: '/ai-booking', query: { ask: question, ask_mode: 'new_only' } })
 }
 
 onMounted(async () => {

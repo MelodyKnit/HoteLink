@@ -16,6 +16,7 @@
         <option value="confirmed">已确认（补录）</option>
         <option value="paid">已支付（补录）</option>
         <option value="completed">已完成</option>
+        <option value="no_show">未入住</option>
         <option value="cancelled">已取消</option>
       </SelectField>
       <input
@@ -147,7 +148,7 @@ const consumeAmount = ref<number>(0)
 const depositDeduction = ref<number>(0)
 const remark = ref('')
 
-const allowedStatuses = new Set(['pending_payment', 'paid', 'confirmed', 'checked_in', 'completed', 'cancelled'])
+const allowedStatuses = new Set(['pending_payment', 'paid', 'confirmed', 'checked_in', 'completed', 'no_show', 'cancelled'])
 
 const canCheckOut = computed(() => {
   if (!selectedOrder.value) return false

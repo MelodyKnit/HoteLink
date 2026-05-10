@@ -55,6 +55,7 @@ class AIChatService:
     BOOKING_FAMILY_KEYWORDS = ("亲子", "家庭", "带娃", "儿童", "一家人")
     BOOKING_BUSINESS_KEYWORDS = ("出差", "商务", "商旅", "开会")
     BOOKING_NEARBY_KEYWORDS = ("附近", "最近", "离", "周边")
+    BOOKING_TRANSPORT_KEYWORDS = ("近地铁", "地铁口", "地铁", "交通方便", "交通便利", "高铁", "车站", "机场")
     CUSTOMER_SERVICE_KEYWORDS = (
         "订单",
         "取消",
@@ -76,6 +77,51 @@ class AIChatService:
         {"name": "广州塔", "city": "广州", "lat": 23.108500, "lng": 113.324500, "aliases": ["广州塔", "小蛮腰"]},
         {"name": "深圳湾公园", "city": "深圳", "lat": 22.506000, "lng": 113.935000, "aliases": ["深圳湾", "深圳湾公园"]},
     )
+    CITY_TRANSPORT_ANCHORS = {
+        "杭州": (
+            {"name": "龙翔桥站", "lat": 30.257320, "lng": 120.164540},
+            {"name": "凤起路站", "lat": 30.263700, "lng": 120.170100},
+            {"name": "钱江路站", "lat": 30.257400, "lng": 120.205700},
+            {"name": "江陵路站", "lat": 30.209900, "lng": 120.211300},
+            {"name": "杭州东站", "lat": 30.291600, "lng": 120.213800},
+        ),
+        "上海": (
+            {"name": "人民广场站", "lat": 31.233000, "lng": 121.475000},
+            {"name": "南京东路站", "lat": 31.238000, "lng": 121.484000},
+            {"name": "陆家嘴站", "lat": 31.236000, "lng": 121.502000},
+            {"name": "虹桥火车站", "lat": 31.194000, "lng": 121.318000},
+        ),
+        "北京": (
+            {"name": "国贸站", "lat": 39.909000, "lng": 116.461000},
+            {"name": "王府井站", "lat": 39.914000, "lng": 116.412000},
+            {"name": "西直门站", "lat": 39.940000, "lng": 116.354000},
+            {"name": "北京南站", "lat": 39.865000, "lng": 116.379000},
+        ),
+        "广州": (
+            {"name": "珠江新城站", "lat": 23.119000, "lng": 113.321000},
+            {"name": "体育西路站", "lat": 23.134000, "lng": 113.321000},
+            {"name": "广州塔站", "lat": 23.106000, "lng": 113.324000},
+            {"name": "广州南站", "lat": 22.990000, "lng": 113.269000},
+        ),
+        "深圳": (
+            {"name": "车公庙站", "lat": 22.533000, "lng": 114.028000},
+            {"name": "福田站", "lat": 22.540000, "lng": 114.056000},
+            {"name": "深圳北站", "lat": 22.610000, "lng": 114.030000},
+            {"name": "世界之窗站", "lat": 22.536000, "lng": 113.974000},
+        ),
+        "南京": (
+            {"name": "新街口站", "lat": 32.042000, "lng": 118.784000},
+            {"name": "南京南站", "lat": 31.971000, "lng": 118.797000},
+            {"name": "夫子庙站", "lat": 32.020000, "lng": 118.789000},
+            {"name": "奥体东站", "lat": 32.006000, "lng": 118.729000},
+        ),
+        "成都": (
+            {"name": "春熙路站", "lat": 30.657000, "lng": 104.081000},
+            {"name": "天府广场站", "lat": 30.657000, "lng": 104.066000},
+            {"name": "金融城站", "lat": 30.575000, "lng": 104.065000},
+            {"name": "成都东站", "lat": 30.629000, "lng": 104.141000},
+        ),
+    }
 
     def __init__(self, provider_name: str | None = None) -> None:
         self.settings = load_ai_settings()
@@ -581,6 +627,60 @@ class AIChatService:
             order_id=order_id,
         )
 
+    def _collect_agent_option_summary(self, booking_assistant: dict[str, Any] | None) -> dict[str, Any]:
+        """Collect display-safe action option facts for user-facing traces."""
+
+        options = booking_assistant.get("options", []) if isinstance(booking_assistant, dict) else []
+        if not isinstance(options, list):
+            options = []
+
+        labels: list[str] = []
+        confirmation_labels: list[str] = []
+        evidence: list[str] = []
+        for option in options:
+            if not isinstance(option, dict):
+                continue
+            label = str(option.get("label") or "").strip()
+            if label:
+                labels.append(label)
+            if option.get("requires_confirmation") is True and label:
+                confirmation_labels.append(label)
+            match_reason = str(option.get("match_reason") or "").strip()
+            if not match_reason and isinstance(option.get("highlights"), list):
+                match_reason = self._format_agent_values(
+                    [str(item) for item in option["highlights"] if isinstance(item, str)],
+                    limit=2,
+                )
+            if match_reason:
+                evidence.append(f"{label}：{match_reason}" if label else match_reason)
+
+        return {
+            "count": len(options),
+            "labels": labels,
+            "confirmation_count": len(confirmation_labels),
+            "confirmation_labels": confirmation_labels,
+            "evidence": evidence,
+            "evidence_count": len(evidence),
+        }
+
+    def _format_agent_values(self, values: list[str], *, limit: int = 3) -> str:
+        """Format a short de-duplicated value list for compact trace copy."""
+
+        cleaned: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            normalized = str(value or "").strip()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            cleaned.append(normalized)
+
+        if not cleaned:
+            return ""
+        visible = cleaned[:limit]
+        suffix = f" 等{len(cleaned)}项" if len(cleaned) > limit else ""
+        return "、".join(visible) + suffix
+
     def _build_customer_service_agent_state(
         self,
         *,
@@ -593,56 +693,108 @@ class AIChatService:
         context = booking_assistant.get("context", {}) if isinstance(booking_assistant, dict) else {}
         detected_intent = str(context.get("detected_intent") or self._detect_customer_service_intent(question))
         preferred_order_id = context.get("preferred_order_id") or order_id
-        summary = "我会先核对当前账号可用的订单与通知，再给出解释，并把可安全执行的页面入口整理到消息卡片中。"
-        if detected_intent == "cancel_order":
-            summary = "我会先确认当前订单是否处于可取消状态，再说明影响范围，并只提供需要用户确认的取消入口。"
-        elif detected_intent == "pay_order":
-            summary = "我会先核对待支付订单，再解释支付路径与注意事项，并把继续支付入口放到消息卡片中。"
-        elif detected_intent == "invoice":
-            summary = "我会先判断是否具备开票条件，再说明申请流程，并把发票入口整理到消息卡片中。"
-        elif detected_intent == "review":
-            summary = "我会优先结合当前账号的评价与订单上下文回答，并把相关页面入口整理到消息卡片中。"
+        option_summary = self._collect_agent_option_summary(booking_assistant)
+        option_count = int(option_summary["count"])
+        confirmation_count = int(option_summary["confirmation_count"])
+        action_text = self._format_agent_values(option_summary["labels"], limit=4)
+        confirmation_text = self._format_agent_values(option_summary["confirmation_labels"], limit=3)
+        intent_labels = {
+            "booking_request": "订房引导",
+            "cancel_order": "取消订单",
+            "pay_order": "订单支付",
+            "invoice": "发票",
+            "notification": "通知",
+            "review": "评价",
+            "order_status": "订单状态",
+            "general": "综合咨询",
+        }
+        intent_label = intent_labels.get(detected_intent, "综合咨询")
 
         order_scope_detail = (
             f"已锁定当前会话关联订单 #{preferred_order_id}，仅结合该订单和当前账号最近订单说明。"
             if preferred_order_id
             else "未指定订单时，只读取当前账号最近订单、通知与评价作为参考。"
         )
+        order_markers = []
+        if context.get("requested_order_id"):
+            order_markers.append(f"指定订单 #{context['requested_order_id']}")
+        if context.get("preferred_order_id"):
+            order_markers.append(f"优先订单 #{context['preferred_order_id']}")
+        if context.get("unpaid_order_id"):
+            order_markers.append(f"待支付订单 #{context['unpaid_order_id']}")
+        if context.get("cancellable_order_id"):
+            order_markers.append(f"可取消订单 #{context['cancellable_order_id']}")
+        order_context_text = self._format_agent_values(order_markers, limit=4)
+        action_detail = (
+            f"已生成 {option_count} 个入口：{action_text}。"
+            if action_text
+            else "当前没有生成可直接跳转的业务入口，仅给出文字说明。"
+        )
+        if confirmation_count:
+            action_detail += f" 其中 {confirmation_count} 个入口需要用户再次确认：{confirmation_text}。"
+
+        summary_parts = [f"已识别为{intent_label}诉求"]
+        summary_parts.append(f"关联订单 #{preferred_order_id}" if preferred_order_id else "按当前账号最近业务上下文核对")
+        if option_count:
+            summary_parts.append(f"整理了 {option_count} 个可执行入口")
+        if confirmation_count:
+            summary_parts.append(f"{confirmation_count} 个入口需要确认")
+        summary = "；".join(summary_parts) + "。"
+
+        facts = [
+            f"问题类型：{intent_label}",
+            f"订单范围：{order_context_text or order_scope_detail}",
+        ]
+        if action_text:
+            facts.append(f"可用入口：{action_text}")
+        if confirmation_count:
+            facts.append(f"确认边界：{confirmation_text} 需要用户主动确认")
+
+        metrics = [
+            {"label": "入口", "value": str(option_count)},
+        ]
+        if preferred_order_id:
+            metrics.append({"label": "订单", "value": f"#{preferred_order_id}"})
+        if confirmation_count:
+            metrics.append({"label": "需确认", "value": str(confirmation_count)})
+
         return {
             "mode": "customer_service",
             "display_name": "AI 智能客服",
             "summary": summary,
+            "facts": facts,
+            "metrics": metrics,
             "thinking": [
                 {
                     "id": "classify-request",
                     "title": "识别问题类型",
-                    "content": "先判断这是订单、支付、发票、会员还是评价问题，再决定回答路径和需要的确认步骤。",
+                    "content": f"用户问题命中「{intent_label}」，先决定是否需要订单、支付、发票、通知或评价上下文。",
                 },
                 {
                     "id": "scope-data",
                     "title": "限制查询范围",
-                    "content": "只结合当前登录账号自己的订单、通知、评价与当前会话上下文，不读取其他用户的数据。",
+                    "content": order_scope_detail,
                 },
             ],
             "tool_steps": [
                 {
                     "id": "load-user-context",
                     "label": "读取当前账号上下文",
-                    "detail": order_scope_detail,
+                    "detail": order_context_text or order_scope_detail,
                     "status": "completed",
                     "read_only": True,
                 },
                 {
                     "id": "prepare-safe-actions",
                     "label": "整理安全操作入口",
-                    "detail": "只返回跳转、查看和确认提示，不直接执行取消订单、支付或开票等写操作。",
+                    "detail": action_detail,
                     "status": "completed",
                     "read_only": True,
                 },
                 {
                     "id": "compose-answer",
                     "label": "生成自然回复",
-                    "detail": "基于系统真实数据组织可执行说明，并提示用户可直接使用消息中的快捷卡片。",
+                    "detail": "基于当前账号可见数据组织说明；支付、取消、开票等写操作仍由用户点击业务按钮后执行。",
                     "status": "completed",
                     "read_only": True,
                 },
@@ -660,49 +812,163 @@ class AIChatService:
         """Build safe trace metadata for the booking assistant."""
 
         phase = str((booking_assistant or {}).get("phase") or "")
+        context = booking_assistant.get("context", {}) if isinstance(booking_assistant, dict) else {}
+        option_summary = self._collect_agent_option_summary(booking_assistant)
+        option_count = int(option_summary["count"])
+        option_labels = self._format_agent_values(option_summary["labels"], limit=4)
+        option_evidence = self._format_agent_values(option_summary["evidence"], limit=3)
+        option_evidence_count = int(option_summary["evidence_count"])
+        phase_labels = {
+            "switch_to_customer_service": "切换客服",
+            "select_room_type": "选择房型",
+            "select_hotel": "筛选酒店",
+            "select_city": "选择城市",
+            "clarify_poi": "补充地标",
+            "clarify_radius": "补充范围",
+        }
+        phase_label = phase_labels.get(phase, "理解需求")
+        selected_city = str(context.get("selected_city") or "").strip()
+        selected_hotel_id = context.get("selected_hotel_id")
+        nearby_poi_name = str(context.get("nearby_poi_name") or "").strip()
+        nearby_radius_km = context.get("nearby_radius_km")
+        budget_max = context.get("budget_max")
+        min_rating = context.get("min_rating")
+        sort_labels = {
+            "price_asc": "价格从低到高",
+            "price_desc": "价格从高到低",
+            "rating_desc": "评分优先",
+        }
+
+        preferences: list[str] = []
+        if budget_max:
+            preferences.append(f"预算≤{budget_max}元")
+        if min_rating:
+            preferences.append(f"评分≥{min_rating}")
+        if context.get("needs_family"):
+            preferences.append("亲子/家庭")
+        if context.get("needs_business"):
+            preferences.append("商务出行")
+        if context.get("prefer_transport"):
+            preferences.append("交通便利")
+        if nearby_poi_name:
+            preferences.append(f"地标：{nearby_poi_name}")
+        if nearby_radius_km:
+            preferences.append(f"{nearby_radius_km}公里内")
+        sort_by = str(context.get("sort_by") or "").strip()
+        if sort_by in sort_labels:
+            preferences.append(sort_labels[sort_by])
+        preference_text = self._format_agent_values(preferences, limit=5)
+
+        candidate_label = "入口"
+        if phase == "select_city":
+            candidate_label = "城市"
+        elif phase == "select_hotel":
+            candidate_label = "候选酒店"
+        elif phase == "select_room_type":
+            candidate_label = "房型"
+
         summary = "我会先识别城市、酒店和偏好条件，再只基于系统在线酒店与房型数据给出下一步。"
         if phase == "switch_to_customer_service":
             summary = "我识别到这是售后或账户类问题，因此不会误导您进入订房流程，而是引导切换到客服助手继续。"
         elif phase == "select_room_type":
-            summary = "酒店已经定位完成，我会直接整理当前在线房型和下单入口，减少重复确认。"
+            summary = f"已定位酒店 #{selected_hotel_id}，读取到 {option_count} 个在线房型入口；下一步只提供订单填写跳转，不替用户下单。"
         elif phase == "select_hotel":
-            summary = "城市或筛选条件已经明确，我会先返回当前系统内符合条件的酒店，再让您继续选房型。"
+            scope_text = selected_city or "当前城市"
+            filter_text = f"，并按{preference_text}筛选" if preference_text else ""
+            summary = f"已锁定{scope_text}{filter_text}，返回 {option_count} 个系统在线候选酒店。"
+        elif phase == "select_city":
+            summary = f"当前还没有锁定城市，已列出 {option_count} 个系统可预订城市供继续选择。"
+        elif phase == "clarify_poi":
+            summary = f"已识别城市{selected_city or '未明确'}，但缺少具体地标；先给出 {option_count} 个补充入口避免误筛。"
+        elif phase == "clarify_radius":
+            summary = f"已识别地标{nearby_poi_name or '目标地点'}，当前范围内没有可展示酒店；先提供 {option_count} 个扩大范围选项。"
+
+        facts = [
+            f"当前阶段：{phase_label}",
+        ]
+        if selected_city:
+            facts.append(f"城市：{selected_city}")
+        if selected_hotel_id:
+            facts.append(f"酒店：#{selected_hotel_id}")
+        if preference_text:
+            facts.append(f"筛选条件：{preference_text}")
+        if option_evidence:
+            facts.append(f"推荐依据：{option_evidence}")
+        if option_labels:
+            facts.append(f"返回{candidate_label}：{option_labels}")
+
+        metrics = [
+            {"label": candidate_label, "value": str(option_count)},
+        ]
+        if budget_max:
+            metrics.append({"label": "预算", "value": f"≤{budget_max}"})
+        if min_rating:
+            metrics.append({"label": "评分", "value": f"≥{min_rating}"})
+        if nearby_radius_km:
+            metrics.append({"label": "范围", "value": f"{nearby_radius_km}km"})
+        if option_evidence_count:
+            metrics.append({"label": "依据", "value": str(option_evidence_count)})
+
+        extracted_parts = []
+        if selected_city:
+            extracted_parts.append(f"城市 {selected_city}")
+        if selected_hotel_id:
+            extracted_parts.append(f"酒店 #{selected_hotel_id}")
+        if preference_text:
+            extracted_parts.append(preference_text)
+        extracted_text = self._format_agent_values(extracted_parts, limit=5) or "尚未拿到足够订房条件"
+
+        lookup_detail = "仅读取系统公开展示的在线酒店、房型与参考价格信息，不访问其他用户订单数据。"
+        if phase == "select_city":
+            lookup_detail = f"读取系统在线城市，返回 {option_count} 个城市入口。"
+        elif phase == "select_hotel":
+            lookup_detail = f"读取{selected_city or '当前城市'}在线酒店，按{preference_text or '推荐、评分和价格'}排序后返回 {option_count} 个候选。"
+            if option_evidence:
+                lookup_detail += f" 本轮可展示依据：{option_evidence}。"
+        elif phase == "select_room_type":
+            lookup_detail = f"读取酒店 #{selected_hotel_id} 的在线房型，返回 {option_count} 个可下单房型入口。"
+        elif phase == "clarify_poi":
+            lookup_detail = "用户表达了附近/最近诉求，但缺少可精确匹配的地标，先收集地标和范围。"
+        elif phase == "clarify_radius":
+            lookup_detail = f"已按{nearby_poi_name or '目标地点'}附近范围检索，但当前结果为空，建议扩大半径。"
 
         return {
             "mode": "booking_assistant",
             "display_name": "AI 订房助手",
             "summary": summary,
+            "facts": facts,
+            "metrics": metrics,
             "thinking": [
                 {
                     "id": "extract-booking-slots",
                     "title": "提取订房条件",
-                    "content": "识别城市、酒店关键词、预算、评分和地理位置偏好，尽量少重复追问已经明确的信息。",
+                    "content": f"已从当前消息和会话上下文提取：{extracted_text}。",
                 },
                 {
                     "id": "confirm-online-data",
-                    "title": "核对在线可售数据",
-                    "content": "只根据系统当前在线酒店、房型和公开价格信息引导，不编造库存、价格或政策。",
+                    "title": "判断下一步动作",
+                    "content": f"当前阶段为「{phase_label}」，因此只返回与该阶段匹配的{candidate_label}或补充入口。",
                 },
             ],
             "tool_steps": [
                 {
                     "id": "parse-booking-context",
                     "label": "解析订房上下文",
-                    "detail": "结合当前消息与历史订房上下文，判断是否需要重置城市、酒店或筛选偏好。",
+                    "detail": f"结合当前消息与历史上下文，保留可复用条件：{extracted_text}。",
                     "status": "completed",
                     "read_only": True,
                 },
                 {
                     "id": "load-online-hotels",
                     "label": "查询在线酒店与房型",
-                    "detail": "仅读取系统公开展示的在线酒店、房型与参考价格信息，不访问其他用户订单数据。",
+                    "detail": lookup_detail,
                     "status": "completed",
                     "read_only": True,
                 },
                 {
                     "id": "return-structured-options",
                     "label": "返回结构化操作卡片",
-                    "detail": "将可点击的城市、酒店、房型或跳转入口整理为消息卡片，便于继续完成预订。",
+                    "detail": f"已整理 {option_count} 个{candidate_label}卡片：{option_labels or '暂无可点击结果'}。",
                     "status": "completed",
                     "read_only": True,
                 },
@@ -1230,7 +1496,7 @@ class AIChatService:
         )
 
         if isinstance(matched_hotel, list):
-            options = [self._build_hotel_option(item) for item in matched_hotel[:6]]
+            options = [self._build_hotel_option(item, preference_context=context) for item in matched_hotel[:6]]
             answer = "我识别到您提到了多个可预订酒店，先点一个酒店，我直接带您看该酒店可下单的房型。"
             context["selected_hotel_id"] = None
             context["last_hotel_ids"] = [item.id for item in matched_hotel[:6]]
@@ -1334,7 +1600,7 @@ class AIChatService:
                     "intent": "hotel_booking",
                     "phase": "select_hotel",
                     "context": context,
-                    "options": [self._build_hotel_option(hotel) for hotel in top_hotels],
+                    "options": [self._build_hotel_option(hotel, preference_context=context) for hotel in top_hotels],
                     "answer": answer,
                 }
 
@@ -1652,6 +1918,7 @@ class AIChatService:
         budget_max = context.get("budget_max")
         min_rating = context.get("min_rating")
         sort_by = context.get("sort_by")
+        prefer_transport = bool(context.get("prefer_transport"))
 
         if isinstance(budget_max, int):
             filtered_budget = [hotel for hotel in filtered if hotel.min_price and float(hotel.min_price) <= budget_max]
@@ -1663,13 +1930,133 @@ class AIChatService:
             if filtered_rating:
                 filtered = filtered_rating
 
+        transport_prefix = self._transport_rank_key if prefer_transport else lambda hotel: (1, 999.0, 99)
         if sort_by == "price_asc":
-            return sorted(filtered, key=lambda hotel: (float(hotel.min_price or 0), -float(hotel.rating or 0), hotel.id))
+            return sorted(filtered, key=lambda hotel: (*transport_prefix(hotel), float(hotel.min_price or 0), -float(hotel.rating or 0), hotel.id))
         if sort_by == "rating_desc":
-            return sorted(filtered, key=lambda hotel: (-float(hotel.rating or 0), float(hotel.min_price or 0), hotel.id))
+            return sorted(filtered, key=lambda hotel: (*transport_prefix(hotel), -float(hotel.rating or 0), float(hotel.min_price or 0), hotel.id))
         if sort_by == "price_desc":
-            return sorted(filtered, key=lambda hotel: (-float(hotel.min_price or 0), -float(hotel.rating or 0), hotel.id))
-        return sorted(filtered, key=lambda hotel: (-int(bool(hotel.is_recommended)), -float(hotel.rating or 0), float(hotel.min_price or 0), hotel.id))
+            return sorted(filtered, key=lambda hotel: (*transport_prefix(hotel), -float(hotel.min_price or 0), -float(hotel.rating or 0), hotel.id))
+        return sorted(filtered, key=lambda hotel: (*transport_prefix(hotel), -int(bool(hotel.is_recommended)), -float(hotel.rating or 0), float(hotel.min_price or 0), hotel.id))
+
+    def _transport_rank_key(self, hotel: Hotel) -> tuple[int, float, int]:
+        """Return a stable sort key that favors concrete transport evidence."""
+
+        display = self._build_hotel_transport_display(hotel)
+        has_positive_evidence = bool(display.get("has_positive_evidence"))
+        distance = display.get("transport_distance_km")
+        distance_value = float(distance) if isinstance(distance, (int, float)) else 999.0
+        evidence_count = len(display.get("highlights", [])) if isinstance(display.get("highlights"), list) else 0
+        return (0 if has_positive_evidence else 1, distance_value, -evidence_count)
+
+    def _normalize_hotel_text_items(self, value: Any) -> list[str]:
+        """Normalize hotel JSON-list text fields into short strings."""
+
+        if not isinstance(value, list):
+            return []
+        result: list[str] = []
+        for item in value:
+            if item is None:
+                continue
+            text = str(item).strip()
+            if text:
+                result.append(text)
+        return result
+
+    def _find_nearest_transport_anchor(self, hotel: Hotel) -> dict[str, Any] | None:
+        """Find the nearest configured transport reference point for a hotel."""
+
+        anchors = self.CITY_TRANSPORT_ANCHORS.get(hotel.city or "")
+        if not anchors or hotel.latitude is None or hotel.longitude is None:
+            return None
+
+        nearest: dict[str, Any] | None = None
+        for anchor in anchors:
+            distance_km = self._haversine_km(
+                float(hotel.latitude),
+                float(hotel.longitude),
+                float(anchor["lat"]),
+                float(anchor["lng"]),
+            )
+            if nearest is None or distance_km < float(nearest["distance_km"]):
+                nearest = {
+                    "name": anchor["name"],
+                    "distance_km": round(distance_km, 2),
+                }
+        return nearest
+
+    def _collect_transport_text_evidence(self, hotel: Hotel) -> list[str]:
+        """Collect display-safe transport evidence from hotel tags, address, and facilities."""
+
+        evidence: list[str] = []
+        tags = self._normalize_hotel_text_items(hotel.tags)
+        facilities = self._normalize_hotel_text_items(hotel.facilities)
+        searchable_fields = [hotel.name or "", hotel.address or "", *tags]
+        matched_terms: list[str] = []
+        for keyword in self.BOOKING_TRANSPORT_KEYWORDS:
+            if any(keyword in field for field in searchable_fields):
+                matched_terms.append(keyword)
+        if "近地铁" in matched_terms and "地铁" in matched_terms:
+            matched_terms.remove("地铁")
+
+        if matched_terms:
+            evidence.append(f"标签/地址命中：{self._format_agent_values(matched_terms, limit=2)}")
+        if "airport_shuttle" in facilities:
+            evidence.append("设施包含接送机")
+        return evidence
+
+    def _build_hotel_transport_display(self, hotel: Hotel) -> dict[str, Any]:
+        """Build compact transport evidence used by AI option cards and traces."""
+
+        highlights: list[str] = []
+        badges: list[str] = []
+        anchor = self._find_nearest_transport_anchor(hotel)
+        if anchor is not None:
+            distance_km = float(anchor["distance_km"])
+            highlights.append(f"距{anchor['name']}约{distance_km:.2f}km（直线参考）")
+            badges.append(f"{distance_km:.1f}km")
+            badges.append(anchor["name"])
+
+        text_evidence = self._collect_transport_text_evidence(hotel)
+        highlights.extend(text_evidence[:2])
+        if text_evidence:
+            badges.append("交通标签")
+
+        has_positive_evidence = bool(anchor is not None or text_evidence)
+        if not has_positive_evidence:
+            if hotel.latitude is None or hotel.longitude is None:
+                highlights.append("酒店暂无坐标，无法计算到交通点距离")
+            else:
+                highlights.append("暂无地铁标签，按评分与价格补位")
+
+        return {
+            "highlights": highlights[:3],
+            "badges": badges[:3],
+            "match_reason": highlights[0] if highlights else "",
+            "has_positive_evidence": has_positive_evidence,
+            "transport_anchor": anchor["name"] if anchor is not None else "",
+            "transport_distance_km": anchor["distance_km"] if anchor is not None else None,
+        }
+
+    def _build_transport_answer_hint(self, *, selected_city: str, hotels: list[Hotel]) -> str:
+        """Summarize concrete transport evidence for the natural-language reply."""
+
+        examples: list[str] = []
+        for hotel in hotels[:3]:
+            display = self._build_hotel_transport_display(hotel)
+            reason = str(display.get("match_reason") or "").strip()
+            if reason:
+                examples.append(f"{hotel.name}：{reason}")
+
+        if examples:
+            return (
+                "我优先查看交通证据，"
+                f"{self._format_agent_values(examples, limit=2)}。"
+                "距离为直线参考，实际步行/驾车请以地图路线为准。"
+            )
+        if self.CITY_TRANSPORT_ANCHORS.get(selected_city):
+            return "该城市已配置交通参考点，但当前候选酒店缺少可展示的坐标或交通标签。"
+        return "当前该城市尚未配置交通参考点，先按酒店标签、评分与价格做保守排序。"
 
     def _is_repeated_hotel_options(self, hotels: list[Hotel], context: dict[str, Any]) -> bool:
         last_ids = context.get("last_hotel_ids") or []
@@ -1706,7 +2093,11 @@ class AIChatService:
             reasons.append("交通便利偏好")
 
         reason_text = f"（已按{'、'.join(reasons)}筛选）" if reasons else ""
-        transport_hint = "当前系统未提供实时地铁/市中心距离字段，我先按评分与价格为您做近似优选。" if prefer_transport else ""
+        transport_hint = (
+            self._build_transport_answer_hint(selected_city=selected_city, hotels=hotels)
+            if prefer_transport
+            else ""
+        )
 
         if repeated:
             return (
@@ -1979,26 +2370,65 @@ class AIChatService:
         distance_km: float | None = None,
         poi_name: str | None = None,
         navigate_to_detail: bool = False,
+        preference_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         description = f"{hotel.city} | {hotel.star}星 | 评分{hotel.rating} | ¥{hotel.min_price}起"
         query: dict[str, str] = {}
+        highlights: list[str] = []
+        badges: list[str] = []
+        match_reason = ""
         if distance_km is not None:
             description = f"{description} | 距{poi_name or '目标点'}约{distance_km:.2f}km"
             query["distance_km"] = f"{distance_km:.2f}"
             if poi_name:
                 query["poi"] = poi_name
+            highlights.append(f"距{poi_name or '目标点'}约{distance_km:.2f}km（直线参考）")
+            badges.append(f"{distance_km:.1f}km")
+            match_reason = highlights[0]
+
+        if preference_context and preference_context.get("prefer_transport"):
+            transport_display = self._build_hotel_transport_display(hotel)
+            highlights.extend(
+                item
+                for item in transport_display.get("highlights", [])
+                if isinstance(item, str) and item not in highlights
+            )
+            badges.extend(
+                item
+                for item in transport_display.get("badges", [])
+                if isinstance(item, str) and item not in badges
+            )
+            if not match_reason:
+                match_reason = str(transport_display.get("match_reason") or "")
+            transport_distance = transport_display.get("transport_distance_km")
+            transport_anchor = str(transport_display.get("transport_anchor") or "")
+            if isinstance(transport_distance, (int, float)):
+                query.setdefault("distance_km", f"{float(transport_distance):.2f}")
+            if transport_anchor:
+                query.setdefault("poi", transport_anchor)
 
         option = {
             "type": "select_hotel",
             "label": hotel.name,
             "value": str(hotel.id),
             "description": description,
+            "hotel_summary": {
+                "city": str(hotel.city or ""),
+                "star": str(hotel.star or ""),
+                "rating": str(hotel.rating or ""),
+                "min_price": str(hotel.min_price or ""),
+            },
+            "badges": badges[:3],
+            "highlights": highlights[:3],
+            "match_reason": match_reason,
             "payload": {
                 "intent": "hotel_booking",
                 "selected_city": hotel.city,
                 "selected_hotel_id": hotel.id,
             },
         }
+        if query:
+            option["query"] = query
         if navigate_to_detail:
             option["type"] = "navigate_hotel"
             option["route"] = f"/hotels/{hotel.id}"

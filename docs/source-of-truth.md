@@ -40,6 +40,7 @@
 - `UserProfile` 使用双积分口径：`member_points` 是会员成长积分，只用于等级升级；`consume_points` 是可兑换消费积分余额；`points` 作为旧接口兼容字段保留并等同消费积分。
 - `PointsLog` 使用 `point_type=consume|member` 区分两类积分流水，`balance` 表示对应类型的变动后余额。
 - `BookingOrder.points_earned` 表示本单发放的消费积分，`BookingOrder.member_points_earned` 表示本单累计的会员积分。
+- `BookingOrder.status` 包含 `no_show`，用于表示已支付/已确认订单在未办理入住的情况下超过生命周期窗口；`no_show_at` 记录标记时间，支付状态不因未入住自动改为退款。
 
 ### 2.3 Celery 与定时任务
 
@@ -47,6 +48,7 @@
   - `apps.bookings.tasks.auto_cancel_unpaid_order`
   - `apps.bookings.tasks.sweep_timeout_unpaid_orders`
   - `apps.bookings.tasks.sweep_order_lifecycle_anomalies`
+- 订单生命周期巡检会自动完结过期在住订单，并将过期未入住的 `paid/confirmed` 订单标记为 `no_show`；订单列表/详情读取和关键写操作也会触发生命周期修复，避免展示或操作陈旧状态。
 - Beat 调度已在 `config/settings/base.py` 配置：
   - `order-timeout-sweep`
   - `order-lifecycle-sweep`

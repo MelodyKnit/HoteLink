@@ -245,10 +245,14 @@ class BookingOrderSerializer(serializers.ModelSerializer):
 
     def get_lifecycle_warning(self, obj):
         today = timezone.localdate()
+        if obj.status == BookingOrder.STATUS_NO_SHOW:
+            return f"订单离店日 {obj.check_out_date} 已过，系统已标记为未入住。如需处理退款或申诉，请联系客服。"
         if obj.status == BookingOrder.STATUS_CHECKED_IN and obj.check_out_date < today:
             return f"订单离店日 {obj.check_out_date} 已过，系统将自动完结"
         if obj.status in {BookingOrder.STATUS_PAID, BookingOrder.STATUS_CONFIRMED} and obj.check_out_date < today:
-            return f"订单离店日 {obj.check_out_date} 已过，仍未办理入住/退房，请人工核查"
+            return f"订单离店日 {obj.check_out_date} 已过，仍未办理入住，系统将标记为未入住"
+        if obj.status in {BookingOrder.STATUS_PAID, BookingOrder.STATUS_CONFIRMED} and obj.check_in_date < today:
+            return f"订单入住日 {obj.check_in_date} 已过，尚未办理入住，请尽快联系酒店确认"
         return ""
 
     def get_latest_payment(self, obj):
@@ -276,6 +280,7 @@ class BookingOrderSerializer(serializers.ModelSerializer):
             "confirmed_at",
             "checked_in_at",
             "completed_at",
+            "no_show_at",
             "cancelled_at",
             "check_in_date",
             "check_out_date",
@@ -302,16 +307,10 @@ class BookingOrderSerializer(serializers.ModelSerializer):
 
 
 class UserBookingOrderSerializer(BookingOrderSerializer):
-    """用户端订单序列化器：隐藏管理员备注和运维信息。"""
-
-    def get_lifecycle_warning(self, obj):
-        return ""
-
-    def get_is_lifecycle_anomaly(self, obj):
-        return False
+    """用户端订单序列化器：隐藏管理员备注但保留必要生命周期提示。"""
 
     class Meta(BookingOrderSerializer.Meta):
-        fields = [f for f in BookingOrderSerializer.Meta.fields if f not in ("operator_remark", "is_lifecycle_anomaly", "lifecycle_warning")]
+        fields = [f for f in BookingOrderSerializer.Meta.fields if f != "operator_remark"]
 
 
 class PaymentRecordSerializer(serializers.ModelSerializer):
@@ -496,6 +495,9 @@ class HotelUpdateSerializer(HotelCreateSerializer):
     """HotelUpdate 序列化器：用于接口参数校验或响应数据转换。"""
     hotel_id = serializers.IntegerField(min_value=1)
 
+    class Meta(HotelCreateSerializer.Meta):
+        fields = ["hotel_id", *HotelCreateSerializer.Meta.fields]
+
 
 class RoomTypeCreateSerializer(serializers.ModelSerializer):
     """RoomTypeCreate 序列化器：用于接口参数校验或响应数据转换。"""
@@ -523,6 +525,9 @@ class RoomTypeCreateSerializer(serializers.ModelSerializer):
 class RoomTypeUpdateSerializer(RoomTypeCreateSerializer):
     """RoomTypeUpdate 序列化器：用于接口参数校验或响应数据转换。"""
     room_type_id = serializers.IntegerField(min_value=1)
+
+    class Meta(RoomTypeCreateSerializer.Meta):
+        fields = ["room_type_id", *RoomTypeCreateSerializer.Meta.fields]
 
 
 class InventoryUpdateSerializer(serializers.Serializer):

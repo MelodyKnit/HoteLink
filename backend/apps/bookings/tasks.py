@@ -110,21 +110,89 @@ def complete_overdue_checked_in_order(order, *, today) -> bool:
     return True
 
 
-def mark_overdue_unchecked_in_order(order, *, today) -> bool:
-    """标记已过离店日期但仍未办理入住/退房的已支付订单。"""
+def mark_no_show_order(order, *, today) -> bool:
+    """将离店日期已过且未入住的已支付订单标记为未入住。"""
     from apps.bookings.models import BookingOrder
+    from apps.operations.models import SystemNotice
 
     if order.status not in {BookingOrder.STATUS_PAID, BookingOrder.STATUS_CONFIRMED}:
+        return False
+    if order.payment_status != BookingOrder.PAYMENT_PAID:
         return False
     if order.check_out_date >= today:
         return False
 
-    note = f"系统异常提醒：离店日 {order.check_out_date} 已过，仍未办理入住/退房，请人工核查"
-    changed = append_operator_remark(order, note)
-    if not changed:
-        return False
-    order.save(update_fields=["operator_remark", "updated_at"])
+    note = f"系统自动标记未入住：离店日 {order.check_out_date} 已过，订单未办理入住/退房"
+    remark_changed = append_operator_remark(order, note)
+    order.status = BookingOrder.STATUS_NO_SHOW
+    order.no_show_at = timezone.now()
+    update_fields = ["status", "no_show_at", "updated_at"]
+    if remark_changed:
+        update_fields.append("operator_remark")
+    order.save(update_fields=update_fields)
+
+    SystemNotice.objects.create(
+        user_id=order.user_id,
+        notice_type=SystemNotice.TYPE_ORDER,
+        title="订单已标记为未入住",
+        content=f"订单 {order.order_no} 的离店日期已过，系统已标记为未入住。支付记录仍保留，如需处理退款或申诉请联系客服。",
+        related_order=order,
+    )
     return True
+
+
+def refresh_order_lifecycle(order, *, today=None) -> bool:
+    """刷新已加锁订单的过期生命周期状态。"""
+    current_day = today or timezone.localdate()
+    if complete_overdue_checked_in_order(order, today=current_day):
+        return True
+    if mark_no_show_order(order, today=current_day):
+        return True
+    return False
+
+
+def repair_overdue_order_lifecycles(*, user_id=None, batch_size: int = 200, today=None) -> dict:
+    """批量修复过期订单状态，避免列表或详情继续展示陈旧生命周期。"""
+    from apps.bookings.models import BookingOrder
+
+    current_day = today or timezone.localdate()
+    safe_batch_size = max(int(batch_size), 1)
+    queryset = BookingOrder.objects.filter(
+        status__in=[
+            BookingOrder.STATUS_CHECKED_IN,
+            BookingOrder.STATUS_PAID,
+            BookingOrder.STATUS_CONFIRMED,
+        ],
+        check_out_date__lt=current_day,
+    )
+    if user_id is not None:
+        queryset = queryset.filter(user_id=user_id)
+
+    order_ids = list(
+        queryset.order_by("check_out_date", "id").values_list("id", flat=True)[:safe_batch_size]
+    )
+
+    completed_count = 0
+    no_show_count = 0
+    for order_id in order_ids:
+        with transaction.atomic():
+            order = BookingOrder.objects.select_for_update().filter(pk=order_id).first()
+            if not order:
+                continue
+            previous_status = order.status
+            if not refresh_order_lifecycle(order, today=current_day):
+                continue
+            if order.status == BookingOrder.STATUS_COMPLETED and previous_status != order.status:
+                completed_count += 1
+            if order.status == BookingOrder.STATUS_NO_SHOW and previous_status != order.status:
+                no_show_count += 1
+
+    return {
+        "checked": len(order_ids),
+        "auto_completed": completed_count,
+        "marked_no_show": no_show_count,
+        "date": current_day.isoformat(),
+    }
 
 
 @shared_task(bind=True, max_retries=2, default_retry_delay=30)
@@ -192,55 +260,18 @@ def sweep_order_lifecycle_anomalies(self, batch_size: int = 500):
     safe_batch_size = max(int(batch_size), 1)
     today = timezone.localdate()
 
-    overdue_checked_in_ids = list(
-        BookingOrder.objects.filter(
-            status=BookingOrder.STATUS_CHECKED_IN,
-            check_out_date__lt=today,
-        )
-        .order_by("check_out_date", "id")
-        .values_list("id", flat=True)[:safe_batch_size]
-    )
-
-    completed_count = 0
-    for order_id in overdue_checked_in_ids:
-        with transaction.atomic():
-            order = BookingOrder.objects.select_for_update().filter(pk=order_id).first()
-            if not order:
-                continue
-            if complete_overdue_checked_in_order(order, today=today):
-                completed_count += 1
-
-    overdue_unchecked_in_ids = list(
-        BookingOrder.objects.filter(
-            status__in=[BookingOrder.STATUS_PAID, BookingOrder.STATUS_CONFIRMED],
-            check_out_date__lt=today,
-        )
-        .order_by("check_out_date", "id")
-        .values_list("id", flat=True)[:safe_batch_size]
-    )
-
-    marked_count = 0
-    for order_id in overdue_unchecked_in_ids:
-        with transaction.atomic():
-            order = BookingOrder.objects.select_for_update().filter(pk=order_id).first()
-            if not order:
-                continue
-            if mark_overdue_unchecked_in_order(order, today=today):
-                marked_count += 1
+    result = repair_overdue_order_lifecycles(batch_size=safe_batch_size, today=today)
 
     logger.info(
-        "sweep_order_lifecycle_anomalies: overdue_checked_in=%s auto_completed=%s overdue_unchecked_in=%s marked=%s today=%s",
-        len(overdue_checked_in_ids),
-        completed_count,
-        len(overdue_unchecked_in_ids),
-        marked_count,
+        "sweep_order_lifecycle_anomalies: checked=%s auto_completed=%s marked_no_show=%s today=%s",
+        result["checked"],
+        result["auto_completed"],
+        result["marked_no_show"],
         today.isoformat(),
     )
     return {
-        "overdue_checked_in": len(overdue_checked_in_ids),
-        "auto_completed": completed_count,
-        "overdue_unchecked_in": len(overdue_unchecked_in_ids),
-        "marked": marked_count,
+        **result,
+        "marked": result["marked_no_show"],
         "date": today.isoformat(),
     }
 

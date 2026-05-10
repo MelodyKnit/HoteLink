@@ -1,13 +1,16 @@
 <template>
   <div class="flex h-[100dvh] flex-col overflow-hidden bg-gradient-to-br from-gray-50 to-gray-100">
     <!-- Header -->
-    <header class="sticky top-0 z-20 flex h-14 shrink-0 items-center justify-between border-b border-gray-200 bg-white px-4 shadow-sm">
+    <header class="sticky top-0 z-20 flex h-14 shrink-0 items-center justify-between border-b border-gray-200 bg-white/95 px-4 shadow-sm backdrop-blur">
       <button @click="$router.back()" class="rounded-lg p-1 text-gray-600 hover:bg-gray-100">← 返回</button>
       <div class="flex items-center gap-2">
-        <span class="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-brand to-brand/80 text-white shadow-sm">🤖</span>
+        <span class="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-brand to-brand/80 text-[11px] font-semibold tracking-wide text-white shadow-sm">AI</span>
         <div>
           <h1 class="text-sm font-semibold text-gray-800">{{ pageTitle }}</h1>
-          <p class="text-xs text-green-500">🟢 在线</p>
+          <p class="mt-0.5 inline-flex items-center gap-1.5 text-[11px] text-emerald-500">
+            <span class="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+            在线服务中
+          </p>
         </div>
       </div>
       <!-- Header Actions -->
@@ -15,54 +18,85 @@
         <button @click="showMenu = !showMenu" class="rounded-lg p-2 text-gray-600 hover:bg-gray-100 transition">
           ⋮
         </button>
-        <div v-if="showMenu" class="absolute right-0 mt-1 w-40 bg-white rounded-lg shadow-lg border border-gray-100 z-50">
-          <button @click="showHistoryPanel = true; showMenu = false" class="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 text-gray-700 flex items-center gap-2 hover:text-brand">
-            📜 查看历史聊天
+        <div v-if="showMenu" class="absolute right-0 z-50 mt-1 w-40 rounded-lg border border-gray-100 bg-white shadow-lg">
+          <button @click="showHistoryPanel = true; showMenu = false" class="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 hover:text-brand">
+            查看历史聊天
           </button>
-          <button @click="confirmClear" class="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 text-gray-700 flex items-center gap-2 hover:text-red-500 border-t">
-            🗑️ 清空当前聊天
+          <button @click="confirmClear" class="flex w-full items-center gap-2 border-t px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 hover:text-red-500">
+            清空当前聊天
           </button>
         </div>
       </div>
     </header>
 
     <!-- History Panel Modal -->
-    <div v-if="showHistoryPanel" class="fixed inset-0 z-40 flex items-end bg-black/20 animate-fadeIn">
-      <div class="w-full rounded-t-2xl bg-white p-4 shadow-2xl max-h-[80vh] flex flex-col">
-        <div class="flex items-center justify-between pb-3 border-b border-gray-100">
-          <h2 class="text-base font-semibold text-gray-800">📜 聊天历史</h2>
-          <button @click="showHistoryPanel = false" class="text-gray-500 hover:text-gray-700">✕</button>
+    <div
+      v-if="showHistoryPanel"
+      class="fixed inset-0 z-40 flex items-end bg-slate-950/25 px-2 pt-10 animate-fadeIn backdrop-blur-[2px]"
+      @click.self="closeHistoryPanel"
+    >
+      <div class="flex max-h-[82vh] w-full flex-col overflow-hidden rounded-t-[28px] border border-white/80 bg-white/95 shadow-[0_-24px_70px_rgba(15,23,42,0.18)] backdrop-blur">
+        <div class="flex justify-center pt-3">
+          <span class="h-1.5 w-12 rounded-full bg-slate-200" />
         </div>
-        <div class="flex-1 overflow-y-auto my-3">
-          <div v-if="chatHistories.length === 0" class="text-center py-8 text-gray-500">
-            <p class="text-sm">还没有历史聊天记录</p>
+        <div class="flex items-start justify-between gap-3 px-4 pb-3 pt-2">
+          <div class="min-w-0">
+            <p class="text-[11px] font-medium tracking-[0.08em] text-slate-400">本地会话</p>
+            <h2 class="mt-1 text-lg font-semibold text-slate-900">聊天历史</h2>
+            <p class="mt-1 text-[12px] leading-5 text-slate-500">
+              按最近使用排序，可随时恢复之前的对话。
+            </p>
           </div>
-          <div v-else class="space-y-2">
-            <div v-for="(history, idx) in chatHistories" :key="`${history.timestamp}-${idx}`" 
-              class="group flex items-start justify-between gap-2 rounded-lg p-3 bg-gray-50 hover:bg-gray-100 transition">
-              <div class="flex-1 min-w-0">
-                <p class="text-xs text-gray-500">{{ formatHistoryTime(history.timestamp) }}</p>
-                <p class="text-sm font-medium text-gray-800 line-clamp-2 mt-1">
-                  {{ history.preview || '（空聊天）' }}
-                </p>
-                <p class="text-xs text-gray-500 mt-1">{{ history.messageCount }} 条消息</p>
+          <button
+            @click="closeHistoryPanel"
+            class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-sm text-slate-500 transition hover:border-slate-300 hover:text-slate-700"
+            aria-label="关闭历史聊天"
+          >
+            ✕
+          </button>
+        </div>
+        <div class="flex-1 overflow-y-auto border-t border-slate-100 px-4 pb-4 pt-3">
+          <div
+            v-if="chatHistories.length === 0"
+            class="rounded-[24px] border border-dashed border-slate-200 bg-slate-50/70 px-5 py-10 text-center"
+          >
+            <p class="text-sm font-medium text-slate-700">还没有历史聊天记录</p>
+            <p class="mt-2 text-[12px] leading-5 text-slate-500">
+              开始一段新对话后，这里会自动保留最近 20 条记录。
+            </p>
+          </div>
+          <div v-else class="space-y-3">
+            <article
+              v-for="(history, idx) in chatHistories"
+              :key="`${history.timestamp}-${idx}`"
+              class="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-3.5 shadow-[0_10px_30px_rgba(15,23,42,0.05)] transition hover:border-slate-300 hover:bg-white"
+            >
+              <div class="flex items-center justify-between gap-3">
+                <p class="text-[11px] font-medium text-slate-400">{{ formatHistoryTime(history.timestamp) }}</p>
+                <span class="shrink-0 rounded-full bg-white px-2.5 py-1 text-[11px] font-medium text-slate-500 ring-1 ring-slate-200/80">
+                  {{ history.messageCount }} 条消息
+                </span>
               </div>
-              <div class="flex gap-1">
-                <button @click="restoreHistory(idx)" class="rounded p-1.5 text-gray-600 hover:bg-blue-100 hover:text-blue-600 transition opacity-0 group-hover:opacity-100"
-                  title="恢复">
-                  ↩️
+              <p class="mt-2 break-words text-[13px] font-medium leading-6 text-slate-700">
+                {{ normalizeChatHistoryPreview(history.preview) || '这段对话里暂时没有可展示的提问摘要。' }}
+              </p>
+              <div class="mt-3 flex flex-wrap justify-end gap-2">
+                <button
+                  @click="restoreHistory(idx)"
+                  class="inline-flex min-w-[88px] items-center justify-center rounded-full bg-slate-900 px-3.5 py-1.5 text-[12px] font-medium leading-5 text-white transition hover:bg-slate-800"
+                >
+                  恢复对话
                 </button>
-                <button @click="deleteHistory(idx)" class="rounded p-1.5 text-gray-600 hover:bg-red-100 hover:text-red-600 transition opacity-0 group-hover:opacity-100"
-                  title="删除">
-                  🗑️
+                <button
+                  @click="deleteHistory(idx)"
+                  class="inline-flex min-w-[88px] items-center justify-center rounded-full border border-slate-200 bg-white px-3.5 py-1.5 text-[12px] font-medium leading-5 text-slate-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                >
+                  删除记录
                 </button>
               </div>
-            </div>
+            </article>
           </div>
         </div>
-        <button @click="showHistoryPanel = false" class="mt-3 w-full rounded-lg bg-gray-100 px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-200">
-          关闭
-        </button>
       </div>
     </div>
 
@@ -90,66 +124,97 @@
           :class="msg.role === 'user' ? 'bg-brand text-white rounded-br-sm shadow-md' : 'bg-white text-gray-700 shadow-md rounded-bl-sm'">
           <!-- Assistant Response -->
           <template v-if="msg.role === 'assistant'">
-            <div v-if="msg.trace" class="mb-3">
+            <div v-if="msg.trace" class="mb-2">
               <button
                 v-if="!msg.loading && !isAssistantTraceExpanded(msg.id)"
                 @click="toggleAssistantTrace(msg.id)"
-                class="inline-flex items-center gap-2 text-sm font-medium text-slate-400 transition hover:text-slate-600"
+                class="group inline-flex max-w-full items-center gap-1.5 rounded-full bg-slate-50/80 px-2.5 py-1 text-[11px] leading-none text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+                :aria-expanded="isAssistantTraceExpanded(msg.id)"
               >
-                <span>已完成分析</span>
-                <span class="text-lg leading-none">›</span>
+                <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400/70" />
+                <span class="truncate">{{ resolveTraceCollapsedLabel(msg.trace) }}</span>
+                <span class="text-[13px] leading-none transition group-hover:translate-x-0.5">›</span>
               </button>
               <div
                 v-else
-                class="rounded-[24px] border border-slate-200/80 bg-gradient-to-br from-slate-50 via-white to-slate-100 p-4 shadow-sm"
+                class="rounded-2xl border border-slate-200/70 bg-slate-50/60 px-3 py-2 text-[11px] leading-5 text-slate-500 shadow-[0_8px_24px_rgba(15,23,42,0.03)]"
               >
-                <div class="flex items-start justify-between gap-3">
+                <div class="flex items-start justify-between gap-2">
                   <div class="min-w-0">
-                    <p class="text-[11px] font-medium uppercase tracking-[0.12em] text-slate-400">{{ msg.trace.title }}</p>
-                    <p class="mt-1 text-lg font-semibold leading-8 text-slate-900">
+                    <p class="truncate text-[11px] font-medium text-slate-400">{{ msg.trace.title }}</p>
+                    <p class="mt-0.5 text-[12px] font-medium leading-5 text-slate-600">
                       {{ msg.loading ? msg.trace.statusTitle : '已完成分析' }}
                     </p>
-                    <p v-if="msg.trace.summary" class="mt-2 text-sm leading-6 text-slate-600">
+                    <p v-if="msg.trace.summary" class="mt-1.5 text-[11px] leading-5 text-slate-500">
                       {{ msg.trace.summary }}
                     </p>
                   </div>
                   <button
                     v-if="!msg.loading"
                     @click="toggleAssistantTrace(msg.id)"
-                    class="shrink-0 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-500 transition hover:border-slate-300 hover:text-slate-700"
+                    class="shrink-0 rounded-full border border-slate-200 bg-white/80 px-2.5 py-0.5 text-[11px] font-medium text-slate-400 transition hover:border-slate-300 hover:text-slate-600"
                   >
                     收起
                   </button>
                   <span
                     v-else
-                    class="shrink-0 rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-xs font-medium text-violet-600"
+                    class="shrink-0 rounded-full border border-sky-100 bg-sky-50 px-2.5 py-0.5 text-[11px] font-medium text-sky-500"
                   >
                     分析中
                   </span>
                 </div>
-                <div v-if="msg.trace.stages.length" class="mt-4 space-y-3">
+
+                <div v-if="msg.trace.metrics.length" class="mt-2 flex flex-wrap gap-1.5">
+                  <span
+                    v-for="metric in msg.trace.metrics"
+                    :key="`${metric.label}-${metric.value}`"
+                    class="inline-flex items-center gap-1 rounded-full border border-slate-200/80 bg-white/70 px-2 py-0.5 text-[10px] leading-4 text-slate-500"
+                  >
+                    <span class="text-slate-400">{{ metric.label }}</span>
+                    <span class="font-medium text-slate-600">{{ metric.value }}</span>
+                  </span>
+                </div>
+
+                <div v-if="msg.trace.facts.length" class="mt-2.5 rounded-xl bg-white/55 px-2.5 py-2">
+                  <p class="text-[11px] font-medium text-slate-400">依据</p>
+                  <ul class="mt-1 space-y-1">
+                    <li
+                      v-for="(fact, factIndex) in msg.trace.facts"
+                      :key="`fact-${factIndex}`"
+                      class="flex gap-1.5 break-words text-[11px] leading-5 text-slate-500"
+                    >
+                      <span class="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-slate-300" />
+                      <span>{{ fact }}</span>
+                    </li>
+                  </ul>
+                </div>
+
+                <div v-if="msg.trace.stages.length" class="mt-2.5 space-y-2">
                   <section
                     v-for="stage in msg.trace.stages"
                     :key="stage.id"
-                    class="rounded-2xl border border-white/80 bg-white/70 p-3"
+                    class="flex gap-2"
                   >
-                    <div class="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                    <div class="pt-1.5">
                       <span
-                        class="flex h-7 w-7 items-center justify-center rounded-full border text-sm"
-                        :class="resolveTraceStageBadgeClass(stage.tone)"
-                      >
-                        {{ resolveTraceStageIcon(stage.tone) }}
-                      </span>
-                      <span>{{ stage.title }}</span>
+                        class="block h-1.5 w-1.5 rounded-full"
+                        :class="resolveTraceStageDotClass(stage.tone)"
+                      />
                     </div>
-                    <div class="mt-3 border-l border-slate-200/80 pl-3 space-y-2">
-                      <p
-                        v-for="(item, itemIndex) in stage.items"
-                        :key="`${stage.id}-${itemIndex}`"
-                        class="rounded-full border border-white/90 bg-white px-3 py-2 text-sm leading-6 text-slate-600 shadow-sm break-words"
-                      >
-                        {{ item }}
-                      </p>
+                    <div class="min-w-0 flex-1">
+                      <div class="text-[11px] font-medium text-slate-600">
+                        {{ stage.title }}
+                      </div>
+                      <ul class="mt-1 space-y-1">
+                        <li
+                          v-for="(item, itemIndex) in stage.items"
+                          :key="`${stage.id}-${itemIndex}`"
+                          class="flex gap-1.5 break-words text-[11px] leading-5 text-slate-500"
+                        >
+                          <span class="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-slate-300/90" />
+                          <span>{{ item }}</span>
+                        </li>
+                      </ul>
                     </div>
                   </section>
                 </div>
@@ -173,15 +238,18 @@
               已停止回复
             </div>
             <!-- Smart Options -->
-            <div v-if="msg.bookingAssistant?.options?.length" class="mt-4 space-y-2 border-t border-gray-100 pt-3">
+            <div v-if="msg.bookingAssistant?.options?.length" class="mt-3 border-t border-slate-100 pt-2.5">
               <button
                 @click="toggleAssistantOptions(msg.id)"
-                class="flex w-full items-center justify-between rounded-xl bg-gray-50 px-3 py-2 text-xs font-medium text-gray-600 hover:bg-gray-100"
+                class="flex w-full items-center justify-between rounded-full bg-slate-50/90 px-2.5 py-1.5 text-[11px] font-medium text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
               >
-                <span>⚡ 快捷操作（{{ resolveAssistantOptions(msg.bookingAssistant?.options).length }}）</span>
-                <span>{{ isAssistantOptionsExpanded(msg.id) ? '收起' : '展开' }}</span>
+                <span class="inline-flex items-center gap-1.5">
+                  <span class="h-1.5 w-1.5 rounded-full bg-brand/60" />
+                  推荐下一步（{{ resolveAssistantOptions(msg.bookingAssistant?.options).length }}）
+                </span>
+                <span>{{ isAssistantOptionsExpanded(msg.id) ? '收起' : '查看' }}</span>
               </button>
-              <div v-if="isAssistantOptionsExpanded(msg.id)" class="space-y-2">
+              <div v-if="isAssistantOptionsExpanded(msg.id)" class="mt-2 space-y-1.5">
                 <div
                   v-for="(option, optionIndex) in resolveAssistantOptions(msg.bookingAssistant?.options)"
                   :key="`${option.type}-${option.value}-${optionIndex}`"
@@ -189,38 +257,93 @@
                   @keydown.enter="handleAssistantOption(option)"
                   tabindex="0"
                   role="button"
-                  class="group w-full rounded-2xl border-2 border-brand/20 bg-gradient-to-r from-brand/5 to-transparent px-3 py-3 text-left transition-all hover:border-brand/50 hover:bg-brand/10"
+                  class="group w-full cursor-pointer rounded-xl border border-slate-200/80 bg-white/80 px-3 py-2.5 text-left transition-all hover:border-brand/30 hover:bg-brand/5 focus:outline-none focus:ring-2 focus:ring-brand/20"
                 >
-                  <div class="flex items-start justify-between gap-3">
-                    <div class="flex-1">
-                      <p class="font-semibold text-gray-800 group-hover:text-brand">{{ option.label }}</p>
-                      <p v-if="option.description" class="mt-1 text-xs leading-5 text-gray-500">{{ option.description }}</p>
-                      <div class="mt-1.5 flex flex-wrap items-center gap-1.5 text-[10px]">
+                  <div class="flex items-start gap-2.5">
+                    <span
+                      class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold"
+                      :class="resolveOptionBadgeClass(option)"
+                    >
+                      {{ getOptionCode(option.type) }}
+                    </span>
+                    <div class="min-w-0 flex-1">
+                      <div :class="isHotelOption(option) ? '' : 'flex items-start justify-between gap-2'">
+                        <div class="min-w-0 flex-1">
+                          <p
+                            :class="isHotelOption(option)
+                              ? 'line-clamp-2 text-[13px] font-semibold leading-5 text-slate-700 group-hover:text-brand'
+                              : 'text-[12px] font-medium leading-5 text-slate-700 group-hover:text-brand'"
+                          >
+                            {{ option.label }}
+                          </p>
+                          <div
+                            v-if="isHotelOption(option) && normalizeAssistantOptionHotelMeta(option).length"
+                            class="mt-1.5 flex flex-wrap gap-1.5"
+                          >
+                            <span
+                              v-for="meta in normalizeAssistantOptionHotelMeta(option)"
+                              :key="`${option.value}-${meta.key}`"
+                              class="rounded-full border px-2 py-0.5 text-[10px] font-medium leading-4"
+                              :class="meta.tone === 'accent'
+                                ? 'border-amber-100 bg-amber-50/90 text-amber-700'
+                                : 'border-slate-200 bg-slate-100/80 text-slate-500'"
+                            >
+                              {{ meta.text }}
+                            </span>
+                          </div>
+                          <p v-else-if="option.description" class="mt-0.5 text-[11px] leading-5 text-slate-500">{{ option.description }}</p>
+                        </div>
+                        <div v-if="!isHotelOption(option)" class="mt-0.5 flex shrink-0 items-center gap-2 self-start">
+                          <span class="text-[15px] leading-none text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-brand">›</span>
+                        </div>
+                      </div>
+                      <div v-if="normalizeAssistantOptionBadges(option).length" class="mt-1.5 flex flex-wrap gap-1">
                         <span
-                          v-if="isRecommendedOption(option)"
-                          class="rounded-full bg-brand/10 px-2 py-0.5 font-medium text-brand"
+                          v-for="badge in normalizeAssistantOptionBadges(option)"
+                          :key="`${option.value}-${badge}`"
+                          class="rounded-full border border-sky-100 bg-sky-50/80 px-2 py-0.5 text-[10px] font-medium leading-4 text-sky-700"
                         >
-                          推荐
-                        </span>
-                        <span
-                          v-if="option.requires_confirmation"
-                          class="rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-700"
-                        >
-                          需确认
+                          {{ badge }}
                         </span>
                       </div>
-                    </div>
-                    <div class="shrink-0 flex items-center gap-2">
-                      <button
-                        v-if="isHotelOption(option)"
-                        @click.stop="openHotelDetail(option)"
-                        class="rounded-md border border-brand/30 px-2 py-1 text-[11px] font-medium leading-none text-brand hover:bg-brand/10"
-                      >
-                        详情
-                      </button>
-                      <span class="text-xl group-hover:scale-110 transition-transform">
-                        {{ getOptionEmoji(option.type) }}
-                      </span>
+                      <ul v-if="normalizeAssistantOptionHighlights(option).length" class="mt-1.5 space-y-0.5">
+                        <li
+                          v-for="highlight in normalizeAssistantOptionHighlights(option)"
+                          :key="`${option.value}-${highlight}`"
+                          class="flex gap-1.5 text-[10px] leading-4 text-slate-400"
+                        >
+                          <span class="mt-[6px] h-1 w-1 shrink-0 rounded-full bg-slate-300" />
+                          <span class="break-words">{{ highlight }}</span>
+                        </li>
+                      </ul>
+                      <div class="mt-2 flex items-center justify-between gap-2">
+                        <div class="flex flex-wrap items-center gap-1.5 text-[10px]">
+                          <span
+                            v-if="isRecommendedOption(option)"
+                            class="rounded-full bg-brand/10 px-2 py-0.5 font-medium text-brand"
+                          >
+                            推荐
+                          </span>
+                          <span
+                            v-if="option.requires_confirmation"
+                            class="rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-700"
+                          >
+                            需确认
+                          </span>
+                          <span v-if="isHotelOption(option)" class="text-slate-400">
+                            点击卡片继续选房型
+                          </span>
+                        </div>
+                        <div v-if="isHotelOption(option)" class="flex shrink-0 items-center gap-2">
+                          <button
+                            @click.stop="openHotelDetail(option)"
+                            class="rounded-full border border-brand/20 bg-white/90 px-2.5 py-1 text-[10px] font-medium leading-none text-brand transition hover:bg-brand/10"
+                          >
+                            查看酒店
+                          </button>
+                          <span class="text-[15px] leading-none text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-brand">›</span>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -245,23 +368,23 @@
         <div class="rounded-2xl bg-white p-4 shadow-sm border border-brand/10">
           <template v-if="isBookingMode">
             <p class="text-xs text-gray-600 leading-relaxed">
-              💬 直接告诉我您的订房需求，比如：<br/>
-              <span class="mt-2 inline-block">
-                • "我想在上海订个五星酒店"<br/>
-                • "帮我找近地铁的酒店"<br/>
-                • "预算500左右，要高评分的"
-              </span>
+              直接告诉我您的订房需求，例如城市、预算、位置或出行场景。
             </p>
+            <div class="mt-3 grid gap-1.5 text-[11px] leading-5 text-slate-500">
+              <span>我想在上海订个五星酒店</span>
+              <span>帮我找近地铁的酒店</span>
+              <span>预算500左右，要高评分的</span>
+            </div>
           </template>
           <template v-else>
             <p class="text-xs text-gray-600 leading-relaxed">
-              💬 可以直接问我系统与订单问题，比如：<br/>
-              <span class="mt-2 inline-block">
-                • "怎么取消订单？"<br/>
-                • "退款大概多久到账？"<br/>
-                • "我的发票申请到哪一步了？"
-              </span>
+              可以直接问系统与订单问题，我会先核对当前账号可见信息再回答。
             </p>
+            <div class="mt-3 grid gap-1.5 text-[11px] leading-5 text-slate-500">
+              <span>怎么取消订单？</span>
+              <span>退款大概多久到账？</span>
+              <span>我的发票申请到哪一步了？</span>
+            </div>
           </template>
         </div>
       </div>
@@ -326,9 +449,15 @@ import { marked } from 'marked'
 import { userAiApi } from '@hotelink/api'
 import type { AssistantTrace, AssistantTraceStage } from '@hotelink/utils'
 import {
+  buildChatHistoryPreview,
+  normalizeAssistantOptionBadges,
+  normalizeAssistantOptionHighlights,
+  normalizeAssistantOptionHotelMeta,
+  normalizeChatHistoryPreview,
   normalizeAssistantTrace,
   resolveAssistantTypingBurstSize,
   resolveAssistantTypingDelayMs,
+  shouldAutoSendEntryAsk,
   splitAssistantStreamText,
 } from '@hotelink/utils'
 import { useConfirm, useToast } from '@hotelink/ui'
@@ -387,6 +516,10 @@ interface AssistantOption {
   priority?: number
   tracking_id?: string
   source_scene?: string
+  badges?: string[]
+  highlights?: string[]
+  match_reason?: string
+  hotel_summary?: Record<string, unknown>
   payload?: Record<string, unknown>
   route?: string
   query?: Record<string, string>
@@ -492,15 +625,15 @@ function resolveHistoryStorageKey(path: string): string {
 
 function resolveDefaultWelcome(path: string): string {
   if (isBookingPath(path)) {
-    return '嗨，我是您的 AI 订房助手 🧭\n\n直接告诉我您想在哪里订酒店，什么时间？我会帮您快速找到最适合的房间。'
+    return '我是 HoteLink 的 AI 订房助手。\n\n告诉我城市、预算、位置或出行场景，我会先核对系统在线酒店和房型，再给出可点击的下一步。'
   }
-  return '您好！我是 HoteLink 的智能助理 💬\n\n有什么我可以帮您的吗？（预订、取消、退款、会员权益...）'
+  return '您好，我是 HoteLink 的智能助理。\n\n可以咨询预订、取消、退款、发票、会员权益等问题，我会结合当前账号可见信息为您整理答复。'
 }
 
 const isBookingMode = computed(() => isBookingPath(route.path))
 const scene = computed(() => resolveScene(route.path))
 
-const pageTitle = computed(() => (isBookingMode.value ? 'AI 订房助手 🧭' : 'AI 智能客服 💬'))
+const pageTitle = computed(() => (isBookingMode.value ? 'AI 订房助手' : 'AI 智能客服'))
 const inputPlaceholder = computed(() => (
   isBookingMode.value
     ? '直接描述您的订房需求，我会帮您快速筛选酒店与房型...'
@@ -541,9 +674,13 @@ function isAssistantOptionsExpanded(messageId: string): boolean {
 }
 
 function toggleAssistantOptions(messageId: string) {
+  const expanded = !isAssistantOptionsExpanded(messageId)
   assistantOptionsExpanded.value = {
     ...assistantOptionsExpanded.value,
-    [messageId]: !isAssistantOptionsExpanded(messageId),
+    [messageId]: expanded,
+  }
+  if (expanded && isNearBottom(260)) {
+    scrollBottom()
   }
 }
 
@@ -559,7 +696,8 @@ function setAssistantTraceExpanded(messageId: string, expanded: boolean) {
 }
 
 function toggleAssistantTrace(messageId: string) {
-  setAssistantTraceExpanded(messageId, !isAssistantTraceExpanded(messageId))
+  const expanded = !isAssistantTraceExpanded(messageId)
+  setAssistantTraceExpanded(messageId, expanded)
 }
 
 function attachAssistantTrace(message: Msg, trace: AssistantTrace | null, options?: { expanded?: boolean }) {
@@ -570,20 +708,37 @@ function attachAssistantTrace(message: Msg, trace: AssistantTrace | null, option
   }
 }
 
-function resolveTraceStageIcon(tone: AssistantTraceStage['tone']): string {
-  if (tone === 'lookup') return '◌'
-  if (tone === 'guardrail') return '✓'
-  return '◍'
+function formatTraceMetric(metric: AssistantTrace['metrics'][number]): string {
+  if (metric.label === '需确认') return `${metric.value} 项需确认`
+  if (['入口', '城市', '候选酒店', '房型'].includes(metric.label)) {
+    return `${metric.value} 个${metric.label}`
+  }
+  return `${metric.label} ${metric.value}`
 }
 
-function resolveTraceStageBadgeClass(tone: AssistantTraceStage['tone']): string {
+function resolveTraceCollapsedLabel(trace: AssistantTrace): string {
+  const parts = ['已完成分析']
+  const primaryMetric = trace.metrics.find((metric) => ['入口', '城市', '候选酒店', '房型'].includes(metric.label))
+    || trace.metrics[0]
+  if (trace.facts.length) {
+    parts.push(`${trace.facts.length} 条依据`)
+  }
+  if (primaryMetric) {
+    parts.push(formatTraceMetric(primaryMetric))
+  } else if (trace.stages.length) {
+    parts.push(`${trace.stages.length} 步`)
+  }
+  return parts.join(' · ')
+}
+
+function resolveTraceStageDotClass(tone: AssistantTraceStage['tone']): string {
   if (tone === 'lookup') {
-    return 'border-sky-200 bg-sky-50 text-sky-600'
+    return 'bg-sky-400/70'
   }
   if (tone === 'guardrail') {
-    return 'border-emerald-200 bg-emerald-50 text-emerald-600'
+    return 'bg-emerald-400/70'
   }
-  return 'border-violet-200 bg-violet-50 text-violet-600'
+  return 'bg-slate-400/70'
 }
 
 function buildConversationSummarySnippet(items: Msg[]): string {
@@ -616,31 +771,42 @@ function compressConversationIfNeeded() {
   messages.value = [summaryMessage, ...recentMessages]
 }
 
-// 获取选项对应的emoji
-function getOptionEmoji(type: string): string {
-  const emojiMap: Record<string, string> = {
-    'navigate_booking': '🛏️',
-    'navigate_hotel': '🗺️',
-    'navigate_order_list': '📋',
-    'navigate_order_detail': '🧾',
-    'navigate_payment': '💳',
-    'navigate_cancel_order': '✖️',
-    'navigate_invoice': '🧾',
-    'navigate_notification': '🔔',
-    'navigate_help': '🆘',
-    'navigate_ai_booking': '🧭',
-    'navigate_ai_customer_service': '💬',
-    'select_city': '📍',
-    'select_hotel': '🏨',
-    'select_radius': '📏',
-    'clarify_poi': '🧭',
-    'select_price': '💰',
-    'select_rating': '⭐',
-    'select_feature': '✨',
-    'check_availability': '📅',
-    'confirm': '✅',
+// 用短标签替代 emoji，保持 AI 动作卡片与系统整体风格一致。
+function getOptionCode(type: string): string {
+  const codeMap: Record<string, string> = {
+    'navigate_booking': '订',
+    'navigate_hotel': '店',
+    'navigate_order_list': '单',
+    'navigate_order_detail': '详',
+    'navigate_payment': '付',
+    'navigate_cancel_order': '退',
+    'navigate_invoice': '票',
+    'navigate_notification': '知',
+    'navigate_help': '?',
+    'navigate_ai_booking': '订',
+    'navigate_ai_customer_service': '服',
+    'navigate_reviews': '评',
+    'select_city': '城',
+    'select_hotel': '店',
+    'select_radius': '距',
+    'clarify_poi': '位',
+    'select_price': '价',
+    'select_rating': '分',
+    'select_feature': '选',
+    'check_availability': '查',
+    'confirm': '确',
   }
-  return emojiMap[type] || '→'
+  return codeMap[type] || '>'
+}
+
+function resolveOptionBadgeClass(option: AssistantOption): string {
+  if (option.requires_confirmation) {
+    return 'bg-amber-50 text-amber-700 ring-1 ring-amber-100'
+  }
+  if (isRecommendedOption(option)) {
+    return 'bg-brand/10 text-brand ring-1 ring-brand/15'
+  }
+  return 'bg-slate-100 text-slate-500 ring-1 ring-slate-200/70'
 }
 
 function isRecommendedOption(option: AssistantOption): boolean {
@@ -687,6 +853,10 @@ function onInputFocus() {
   // 可用于显示更多建议或提示
 }
 
+function closeHistoryPanel() {
+  showHistoryPanel.value = false
+}
+
 // 时间格式化
 function formatHistoryTime(timestamp: number): string {
   const date = new Date(timestamp)
@@ -710,7 +880,8 @@ function saveCurrentChatToHistoryForPath(path: string) {
   const userMessages = messages.value.filter(m => m.role === 'user')
   if (userMessages.length === 0) return // 没有用户消息，不保存
 
-  const preview = userMessages[0].content.slice(0, 50)
+  // 历史摘要统一取首条用户诉求，避免抽屉里出现换行、空白和过长文本。
+  const preview = buildChatHistoryPreview(messages.value)
   const history: ChatHistory = {
     timestamp: Date.now(),
     messages: [...messages.value],
@@ -1278,9 +1449,20 @@ function initializeCurrentModeState() {
 async function consumeAskQueryIfNeeded() {
   const ask = typeof route.query.ask === 'string' ? route.query.ask.trim() : ''
   if (!ask) return
-  await sendMessage(ask)
+  const askMode = typeof route.query.ask_mode === 'string' ? route.query.ask_mode.trim() : ''
+  // 首页引导问题只在“欢迎语 + 空会话”时自动发送，避免覆盖用户已有聊天上下文。
+  const canAutoSend = askMode !== 'new_only' || shouldAutoSendEntryAsk({
+    messages: messages.value,
+    backendSessionId: backendSessionId.value,
+    conversationSummary: conversationSummary.value,
+    bookingContext: bookingContext.value,
+  })
+  if (canAutoSend) {
+    await sendMessage(ask)
+  }
   const nextQuery = { ...route.query }
   delete nextQuery.ask
+  delete nextQuery.ask_mode
   await router.replace({ path: route.path, query: nextQuery })
 }
 

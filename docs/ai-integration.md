@@ -132,9 +132,14 @@ build_ai_client(provider) → OpenAI compatible client
 - 客服 AI 检测到订房诉求时，会返回 `navigate_ai_booking` 一键切换动作，并透传 `ask` 到订房助手继续处理。
 - 订房 AI 检测到客服诉求时，会返回 `navigate_ai_customer_service` 一键切换动作，并透传 `ask` 到客服助手继续处理。
 - 每个动作包含统一协议字段：`type`、`action_type`、`route/target`、`query/params`、`requires_confirmation`、`priority`、`tracking_id`。
+- 酒店候选动作会额外返回 `hotel_summary` 结构化字段（`city`、`star`、`rating`、`min_price`），前端优先按该字段渲染城市/星级/评分/价格标签；旧版客户端仍可回退解析 `description`。
 - 前端按优先级渲染动作卡片，并在高风险动作（如取消引导）前进行确认提示，随后跳转至对应页面完成操作。
+- 订房酒店候选动作可额外携带 `badges`、`highlights`、`match_reason`：`badges` 用于展示距离或交通点短标签，`highlights` 用于展示“距某交通点约 N km（直线参考）”“标签/地址命中近地铁”等可解释证据，`match_reason` 用于过程轨迹摘要。
 - 前端会在对话过长时自动压缩较早消息，并通过 `conversation_summary` 传给后端用于后续轮次上下文衔接。
-- 流式协议采用 `meta -> chunk -> done` 顺序；`meta` 负责返回 `scene`、`session_id`、可选的 `booking_assistant` 结构化动作数据，以及可选的 `agent_state` 安全过程卡片数据。
+- 用户端顶部菜单提供本地历史抽屉，按最近使用排序保留当前设备最近 20 条对话摘要，并提供始终可见的恢复/删除按钮；它用于快速恢复本地会话，不替代后端 `AI 会话列表` 的跨设备持久化能力。
+- 流式协议采用 `meta -> chunk -> done` 顺序；`meta` 负责返回 `scene`、`session_id`、可选的 `booking_assistant` 结构化动作数据，以及可选的 `agent_state` 安全过程轨迹数据。
+- `agent_state` 基于本轮实际命中的城市、酒店、房型、订单、筛选条件和快捷动作生成，可包含 `summary`、`facts`、`metrics`、`thinking`、`tool_steps`、`guardrails` 等展示字段；这些字段只用于解释“系统如何整理可见信息”，不包含系统提示词、原始内部推理或跨用户数据。
+- 前端将 `agent_state` 渲染为小字号灰阶状态条，默认收起，展开后只显示紧凑化依据、指标、阶段和边界说明，避免把内部提示词或冗长日志暴露给用户。
 - AI 的查询范围被限制为“当前登录用户上下文 + 系统公开在线酒店/房型数据”；取消、支付、开票等写操作只提供入口和确认提示，不由 AI 直接执行。
 
 ### 4.2 管理端 AI 功能
@@ -265,7 +270,8 @@ stateDiagram-v2
 ### 6.2 编排特点
 
 - 每个阶段返回结构化 `booking_assistant` 字段，携带 `stage`、`options`、`action`
-- 支持预算偏好提取、距离排序（POI 附近酒店）、评分排序
+- 支持预算偏好提取、距离排序（POI 附近酒店）、交通参考点距离、酒店标签/地址命中、评分排序
+- 当用户表达“近地铁”“交通方便”等偏好时，服务端优先使用酒店坐标计算到城市内配置的交通参考点的直线距离，并结合酒店 `tags`、`address`、`facilities` 中的交通证据生成候选依据；没有足够数据时会明确说明缺失限制，不编造真实路线距离。
 - 前端渲染城市/酒店/房型动作卡片，点击后继续对话或跳转 `/booking`
 - 上下文由前端通过 `booking_context` 字段传递，支持跨轮对话状态保持
 - 即使 LLM 不可用，仍通过酒店名词元重叠匹配直接命中酒店并返回房型
@@ -307,7 +313,7 @@ stateDiagram-v2
 
 - 两个接口共享同一套 Prompt 渲染与上下文绑定逻辑
 - AI 订房场景会额外返回 `booking_assistant`，用于驱动城市、酒店、房型和跳转动作
-- 流式接口的 `meta` 事件可附带 `agent_state`，用于渲染“分析中 / 已完成分析”过程卡片；卡片内容只包含可展示摘要、阶段说明与安全边界
+- 流式接口的 `meta` 事件可附带 `agent_state`，用于渲染“分析中 / 已完成分析”过程轨迹；内容只包含可展示摘要、真实依据、小指标、阶段说明与安全边界
 - 前端调用流式接口时，应先处理 `meta` 事件中的结构化订房数据和 `agent_state`，再消费 `chunk/done` 文本事件
 
 ### 7.5 前端 AI 页面
@@ -326,8 +332,8 @@ stateDiagram-v2
 
 - 智能问答输入框
 - 流式输出 Markdown 渲染
-- 过程卡片（分析阶段、查询步骤、安全边界）
-- 订房动作卡片（城市、酒店、房型）
+- 轻量过程状态条（分析阶段、查询步骤、安全边界）
+- 推荐下一步动作卡片（城市、酒店、房型、订单、发票等入口）
 - 对话历史保持
 
 用户端 AI 酒店对比页（`/hotel-compare`）支持：

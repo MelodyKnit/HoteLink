@@ -1,5 +1,6 @@
 """apps/api/tests.py —— API 集成测试用例集合。"""
 
+import inspect
 import json
 from datetime import timedelta
 from decimal import Decimal
@@ -14,8 +15,10 @@ from django.core.cache import cache
 from django.test import override_settings
 from django.utils import timezone
 from django.core.files.uploadedfile import SimpleUploadedFile
+from rest_framework import serializers as drf_serializers
 from rest_framework.test import APITestCase
 
+from apps.api import serializers as api_serializers
 from apps.bookings.models import BookingOrder
 from apps.bookings.tasks import sweep_order_lifecycle_anomalies
 from apps.crm.models import ChatMessage, ChatSession, CouponTemplate, InvoiceTitle, PointsLog, Review, UserCoupon
@@ -37,6 +40,18 @@ User = get_user_model()
 
 class ApiBaseTestCase(APITestCase):
     """API 测试基类，准备账号、酒店、房型、订单等公共夹具。"""
+
+    def parse_sse_payload(self, payload):
+        """Parse a Django test streaming SSE payload into JSON events."""
+
+        events = []
+        for block in payload.split("\n\n"):
+            normalized = block.strip()
+            if not normalized.startswith("data: "):
+                continue
+            events.append(json.loads(normalized.removeprefix("data: ")))
+        return events
+
     @classmethod
     def setUpTestData(cls):
         """构造全量测试基准数据。"""
@@ -181,6 +196,26 @@ class ApiBaseTestCase(APITestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {response.json()['data']['access_token']}")
+
+
+class SerializerContractTests(APITestCase):
+    """序列化器契约测试集合。"""
+
+    def test_api_model_serializers_should_build_fields_without_assertion(self):
+        """验证 API ModelSerializer 字段定义完整，避免运行时触发断言型 500。"""
+        failures = []
+
+        for _, serializer_class in inspect.getmembers(api_serializers, inspect.isclass):
+            if serializer_class.__module__ != api_serializers.__name__:
+                continue
+            if not issubclass(serializer_class, drf_serializers.ModelSerializer):
+                continue
+            try:
+                serializer_class().fields
+            except AssertionError as exc:
+                failures.append(f"{serializer_class.__name__}: {exc}")
+
+        self.assertEqual(failures, [], "\n".join(failures))
 
 
 class PublicApiTests(ApiBaseTestCase):
@@ -669,7 +704,79 @@ class UserApiTests(ApiBaseTestCase):
         self.assertNotIn('"type": "thinking"', payload)
         self.assertNotIn('"type": "tool"', payload)
         self.assertNotIn('"type": "guardrail"', payload)
+        self.assertNotIn('"safety_policy"', payload)
+        self.assertNotIn("system_prompt", payload)
         self.assertIn('"display_name": "AI 订房助手"', payload)
+        events = self.parse_sse_payload(payload)
+        meta_event = next(event for event in events if event["type"] == "meta")
+        agent_state = meta_event["agent_state"]
+        self.assertIn("facts", agent_state)
+        self.assertIn("metrics", agent_state)
+        self.assertTrue(any("当前阶段：选择城市" in fact for fact in agent_state["facts"]))
+        self.assertTrue(any(metric["label"] == "城市" and int(metric["value"]) >= 1 for metric in agent_state["metrics"]))
+
+    def test_user_ai_chat_booking_transport_preference_should_include_specific_evidence(self):
+        """验证近地铁诉求会返回真实位置依据，而不是泛化提示。"""
+        self.login_user()
+        nearby_hotel = Hotel.objects.create(
+            name="HoteLink 杭州龙翔桥地铁店",
+            city="杭州",
+            address="杭州市上城区平海路 88 号",
+            star=4,
+            phone="0571-66668888",
+            description="靠近西湖商圈的演示酒店",
+            rating=Decimal("4.8"),
+            min_price=Decimal("520.00"),
+            tags=["近地铁", "商务出行"],
+            latitude=Decimal("30.257320"),
+            longitude=Decimal("120.164540"),
+            is_recommended=True,
+            status=Hotel.STATUS_ONLINE,
+        )
+        Hotel.objects.create(
+            name="HoteLink 杭州远郊舒适店",
+            city="杭州",
+            address="杭州市西湖区示例远郊路 18 号",
+            star=4,
+            phone="0571-55556666",
+            description="远郊演示酒店",
+            rating=Decimal("4.9"),
+            min_price=Decimal("360.00"),
+            tags=["安静舒适"],
+            latitude=Decimal("30.380000"),
+            longitude=Decimal("120.010000"),
+            status=Hotel.STATUS_ONLINE,
+        )
+
+        response = self.client.post(
+            "/api/v1/user/ai/chat/stream",
+            {
+                "scene": "booking_assistant",
+                "question": "杭州近地铁的酒店",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = b"".join(response.streaming_content).decode("utf-8")
+        events = self.parse_sse_payload(payload)
+        meta_event = next(event for event in events if event["type"] == "meta")
+        assistant_payload = meta_event["booking_assistant"]
+        first_option = assistant_payload["options"][0]
+
+        self.assertEqual(assistant_payload["phase"], "select_hotel")
+        self.assertEqual(first_option["label"], nearby_hotel.name)
+        self.assertEqual(first_option["hotel_summary"]["city"], "杭州")
+        self.assertEqual(first_option["hotel_summary"]["star"], "4")
+        self.assertEqual(first_option["hotel_summary"]["rating"], "4.8")
+        self.assertEqual(first_option["hotel_summary"]["min_price"], "520.00")
+        self.assertIn("龙翔桥站", json.dumps(first_option, ensure_ascii=False))
+        self.assertTrue(any("距龙翔桥站" in item for item in first_option["highlights"]))
+        self.assertTrue(any("近地铁" in item for item in first_option["highlights"]))
+        self.assertNotIn("当前系统未提供实时地铁", payload)
+
+        agent_state = meta_event["agent_state"]
+        self.assertTrue(any("推荐依据" in fact and "龙翔桥站" in fact for fact in agent_state["facts"]))
+        self.assertTrue(any(metric["label"] == "依据" for metric in agent_state["metrics"]))
 
     def test_user_ai_chat_customer_service_should_not_trigger_booking_assistant(self):
         """验证客服场景咨询订单操作时，不会误触发订房助手流程。"""
@@ -896,7 +1003,16 @@ class UserApiTests(ApiBaseTestCase):
         self.assertIn('"type": "done"', payload)
         self.assertIn('"display_name": "AI 智能客服"', payload)
         self.assertNotIn('"cross_user_access_forbidden": true', payload)
+        self.assertNotIn('"safety_policy"', payload)
+        self.assertNotIn("system_prompt", payload)
         self.assertNotIn('"type": "guardrail"', payload)
+        events = self.parse_sse_payload(payload)
+        meta_event = next(event for event in events if event["type"] == "meta")
+        agent_state = meta_event["agent_state"]
+        self.assertIn("取消订单", agent_state["summary"])
+        self.assertTrue(any("问题类型：取消订单" in fact for fact in agent_state["facts"]))
+        self.assertTrue(any(metric["label"] == "入口" and int(metric["value"]) >= 1 for metric in agent_state["metrics"]))
+        self.assertTrue(any(metric["label"] == "需确认" for metric in agent_state["metrics"]))
 
     def test_user_ai_chat_should_persist_session_and_messages(self):
         """验证 AI 对话会自动落库会话与消息。"""
@@ -1025,6 +1141,11 @@ class UserApiTests(ApiBaseTestCase):
         self.assertEqual(data["context"]["selected_city"], "北京")
         self.assertIsNone(data["context"]["selected_hotel_id"])
         self.assertTrue(any(option["label"] == self.hotel.name for option in data["options"]))
+        beijing_option = next(option for option in data["options"] if option["label"] == self.hotel.name)
+        self.assertEqual(beijing_option["hotel_summary"]["city"], "北京")
+        self.assertEqual(beijing_option["hotel_summary"]["star"], "4")
+        self.assertEqual(beijing_option["hotel_summary"]["rating"], "4.7")
+        self.assertEqual(beijing_option["hotel_summary"]["min_price"], "399.00")
 
     def test_user_ai_chat_hotel_keyword_should_not_fallback_to_city_selection(self):
         """验证用户明确说出酒店关键词时，订房助手应直接进入酒店/房型选择。"""
@@ -1180,6 +1301,44 @@ class AdminApiTests(ApiBaseTestCase):
         self.assertGreaterEqual(payload["total"], 1)
         self.assertTrue(any(item["id"] == self.hotel.id for item in payload["items"]))
 
+    def test_admin_hotel_update_should_allow_removing_images(self):
+        """验证管理端更新酒店时可删除部分图片而不触发 500。"""
+        self.login_admin()
+        self.hotel.cover_image = "https://example.com/hotels/cover.jpg"
+        self.hotel.images = [
+            "https://example.com/hotels/cover.jpg",
+            "https://example.com/hotels/lobby.jpg",
+            "https://example.com/hotels/restaurant.jpg",
+        ]
+        self.hotel.facilities = ["wifi", "parking", "breakfast"]
+        self.hotel.tags = ["近地铁", "含早"]
+        self.hotel.save(update_fields=["cover_image", "images", "facilities", "tags"])
+
+        response = self.client.post(
+            "/api/v1/admin/hotels/update",
+            {
+                "hotel_id": self.hotel.id,
+                "name": self.hotel.name,
+                "type": self.hotel.type,
+                "city": self.hotel.city,
+                "address": self.hotel.address,
+                "star": self.hotel.star,
+                "phone": self.hotel.phone,
+                "description": "删除部分图片后的酒店介绍",
+                "cover_image": self.hotel.cover_image,
+                "images": [self.hotel.images[0]],
+                "facilities": self.hotel.facilities,
+                "tags": self.hotel.tags,
+                "status": self.hotel.status,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.hotel.refresh_from_db()
+        self.assertEqual(self.hotel.images, ["https://example.com/hotels/cover.jpg"])
+        self.assertEqual(self.hotel.description, "删除部分图片后的酒店介绍")
+
     def test_admin_order_detail_should_include_payments_and_status_timestamps(self):
         """验证管理端订单详情返回支付记录与关键状态时间字段。"""
         self.login_admin()
@@ -1223,8 +1382,8 @@ class AdminApiTests(ApiBaseTestCase):
         self.assertEqual(self.order.status, BookingOrder.STATUS_COMPLETED)
         self.assertIn("系统自动完结", self.order.operator_remark)
 
-    def test_lifecycle_sweep_should_mark_overdue_paid_order_as_anomaly(self):
-        """验证生命周期巡检会标记过期未入住的已支付订单。"""
+    def test_lifecycle_sweep_should_mark_overdue_paid_order_as_no_show(self):
+        """验证生命周期巡检会将过期未入住的已支付订单转为未入住。"""
         today = timezone.localdate()
         BookingOrder.objects.filter(id=self.order.id).update(
             status=BookingOrder.STATUS_PAID,
@@ -1237,8 +1396,57 @@ class AdminApiTests(ApiBaseTestCase):
         sweep_order_lifecycle_anomalies.run(batch_size=20)
 
         self.order.refresh_from_db()
-        self.assertEqual(self.order.status, BookingOrder.STATUS_PAID)
-        self.assertIn("异常提醒", self.order.operator_remark)
+        self.assertEqual(self.order.status, BookingOrder.STATUS_NO_SHOW)
+        self.assertEqual(self.order.payment_status, BookingOrder.PAYMENT_PAID)
+        self.assertIsNotNone(self.order.no_show_at)
+        self.assertIn("未入住", self.order.operator_remark)
+
+    def test_user_order_detail_should_repair_stale_paid_order_to_no_show(self):
+        """验证用户查看订单详情时不会继续看到过期已支付状态。"""
+        self.login_user()
+        today = timezone.localdate()
+        BookingOrder.objects.filter(id=self.order.id).update(
+            status=BookingOrder.STATUS_PAID,
+            payment_status=BookingOrder.PAYMENT_PAID,
+            check_in_date=today - timedelta(days=33),
+            check_out_date=today - timedelta(days=10),
+            operator_remark="",
+            no_show_at=None,
+        )
+
+        response = self.client.get("/api/v1/user/orders/detail", {"order_id": self.order.id})
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertEqual(data["status"], BookingOrder.STATUS_NO_SHOW)
+        self.assertEqual(data["payment_status"], BookingOrder.PAYMENT_PAID)
+        self.assertTrue(data["no_show_at"])
+        self.assertIn("未入住", data["lifecycle_warning"])
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, BookingOrder.STATUS_NO_SHOW)
+
+    def test_user_order_list_should_filter_repaired_no_show_order(self):
+        """验证订单列表筛选前会修正过期生命周期，避免进入待入住列表。"""
+        self.login_user()
+        today = timezone.localdate()
+        BookingOrder.objects.filter(id=self.order.id).update(
+            status=BookingOrder.STATUS_CONFIRMED,
+            payment_status=BookingOrder.PAYMENT_PAID,
+            check_in_date=today - timedelta(days=5),
+            check_out_date=today - timedelta(days=1),
+            no_show_at=None,
+        )
+
+        paid_response = self.client.get("/api/v1/user/orders", {"status": "paid,confirmed"})
+        self.assertEqual(paid_response.status_code, 200)
+        paid_ids = {item["id"] for item in paid_response.json()["data"]["items"]}
+        self.assertNotIn(self.order.id, paid_ids)
+
+        no_show_response = self.client.get("/api/v1/user/orders", {"status": BookingOrder.STATUS_NO_SHOW})
+        self.assertEqual(no_show_response.status_code, 200)
+        items = no_show_response.json()["data"]["items"]
+        self.assertTrue(any(item["id"] == self.order.id and item["status"] == BookingOrder.STATUS_NO_SHOW for item in items))
 
     def test_admin_check_in_should_reject_overdue_checkout_order(self):
         """验证离店日已过的订单不可再办理入住。"""
@@ -1257,10 +1465,79 @@ class AdminApiTests(ApiBaseTestCase):
             format="json",
         )
         self.assertEqual(response.status_code, 409)
-        self.assertIn("超过离店日期", response.json()["message"])
+        self.assertIn("生命周期已自动更新", response.json()["message"])
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, BookingOrder.STATUS_NO_SHOW)
 
-    def test_admin_order_list_should_return_lifecycle_warning(self):
-        """验证管理端订单列表返回生命周期异常提示字段。"""
+    def test_admin_check_in_should_reject_before_arrival_date(self):
+        """验证未到入住日期的订单不可提前办理入住。"""
+        self.login_admin()
+        today = timezone.localdate()
+        BookingOrder.objects.filter(id=self.order.id).update(
+            status=BookingOrder.STATUS_PAID,
+            payment_status=BookingOrder.PAYMENT_PAID,
+            check_in_date=today + timedelta(days=1),
+            check_out_date=today + timedelta(days=3),
+        )
+
+        response = self.client.post(
+            "/api/v1/admin/orders/check-in",
+            {"order_id": self.order.id, "room_no": "1808"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("未到入住日期", response.json()["message"])
+
+    def test_user_cancel_should_repair_overdue_paid_order_to_no_show(self):
+        """验证用户无法取消已过离店日期的未入住订单并获得错误退款。"""
+        self.login_user()
+        today = timezone.localdate()
+        BookingOrder.objects.filter(id=self.order.id).update(
+            status=BookingOrder.STATUS_PAID,
+            payment_status=BookingOrder.PAYMENT_PAID,
+            check_in_date=today - timedelta(days=5),
+            check_out_date=today - timedelta(days=1),
+            no_show_at=None,
+        )
+
+        response = self.client.post(
+            "/api/v1/user/orders/cancel",
+            {"order_id": self.order.id, "reason": "过期后尝试取消"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("生命周期已自动更新", response.json()["message"])
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, BookingOrder.STATUS_NO_SHOW)
+        self.assertEqual(self.order.payment_status, BookingOrder.PAYMENT_PAID)
+
+    def test_user_cancel_paid_order_after_checkin_started_should_fail(self):
+        """验证入住日开始后用户端不能自助取消已支付订单。"""
+        self.login_user()
+        today = timezone.localdate()
+        BookingOrder.objects.filter(id=self.order.id).update(
+            status=BookingOrder.STATUS_CONFIRMED,
+            payment_status=BookingOrder.PAYMENT_PAID,
+            check_in_date=today,
+            check_out_date=today + timedelta(days=2),
+        )
+
+        response = self.client.post(
+            "/api/v1/user/orders/cancel",
+            {"order_id": self.order.id, "reason": "当天取消"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("入住日期已开始", response.json()["message"])
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, BookingOrder.STATUS_CONFIRMED)
+        self.assertEqual(self.order.payment_status, BookingOrder.PAYMENT_PAID)
+
+    def test_admin_order_list_should_return_no_show_lifecycle_warning(self):
+        """验证管理端订单列表会修正并展示未入住生命周期提示。"""
         self.login_admin()
         today = timezone.localdate()
         BookingOrder.objects.filter(id=self.order.id).update(
@@ -1271,11 +1548,12 @@ class AdminApiTests(ApiBaseTestCase):
             operator_remark="",
         )
 
-        response = self.client.get("/api/v1/admin/orders", {"status": BookingOrder.STATUS_PAID})
+        response = self.client.get("/api/v1/admin/orders", {"status": BookingOrder.STATUS_NO_SHOW})
         self.assertEqual(response.status_code, 200)
         item = response.json()["data"]["items"][0]
+        self.assertEqual(item["status"], BookingOrder.STATUS_NO_SHOW)
         self.assertTrue(item["is_lifecycle_anomaly"])
-        self.assertIn("离店日", item["lifecycle_warning"])
+        self.assertIn("未入住", item["lifecycle_warning"])
 
     def test_admin_dashboard_inventory_and_settings(self):
         """验证管理端总览、库存更新和设置接口。"""
@@ -1854,7 +2132,8 @@ class UserApiExtendedTests(ApiBaseTestCase):
         self.assertEqual(data["id"], self.order.id)
         self.assertEqual(data["order_no"], "HTTEST0001")
         self.assertNotIn("operator_remark", data)
-        self.assertNotIn("lifecycle_warning", data)
+        self.assertIn("lifecycle_warning", data)
+        self.assertEqual(data["lifecycle_warning"], "")
 
     def test_order_detail_should_reject_other_user_order(self):
         """验证用户不能查看他人订单。"""
@@ -2115,6 +2394,35 @@ class UserApiExtendedTests(ApiBaseTestCase):
 class AdminApiExtendedTests(ApiBaseTestCase):
     """管理端接口扩展测试集合。"""
 
+    def test_admin_room_type_update_should_accept_room_type_id(self):
+        """验证管理端更新房型时可正常识别 room_type_id。"""
+        self.login_admin()
+
+        response = self.client.post(
+            "/api/v1/admin/room-types/update",
+            {
+                "room_type_id": self.room_type.id,
+                "hotel": self.hotel.id,
+                "name": "焕新豪华大床房",
+                "bed_type": self.room_type.bed_type,
+                "area": 38,
+                "breakfast_count": 2,
+                "base_price": "459.00",
+                "max_guest_count": 2,
+                "stock": 12,
+                "status": RoomType.STATUS_ONLINE,
+                "image": "https://example.com/room-types/deluxe.jpg",
+                "description": "升级后的房型介绍",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.room_type.refresh_from_db()
+        self.assertEqual(self.room_type.name, "焕新豪华大床房")
+        self.assertEqual(self.room_type.area, 38)
+        self.assertEqual(self.room_type.image, "https://example.com/room-types/deluxe.jpg")
+
     def test_admin_check_out_completed_order(self):
         """验证管理端办理退房流程。"""
         self.login_admin()
@@ -2142,6 +2450,25 @@ class AdminApiExtendedTests(ApiBaseTestCase):
             "order_id": self.order.id,
         }, format="json")
         self.assertEqual(response.status_code, 409)
+
+    def test_admin_check_out_paid_order_without_checkin_should_fail(self):
+        """验证已支付但未入住的订单不能直接办理退房。"""
+        self.login_admin()
+        today = timezone.localdate()
+        BookingOrder.objects.filter(id=self.order.id).update(
+            status=BookingOrder.STATUS_PAID,
+            payment_status=BookingOrder.PAYMENT_PAID,
+            check_in_date=today - timedelta(days=1),
+            check_out_date=today + timedelta(days=1),
+        )
+
+        response = self.client.post("/api/v1/admin/orders/check-out", {
+            "order_id": self.order.id,
+        }, format="json")
+
+        self.assertEqual(response.status_code, 409)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, BookingOrder.STATUS_PAID)
 
     def test_admin_extend_stay(self):
         """验证续住功能（延长退房日期）。"""
@@ -2207,6 +2534,95 @@ class AdminApiExtendedTests(ApiBaseTestCase):
         }, format="json")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["data"]["status"], "confirmed")
+
+    def test_admin_change_status_should_mark_overdue_order_no_show(self):
+        """验证管理端可将离店日已过且未入住的订单标记为未入住。"""
+        self.login_admin()
+        today = timezone.localdate()
+        BookingOrder.objects.filter(id=self.order.id).update(
+            status=BookingOrder.STATUS_PAID,
+            payment_status=BookingOrder.PAYMENT_PAID,
+            check_in_date=today - timedelta(days=4),
+            check_out_date=today - timedelta(days=1),
+            no_show_at=None,
+            operator_remark="",
+        )
+
+        response = self.client.post("/api/v1/admin/orders/change-status", {
+            "order_id": self.order.id,
+            "target_status": BookingOrder.STATUS_NO_SHOW,
+            "operator_remark": "客人未到店",
+        }, format="json")
+
+        self.assertEqual(response.status_code, 200)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, BookingOrder.STATUS_NO_SHOW)
+        self.assertIsNotNone(self.order.no_show_at)
+        self.assertIn("客人未到店", self.order.operator_remark)
+
+    def test_admin_change_status_should_mark_started_order_no_show(self):
+        """验证入住日已开始但未过离店日的订单可人工标记未入住。"""
+        self.login_admin()
+        today = timezone.localdate()
+        BookingOrder.objects.filter(id=self.order.id).update(
+            status=BookingOrder.STATUS_CONFIRMED,
+            payment_status=BookingOrder.PAYMENT_PAID,
+            check_in_date=today,
+            check_out_date=today + timedelta(days=2),
+            no_show_at=None,
+            operator_remark="",
+        )
+
+        response = self.client.post("/api/v1/admin/orders/change-status", {
+            "order_id": self.order.id,
+            "target_status": BookingOrder.STATUS_NO_SHOW,
+            "operator_remark": "夜审确认未到店",
+        }, format="json")
+
+        self.assertEqual(response.status_code, 200)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, BookingOrder.STATUS_NO_SHOW)
+        self.assertIn("夜审确认未到店", self.order.operator_remark)
+
+    def test_admin_change_status_same_no_show_should_be_idempotent(self):
+        """验证重复提交未入住状态不会被已关闭状态校验误拦截。"""
+        self.login_admin()
+        BookingOrder.objects.filter(id=self.order.id).update(
+            status=BookingOrder.STATUS_NO_SHOW,
+            payment_status=BookingOrder.PAYMENT_PAID,
+            no_show_at=timezone.now(),
+            operator_remark="",
+        )
+
+        response = self.client.post("/api/v1/admin/orders/change-status", {
+            "order_id": self.order.id,
+            "target_status": BookingOrder.STATUS_NO_SHOW,
+            "operator_remark": "复核未到店",
+        }, format="json")
+
+        self.assertEqual(response.status_code, 200)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, BookingOrder.STATUS_NO_SHOW)
+        self.assertIn("复核未到店", self.order.operator_remark)
+
+    def test_admin_change_status_completed_requires_checked_in(self):
+        """验证未入住订单不能绕过入住流程直接完结。"""
+        self.login_admin()
+        today = timezone.localdate()
+        BookingOrder.objects.filter(id=self.order.id).update(
+            status=BookingOrder.STATUS_PAID,
+            payment_status=BookingOrder.PAYMENT_PAID,
+            check_in_date=today,
+            check_out_date=today + timedelta(days=2),
+        )
+
+        response = self.client.post("/api/v1/admin/orders/change-status", {
+            "order_id": self.order.id,
+            "target_status": BookingOrder.STATUS_COMPLETED,
+        }, format="json")
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("仅已入住订单", response.json()["message"])
 
     def test_admin_change_status_invalid_transition_should_fail(self):
         """验证非法状态流转被拦截。"""

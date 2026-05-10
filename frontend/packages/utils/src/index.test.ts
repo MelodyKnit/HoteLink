@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  ORDER_STATUS_MAP,
   PAYMENT_GATEWAY_SWITCH_META,
   POINT_TYPE_MAP,
   buildImageThumbList,
@@ -8,6 +9,8 @@ import {
   extractApiFieldErrors,
   formatDate,
   formatMoney,
+  isBusinessDateBeforeToday,
+  isBusinessDateOnOrBeforeToday,
   isValidChineseMobile,
   normalizeImageList,
   suggestUniquePaymentGatewayName,
@@ -23,6 +26,13 @@ describe('utils helpers', () => {
     expect(formatMoney(12)).toBe('12.00')
     expect(formatMoney('19.9')).toBe('19.90')
     expect(formatMoney('NaN')).toBe('0.00')
+  })
+
+  it('compares business dates without UTC timezone drift', () => {
+    expect(isBusinessDateOnOrBeforeToday('2026-05-10', '2026-05-10')).toBe(true)
+    expect(isBusinessDateOnOrBeforeToday('2026-05-11', '2026-05-10')).toBe(false)
+    expect(isBusinessDateBeforeToday('2026-05-09', '2026-05-10')).toBe(true)
+    expect(isBusinessDateBeforeToday('invalid', '2026-05-10')).toBe(false)
   })
 
   it('builds thumb proxy urls only for site media assets', () => {
@@ -94,5 +104,9 @@ describe('utils helpers', () => {
   it('maps split point types to user-facing labels', () => {
     expect(POINT_TYPE_MAP.consume).toBe('消费积分')
     expect(POINT_TYPE_MAP.member).toBe('会员积分')
+  })
+
+  it('maps no-show orders to a dedicated lifecycle label', () => {
+    expect(ORDER_STATUS_MAP.no_show.label).toBe('未入住')
   })
 })

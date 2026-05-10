@@ -11,6 +11,7 @@
         <option value="confirmed">已确认</option>
         <option value="checked_in">已入住</option>
         <option value="completed">已完成</option>
+        <option value="no_show">未入住</option>
         <option value="cancelled">已取消</option>
         <option value="refunding">退款中</option>
         <option value="refunded">已退款</option>
@@ -99,19 +100,19 @@
                 >查看详情</router-link>
                 <div class="my-1.5 h-px bg-slate-100" />
                 <router-link
-                  v-if="row.status === 'paid' || row.status === 'confirmed'"
+                  v-if="canCheckInOrder(row)"
                   :to="{ path: '/admin/frontdesk/check-in', query: { order_id: String(row.id) } }"
                   class="block rounded-md px-2 py-1.5 text-left text-[13px] text-teal-700 transition hover:bg-teal-50"
                   @click="closeActionMenu"
                 >完整入住流程</router-link>
                 <router-link
-                  v-if="row.status === 'checked_in' || row.status === 'paid' || row.status === 'confirmed'"
+                  v-if="row.status === 'checked_in'"
                   :to="{ path: '/admin/frontdesk/check-out', query: { order_id: String(row.id) } }"
                   class="block rounded-md px-2 py-1.5 text-left text-[13px] text-teal-700 transition hover:bg-teal-50"
                   @click="closeActionMenu"
                 >完整退房流程</router-link>
                 <router-link
-                  v-if="row.status === 'checked_in' || row.status === 'paid' || row.status === 'confirmed'"
+                  v-if="row.status === 'checked_in'"
                   :to="{ path: '/admin/frontdesk/extend-switch', query: { order_id: String(row.id) } }"
                   class="block rounded-md px-2 py-1.5 text-left text-[13px] text-teal-700 transition hover:bg-teal-50"
                   @click="closeActionMenu"
@@ -125,11 +126,17 @@
                     @click="handleMenuConfirm(row)"
                   >确认</button>
                   <button
-                    v-if="row.status === 'confirmed' || row.status === 'paid'"
+                    v-if="canCheckInOrder(row)"
                     class="inline-flex h-7 flex-1 items-center justify-center rounded-md border border-teal-200 bg-teal-50 text-[12px] font-medium text-teal-700 transition hover:bg-teal-100 disabled:cursor-not-allowed disabled:opacity-60"
                     :disabled="actionOrderId === row.id"
                     @click="handleMenuOpenCheckIn(row)"
                   >入住</button>
+                  <button
+                    v-if="canMarkNoShowOrder(row)"
+                    class="inline-flex h-7 flex-1 items-center justify-center rounded-md border border-amber-200 bg-amber-50 text-[12px] font-medium text-amber-700 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                    :disabled="actionOrderId === row.id"
+                    @click="handleMenuNoShow(row)"
+                  >未入住</button>
                   <button
                     v-if="row.status === 'checked_in'"
                     class="inline-flex h-7 flex-1 items-center justify-center rounded-md border border-slate-200 bg-slate-100 text-[12px] font-medium text-slate-700 transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-60"
@@ -196,7 +203,7 @@
 import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute } from 'vue-router'
 import { orderApi } from '@hotelink/api'
-import { formatMoney, ORDER_STATUS_MAP, PAYMENT_STATUS_MAP, extractApiError } from '@hotelink/utils'
+import { formatMoney, ORDER_STATUS_MAP, PAYMENT_STATUS_MAP, extractApiError, isBusinessDateBeforeToday, isBusinessDateOnOrBeforeToday } from '@hotelink/utils'
 import { PageHeader, DataTable, StatusBadge, ModalDialog, Pagination, RoomSuggestInput, useToast, useConfirm, SelectField } from '@hotelink/ui'
 import { emitOrderSync, onOrderSync } from '../utils/order-sync'
 
@@ -262,6 +269,24 @@ function handleMenuOpenCheckOut(row: Record<string, unknown>) {
   openCheckOut(row)
 }
 
+function handleMenuNoShow(row: Record<string, unknown>) {
+  closeActionMenu()
+  markNoShow(row)
+}
+
+function canCheckInOrder(row: Record<string, unknown>) {
+  const status = String(row.status || '')
+  return ['paid', 'confirmed'].includes(status)
+    && isBusinessDateOnOrBeforeToday(row.check_in_date)
+    && !isBusinessDateBeforeToday(row.check_out_date)
+}
+
+function canMarkNoShowOrder(row: Record<string, unknown>) {
+  const status = String(row.status || '')
+  return ['paid', 'confirmed'].includes(status)
+    && isBusinessDateOnOrBeforeToday(row.check_in_date)
+}
+
 function patchOrderRow(orderId: number, patch: Record<string, unknown>) {
   const nextStatus = String(patch.status || '')
   if (filters.status && nextStatus && filters.status !== nextStatus) {
@@ -272,11 +297,35 @@ function patchOrderRow(orderId: number, patch: Record<string, unknown>) {
   list.value = list.value.map((item) => (Number(item.id) === orderId ? { ...item, ...patch } : item))
 }
 
+async function markNoShow(row: Record<string, unknown>) {
+  if (actionOrderId.value !== null) return
+  if (!await confirmDialog('确认将此订单标记为未入住？')) return
+  actionOrderId.value = row.id as number
+  try {
+    const res = await orderApi.changeStatus({
+      order_id: row.id as number,
+      target_status: 'no_show',
+      operator_remark: '客人未到店',
+    })
+    if (res.code === 0) {
+      showToast('订单已标记为未入住', 'success')
+      patchOrderRow(row.id as number, { status: 'no_show' })
+      emitOrderSync({ action: 'change-status', orderId: Number(row.id), source: 'admin-order-list' })
+    } else {
+      showToast(extractApiError(res, '标记未入住失败'), 'error')
+    }
+  } catch {
+    showToast('标记未入住失败，请重试', 'error')
+  } finally {
+    actionOrderId.value = null
+  }
+}
+
 // 根据状态值返回对应展示信息。
 function statusType(status: string) {
   if (status === 'checked_in' || status === 'completed') return 'success' as const
   if (status === 'cancelled' || status === 'refunded') return 'danger' as const
-  if (status === 'pending_payment') return 'warning' as const
+  if (status === 'pending_payment' || status === 'no_show') return 'warning' as const
   if (status === 'refunding') return 'warning' as const
   return 'info' as const
 }

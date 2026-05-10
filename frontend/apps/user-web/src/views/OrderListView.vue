@@ -29,7 +29,10 @@
     <div class="mb-3 rounded-2xl bg-white px-3 py-1.5 shadow-sm ring-1 ring-gray-100">
       <div class="flex items-center gap-2">
         <div class="min-w-0 flex-1">
-          <div class="relative grid h-9 grid-cols-4 rounded-xl bg-slate-50 p-1 ring-1 ring-inset ring-gray-200">
+          <div
+            class="relative grid h-9 rounded-xl bg-slate-50 p-1 ring-1 ring-inset ring-gray-200"
+            :style="tabGridStyle"
+          >
             <span
               class="pointer-events-none absolute bottom-1 left-1 top-1 rounded-lg bg-white shadow-sm transition-transform duration-300 ease-out"
               :style="tabSliderStyle"
@@ -38,7 +41,7 @@
               v-for="tab in tabs"
               :key="tab.value"
               @click="switchTab(tab.value)"
-              class="relative z-10 h-full rounded-lg px-2 text-[13px] font-medium transition-colors"
+              class="relative z-10 h-full rounded-lg px-1 text-xs font-medium whitespace-nowrap transition-colors sm:px-2 sm:text-[13px]"
               :class="currentTab === tab.value ? 'text-slate-900' : 'text-gray-500'"
             >
               {{ tab.label }}
@@ -331,6 +334,7 @@ const tabs = [
   { value: 'pending_payment', label: '待支付' },
   { value: 'paid,confirmed', label: '待入住' },
   { value: 'completed', label: '已完成' },
+  { value: 'no_show', label: '未入住' },
 ]
 
 const paymentStatusOptions = [
@@ -345,6 +349,10 @@ const currentTabIndex = computed(() => {
   const index = tabs.findIndex(item => item.value === currentTab.value)
   return index >= 0 ? index : 0
 })
+
+const tabGridStyle = computed(() => ({
+  gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))`,
+}))
 
 const tabSliderStyle = computed(() => ({
   width: `calc((100% - 0.5rem) / ${tabs.length})`,
@@ -363,6 +371,7 @@ function statusBadge(s: string): string {
   if (s === 'completed') return 'bg-emerald-50 text-emerald-700'
   if (s === 'checked_in') return 'bg-cyan-50 text-cyan-700'
   if (s === 'pending_payment') return 'bg-amber-50 text-amber-700'
+  if (s === 'no_show') return 'bg-amber-50 text-amber-700'
   if (s === 'cancelled') return 'bg-gray-100 text-gray-500'
   if (s === 'confirmed') return 'bg-indigo-50 text-indigo-700'
   if (s === 'refunding') return 'bg-orange-50 text-orange-700'
@@ -404,6 +413,8 @@ function orderProgressText(order: any): string {
       return '您已入住，祝您旅途愉快'
     case 'completed':
       return order?.has_review ? '订单已完成，感谢您的入住' : '订单已完成，欢迎评价本次入住'
+    case 'no_show':
+      return '离店日期已过，订单已标记为未入住'
     case 'cancelled':
       return '订单已取消'
     default:

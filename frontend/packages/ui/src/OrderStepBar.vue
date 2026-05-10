@@ -26,14 +26,14 @@
       </template>
     </div>
 
-    <!-- 取消/退款状态标签 -->
-    <div class="mt-3 flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5">
-      <span class="flex h-6 w-6 items-center justify-center rounded-full bg-red-100 text-sm">✕</span>
+    <!-- 终态分支状态标签 -->
+    <div class="mt-3 flex items-center gap-2 rounded-xl border px-4 py-2.5" :class="branchBoxClass">
+      <span class="flex h-6 w-6 items-center justify-center rounded-full text-sm" :class="branchIconClass">{{ status === 'no_show' ? '!' : '✕' }}</span>
       <div>
-        <span class="text-sm font-semibold" :class="status === 'refunded' ? 'text-orange-600' : 'text-red-600'">
+        <span class="text-sm font-semibold" :class="branchTextClass">
           {{ BRANCH_LABEL[status] || '已取消' }}
         </span>
-        <span v-if="cancelledAt" class="ml-2 text-xs text-slate-400">{{ cancelledAt }}</span>
+        <span v-if="branchAt" class="ml-2 text-xs text-slate-400">{{ branchAt }}</span>
       </div>
     </div>
   </div>
@@ -99,11 +99,12 @@ const normalSteps = [
 
 const BRANCH_LABEL: Record<string, string> = {
   cancelled:  '已取消',
+  no_show:    '未入住',
   refunding:  '退款中',
   refunded:   '已退款',
 }
 
-const CANCELLED_BRANCHES = new Set(['cancelled', 'refunding', 'refunded'])
+const CANCELLED_BRANCHES = new Set(['cancelled', 'no_show', 'refunding', 'refunded'])
 
 const isCancelledBranch = computed(() => CANCELLED_BRANCHES.has(props.status))
 
@@ -118,13 +119,31 @@ function isPassedInCancelled(i: number) {
     if (normalSteps[i].key === 'confirmed' && props.timestamps?.confirmed) return true
     return false
   }
+  if (props.status === 'no_show') {
+    if (normalSteps[i].key === 'pending_payment') return true
+    if (normalSteps[i].key === 'paid' && props.timestamps?.paid) return true
+    if (normalSteps[i].key === 'confirmed' && props.timestamps?.confirmed) return true
+    return false
+  }
   return passedKeys.has(normalSteps[i].key)
 }
 
-const cancelledAt = computed(() => {
-  const ts = props.timestamps?.cancelled || props.timestamps?.refunding || props.timestamps?.refunded
+const branchAt = computed(() => {
+  const ts = props.timestamps?.cancelled || props.timestamps?.no_show || props.timestamps?.refunding || props.timestamps?.refunded
   return ts ? formatTs(ts) : ''
 })
+
+const branchBoxClass = computed(() => (
+  props.status === 'no_show' ? 'border-amber-200 bg-amber-50' : 'border-red-200 bg-red-50'
+))
+
+const branchIconClass = computed(() => (
+  props.status === 'no_show' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'
+))
+
+const branchTextClass = computed(() => (
+  props.status === 'no_show' ? 'text-amber-700' : props.status === 'refunded' ? 'text-orange-600' : 'text-red-600'
+))
 
 // 当前步骤在 normalSteps 中的索引
 const currentIndex = computed(() => {

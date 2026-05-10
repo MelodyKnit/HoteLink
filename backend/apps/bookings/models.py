@@ -11,6 +11,7 @@ class BookingOrder(models.Model):
     STATUS_CONFIRMED = "confirmed"
     STATUS_CHECKED_IN = "checked_in"
     STATUS_COMPLETED = "completed"
+    STATUS_NO_SHOW = "no_show"
     STATUS_CANCELLED = "cancelled"
     STATUS_REFUNDING = "refunding"
     STATUS_REFUNDED = "refunded"
@@ -20,6 +21,7 @@ class BookingOrder(models.Model):
         (STATUS_CONFIRMED, "已确认"),
         (STATUS_CHECKED_IN, "已入住"),
         (STATUS_COMPLETED, "已完成"),
+        (STATUS_NO_SHOW, "未入住"),
         (STATUS_CANCELLED, "已取消"),
         (STATUS_REFUNDING, "退款中"),
         (STATUS_REFUNDED, "已退款"),
@@ -52,6 +54,7 @@ class BookingOrder(models.Model):
     confirmed_at = models.DateTimeField(null=True, blank=True)
     checked_in_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
+    no_show_at = models.DateTimeField(null=True, blank=True)
     cancelled_at = models.DateTimeField(null=True, blank=True)
     check_in_date = models.DateField(db_index=True)
     check_out_date = models.DateField(db_index=True)

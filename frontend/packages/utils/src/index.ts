@@ -8,6 +8,43 @@ export function formatDate(date: Date | string): string {
   return `${y}-${m}-${day}`
 }
 
+/**
+ * Converts a date into a local YYYY-MM-DD key for business-day comparisons.
+ *
+ * @param date - Date object to normalize with the browser's local timezone.
+ * @returns Local date key in YYYY-MM-DD format.
+ */
+export function localDateKey(date = new Date()): string {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+/**
+ * Checks whether a YYYY-MM-DD style business date has started.
+ *
+ * @param value - Date string from the API.
+ * @param today - Optional local date key used by tests.
+ * @returns True when the given date is today or earlier.
+ */
+export function isBusinessDateOnOrBeforeToday(value: unknown, today = localDateKey()): boolean {
+  const dateKey = String(value || '').slice(0, 10)
+  return /^\d{4}-\d{2}-\d{2}$/.test(dateKey) && dateKey <= today
+}
+
+/**
+ * Checks whether a YYYY-MM-DD style business date is before today.
+ *
+ * @param value - Date string from the API.
+ * @param today - Optional local date key used by tests.
+ * @returns True when the given date has passed.
+ */
+export function isBusinessDateBeforeToday(value: unknown, today = localDateKey()): boolean {
+  const dateKey = String(value || '').slice(0, 10)
+  return /^\d{4}-\d{2}-\d{2}$/.test(dateKey) && dateKey < today
+}
+
 // 处理 formatDateTime 业务流程。
 export function formatDateTime(date: Date | string): string {
   const d = typeof date === 'string' ? new Date(date) : date
@@ -93,6 +130,7 @@ export const ORDER_STATUS_MAP: Record<string, { label: string; color: string }> 
   confirmed: { label: '已确认', color: 'text-indigo-600' },
   checked_in: { label: '已入住', color: 'text-green-600' },
   completed: { label: '已完成', color: 'text-gray-600' },
+  no_show: { label: '未入住', color: 'text-amber-700' },
   cancelled: { label: '已取消', color: 'text-red-600' },
   refunding: { label: '退款中', color: 'text-orange-600' },
   refunded: { label: '已退款', color: 'text-gray-500' },

@@ -136,17 +136,17 @@
           <p class="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">流程入口</p>
           <div class="flex flex-wrap gap-3">
             <router-link
-              v-if="order.status === 'paid' || order.status === 'confirmed'"
+              v-if="canCheckInOrder"
               :to="{ path: '/admin/frontdesk/check-in', query: { order_id: String(order.id) } }"
               class="rounded-lg border border-cyan-200 bg-cyan-50 px-4 py-2 text-sm font-medium text-cyan-700 transition hover:bg-cyan-100"
             >进入完整入住流程</router-link>
             <router-link
-              v-if="order.status === 'checked_in' || order.status === 'paid' || order.status === 'confirmed'"
+              v-if="order.status === 'checked_in'"
               :to="{ path: '/admin/frontdesk/check-out', query: { order_id: String(order.id) } }"
               class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-700 transition hover:bg-amber-100"
             >进入完整退房流程</router-link>
             <router-link
-              v-if="order.status === 'checked_in' || order.status === 'paid' || order.status === 'confirmed'"
+              v-if="order.status === 'checked_in'"
               :to="{ path: '/admin/frontdesk/extend-switch', query: { order_id: String(order.id) } }"
               class="rounded-lg border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-medium text-violet-700 transition hover:bg-violet-100"
             >进入续住/换房流程</router-link>
@@ -173,12 +173,20 @@
               {{ actionLoading ? '处理中…' : '确认订单' }}
             </button>
             <button
-              v-if="order.status === 'confirmed' || order.status === 'paid'"
+              v-if="canCheckInOrder"
               class="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60"
               :disabled="actionLoading"
               @click="openCheckIn"
             >
               {{ actionLoading ? '处理中…' : '办理入住' }}
+            </button>
+            <button
+              v-if="canMarkNoShowOrder"
+              class="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
+              :disabled="actionLoading"
+              @click="markNoShow"
+            >
+              {{ actionLoading ? '处理中…' : '标记未入住' }}
             </button>
             <button
               v-if="order.status === 'checked_in'"
@@ -243,7 +251,7 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute } from 'vue-router'
 import { orderApi } from '@hotelink/api'
-import { formatMoney, formatDateTime, ORDER_STATUS_MAP, PAYMENT_STATUS_MAP, PAYMENT_METHOD_MAP } from '@hotelink/utils'
+import { formatMoney, formatDateTime, ORDER_STATUS_MAP, PAYMENT_STATUS_MAP, PAYMENT_METHOD_MAP, isBusinessDateBeforeToday, isBusinessDateOnOrBeforeToday } from '@hotelink/utils'
 import { PageHeader, StatusBadge, ModalDialog, OrderStepBar, RoomSuggestInput, useToast, useConfirm } from '@hotelink/ui'
 import { emitOrderSync, onOrderSync } from '../utils/order-sync'
 
@@ -282,6 +290,7 @@ const orderTimestamps = computed<Record<string, string | undefined>>(() => ({
   confirmed:       order.value?.confirmed_at as string | undefined,
   checked_in:      order.value?.checked_in_at as string | undefined,
   completed:       order.value?.completed_at as string | undefined,
+  no_show:         order.value?.no_show_at as string | undefined,
   cancelled:       order.value?.cancelled_at as string | undefined,
 }))
 
@@ -303,11 +312,24 @@ const operatorRemarkItems = computed(() => {
 function statusType(status: string) {
   if (status === 'checked_in' || status === 'completed') return 'success' as const
   if (status === 'cancelled' || status === 'refunded') return 'danger' as const
-  if (status === 'pending_payment' || status === 'refunding') return 'warning' as const
+  if (status === 'pending_payment' || status === 'no_show' || status === 'refunding') return 'warning' as const
   return 'info' as const
 }
 
-const canCancelOrder = computed(() => !!order.value && !['checked_in', 'completed', 'cancelled', 'refunded'].includes(String(order.value.status)))
+const canCancelOrder = computed(() => !!order.value && !['checked_in', 'completed', 'no_show', 'cancelled', 'refunded'].includes(String(order.value.status)))
+const canCheckInOrder = computed(() => {
+  if (!order.value) return false
+  const status = String(order.value.status || '')
+  return ['paid', 'confirmed'].includes(status)
+    && isBusinessDateOnOrBeforeToday(order.value.check_in_date)
+    && !isBusinessDateBeforeToday(order.value.check_out_date)
+})
+const canMarkNoShowOrder = computed(() => {
+  if (!order.value) return false
+  const status = String(order.value.status || '')
+  return ['paid', 'confirmed'].includes(status)
+    && isBusinessDateOnOrBeforeToday(order.value.check_in_date)
+})
 
 // 加载 Detail 相关数据。
 async function loadDetail(silent = false) {
@@ -381,6 +403,30 @@ async function submitCancel() {
     }
   } catch {
     showToast('取消失败，请重试', 'error')
+  } finally {
+    actionLoading.value = false
+  }
+}
+
+async function markNoShow() {
+  if (actionLoading.value) return
+  if (!await confirmDialog('确认将此订单标记为未入住？', { type: 'warning' })) return
+  actionLoading.value = true
+  try {
+    const res = await orderApi.changeStatus({
+      order_id: order.value!.id as number,
+      target_status: 'no_show',
+      operator_remark: '客人未到店',
+    })
+    if (res.code === 0) {
+      showToast('订单已标记为未入住', 'success')
+      emitOrderSync({ action: 'change-status', orderId: Number(order.value!.id), source: 'admin-order-detail' })
+      loadDetail(true)
+    } else {
+      showToast(res.message || '标记未入住失败', 'error')
+    }
+  } catch {
+    showToast('标记未入住失败，请重试', 'error')
   } finally {
     actionLoading.value = false
   }

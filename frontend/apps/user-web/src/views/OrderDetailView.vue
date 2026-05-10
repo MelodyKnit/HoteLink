@@ -51,6 +51,7 @@
           confirmed: order.confirmed_at,
           checked_in: order.checked_in_at,
           completed: order.completed_at,
+          no_show: order.no_show_at,
           cancelled: order.cancelled_at,
         }" />
       </div>
@@ -468,7 +469,7 @@ import { useRoute, useRouter } from 'vue-router'
 import type { LocationQueryRaw } from 'vue-router'
 import { userOrderApi, userReviewApi, commonApi, userInvoiceApi } from '@hotelink/api'
 import type { InvoiceRequestItem, InvoiceTitleItem } from '@hotelink/api'
-import { ORDER_STATUS_MAP, PAYMENT_METHOD_MAP, PAYMENT_STATUS_MAP, buildImageThumbUrl, extractApiError, formatMoney } from '@hotelink/utils'
+import { ORDER_STATUS_MAP, PAYMENT_METHOD_MAP, PAYMENT_STATUS_MAP, buildImageThumbUrl, extractApiError, formatMoney, isBusinessDateOnOrBeforeToday } from '@hotelink/utils'
 import { OrderStepBar, SelectField, useToast } from '@hotelink/ui'
 
 const { showToast } = useToast()
@@ -524,7 +525,12 @@ const stayNights = computed(() => {
 
 // 根据状态值返回对应展示信息。
 function statusLabel(s: string): string { return ORDER_STATUS_MAP[s]?.label || s || '未知' }
-const canCancel = computed(() => ['pending_payment', 'paid', 'confirmed'].includes(order.value.status))
+const canCancel = computed(() => {
+  const status = String(order.value.status || '')
+  if (status === 'pending_payment') return true
+  return ['paid', 'confirmed'].includes(status)
+    && !isBusinessDateOnOrBeforeToday(order.value.check_in_date)
+})
 const canOpenInvoice = computed(() => order.value.status === 'completed')
 const invoiceRequestForOrder = computed(() => invoiceRequests.value.find((item) => Number(item.order_id) === orderId))
 const hotelDetailId = computed(() => {
@@ -543,7 +549,7 @@ const hotelDetailRoute = computed(() => (
     ? { path: hotelDetailPath.value, query: hotelDetailQuery.value }
     : '/'
 ))
-const showRebook = computed(() => hotelDetailId.value > 0 && ['completed', 'cancelled', 'refunded'].includes(order.value.status))
+const showRebook = computed(() => hotelDetailId.value > 0 && ['completed', 'no_show', 'cancelled', 'refunded'].includes(order.value.status))
 const showActionBar = computed(() => (
   order.value.status === 'pending_payment'
   || canCancel.value
