@@ -276,6 +276,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { aiApi, type AiCallLogItem, type AiUsageStatsData } from '@hotelink/api'
 import { PageHeader, SelectField, Pagination, ModalDialog, useToast } from '@hotelink/ui'
+import { formatDateTime as formatBusinessDateTime } from '@hotelink/utils'
 import {
   AI_LOG_SOURCE_LABELS,
   AI_LOG_STATUS_LABELS,
@@ -319,8 +320,7 @@ function formatNumber(n: number): string {
 }
 
 function formatDateTime(dt: string): string {
-  if (!dt) return ''
-  return new Date(dt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  return formatBusinessDateTime(dt, { dateStyle: 'month-day' })
 }
 
 function openLogDetail(log: AiCallLogItem) {

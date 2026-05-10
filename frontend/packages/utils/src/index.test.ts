@@ -20,8 +20,15 @@ import {
 } from './index'
 
 describe('utils helpers', () => {
-  it('formats valid dates and rejects invalid input', () => {
-    expect(formatDate(new Date('2026-04-24T00:00:00Z'))).toBe('2026-04-24')
+  it('formats local Date objects and rejects invalid input', () => {
+    expect(formatDate(new Date(2026, 3, 24, 9, 15, 0))).toBe('2026-04-24')
+    expect(formatDate('invalid-date')).toBe('')
+  })
+
+  it('keeps backend timestamp strings stable across viewer timezones', () => {
+    expect(formatDate('2026-04-24T00:00:00Z')).toBe('2026-04-24')
+    expect(formatDateTime('2026-05-10T15:41:34.672170+08:00')).toBe('2026-05-10 15:41:34')
+    expect(formatDateTime('2026-05-10T15:41:34.672170+08:00', { dateStyle: 'month-day', withSeconds: false })).toBe('05-10 15:41')
     expect(formatDate('invalid-date')).toBe('')
   })
 
@@ -37,8 +44,8 @@ describe('utils helpers', () => {
     expect(resolveAdminUserId({})).toBe(0)
   })
 
-  it('formats date time into a compact local timestamp', () => {
-    expect(formatDateTime('2026-05-10T15:41:34.672170+08:00')).toBe('2026-05-10 15:41:34')
+  it('formats local Date objects into a compact timestamp', () => {
+    expect(formatDateTime(new Date(2026, 4, 10, 15, 41, 34))).toBe('2026-05-10 15:41:34')
     expect(formatDateTime('invalid-date')).toBe('')
   })
 

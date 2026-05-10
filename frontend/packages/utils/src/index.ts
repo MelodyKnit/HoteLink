@@ -1,11 +1,62 @@
-// 处理 formatDate 业务流程。
+interface DateDisplayParts {
+  year: string
+  month: string
+  day: string
+  hours: string
+  minutes: string
+  seconds: string
+}
+
+const ISO_DATE_TIME_PREFIX_RE =
+  /^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}):(\d{2})(?::(\d{2}))?)?/
+
+function buildDateDisplayPartsFromDate(date: Date): DateDisplayParts {
+  return {
+    year: String(date.getFullYear()),
+    month: String(date.getMonth() + 1).padStart(2, '0'),
+    day: String(date.getDate()).padStart(2, '0'),
+    hours: String(date.getHours()).padStart(2, '0'),
+    minutes: String(date.getMinutes()).padStart(2, '0'),
+    seconds: String(date.getSeconds()).padStart(2, '0'),
+  }
+}
+
+function buildDateDisplayPartsFromString(value: string): DateDisplayParts | null {
+  const matched = value.trim().match(ISO_DATE_TIME_PREFIX_RE)
+  if (!matched) return null
+
+  return {
+    year: matched[1],
+    month: matched[2],
+    day: matched[3],
+    hours: matched[4] || '00',
+    minutes: matched[5] || '00',
+    seconds: matched[6] || '00',
+  }
+}
+
+function resolveDateDisplayParts(value: Date | string): DateDisplayParts | null {
+  if (typeof value === 'string') {
+    // Preserve backend timestamp strings as business time instead of shifting by browser timezone.
+    const rawParts = buildDateDisplayPartsFromString(value)
+    if (rawParts) return rawParts
+  }
+
+  const date = typeof value === 'string' ? new Date(value) : value
+  if (Number.isNaN(date.getTime())) return null
+  return buildDateDisplayPartsFromDate(date)
+}
+
+/**
+ * Formats a business date into a stable YYYY-MM-DD string.
+ *
+ * Date objects keep the local browser date, while ISO-like backend strings keep
+ * their original business date instead of drifting with the viewer timezone.
+ */
 export function formatDate(date: Date | string): string {
-  const d = typeof date === 'string' ? new Date(date) : date
-  if (Number.isNaN(d.getTime())) return ''
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
+  const parts = resolveDateDisplayParts(date)
+  if (!parts) return ''
+  return `${parts.year}-${parts.month}-${parts.day}`
 }
 
 /**
@@ -45,11 +96,32 @@ export function isBusinessDateBeforeToday(value: unknown, today = localDateKey()
   return /^\d{4}-\d{2}-\d{2}$/.test(dateKey) && dateKey < today
 }
 
-// 处理 formatDateTime 业务流程。
-export function formatDateTime(date: Date | string): string {
-  const d = typeof date === 'string' ? new Date(date) : date
-  if (Number.isNaN(d.getTime())) return ''
-  return `${formatDate(d)} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`
+export interface FormatDateTimeOptions {
+  dateStyle?: 'full' | 'month-day'
+  withSeconds?: boolean
+}
+
+/**
+ * Formats a business timestamp into a stable user-facing string.
+ *
+ * Backend ISO strings preserve their original wall-clock time, while Date
+ * objects continue to use the current browser timezone for in-app local dates.
+ */
+export function formatDateTime(
+  date: Date | string,
+  options: FormatDateTimeOptions = {},
+): string {
+  const parts = resolveDateDisplayParts(date)
+  if (!parts) return ''
+
+  const dateText = options.dateStyle === 'month-day'
+    ? `${parts.month}-${parts.day}`
+    : `${parts.year}-${parts.month}-${parts.day}`
+  const timeText = options.withSeconds === false
+    ? `${parts.hours}:${parts.minutes}`
+    : `${parts.hours}:${parts.minutes}:${parts.seconds}`
+
+  return `${dateText} ${timeText}`
 }
 
 // 处理 formatMoney 业务流程。

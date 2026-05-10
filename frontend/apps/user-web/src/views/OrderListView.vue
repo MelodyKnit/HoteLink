@@ -301,7 +301,12 @@ import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { userOrderApi } from '@hotelink/api'
 import { useToast } from '@hotelink/ui'
-import { ORDER_STATUS_MAP, PAYMENT_STATUS_MAP, formatMoney } from '@hotelink/utils'
+import {
+  ORDER_STATUS_MAP,
+  PAYMENT_STATUS_MAP,
+  formatDateTime as formatBusinessDateTime,
+  formatMoney,
+} from '@hotelink/utils'
 
 const route = useRoute()
 const router = useRouter()
@@ -392,15 +397,8 @@ function maskMobile(mobile?: string): string {
 
 function formatDateTime(value?: string): string {
   if (!value) return '-'
-  const dt = new Date(value)
-  if (Number.isNaN(dt.getTime())) {
-    return String(value).replace('T', ' ').slice(0, 16)
-  }
-  const mm = String(dt.getMonth() + 1).padStart(2, '0')
-  const dd = String(dt.getDate()).padStart(2, '0')
-  const hh = String(dt.getHours()).padStart(2, '0')
-  const mi = String(dt.getMinutes()).padStart(2, '0')
-  return `${mm}-${dd} ${hh}:${mi}`
+  return formatBusinessDateTime(value, { dateStyle: 'month-day', withSeconds: false })
+    || String(value).replace('T', ' ').slice(5, 16)
 }
 
 function orderProgressText(order: any): string {
