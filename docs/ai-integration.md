@@ -127,7 +127,7 @@ build_ai_client(provider) → OpenAI compatible client
 | 功能 | 接口 | 实现状态 |
 |------|------|----------|
 | 智能客服问答 | `POST /api/v1/user/ai/chat` | 完整实现；返回自然语言答案、结构化动作卡片与会话标识 |
-| 流式客服问答 | `POST /api/v1/user/ai/chat/stream` | SSE 输出；`customer_service` 使用真实 LLM token 流，结构化模式使用安全分段流，流结束后再持久化消息 |
+| 流式客服问答 | `POST /api/v1/user/ai/chat/stream` | SSE 输出；`customer_service` 使用真实 LLM token 流，`booking_assistant` 在 AI 可用时采用“规则动作卡片 + LLM 自然语言回复”的混合模式，流结束后再持久化消息 |
 | AI 订房编排 | 同上，订房意图检测后自动切入 | 多轮对话状态机 |
 | 客服快捷操作 | 同上，客服场景返回 `booking_assistant.options` | 为订单、支付、发票、通知、我的评价等页面提供可点击跳转按钮 |
 | FAQ 问答 | 客服场景内支持 | 通过 Prompt 约束 |
@@ -181,6 +181,18 @@ build_ai_client(provider) → OpenAI compatible client
 | AI 连通性测试 | `POST /api/v1/admin/ai/test` | 验证当前或指定供应商是否可用 |
 | AI 调用日志 | `GET /api/v1/admin/ai/call-logs` | 查询 AICallLog 表，分页返回调用记录 |
 | AI 用量统计 | `GET /api/v1/admin/ai/usage-stats` | 按场景 / 供应商统计 token 用量与费用 |
+
+管理端 AI 观测语义：
+
+| 字段 | 可选值 | 含义 |
+|------|--------|------|
+| `status` | `success` / `fallback` / `rule_based` / `failed` / `timeout` / `quota_exceeded` | 最终调用结论；`rule_based` 表示本轮由规则或确定性流程完成，不等同于失败 |
+| `result_source` | `llm` / `fallback` / `rule_engine` | 最终结果实际来自大模型、兜底文案，还是规则引擎 |
+| `llm_invoked` | `true` / `false` | 本轮是否真实发起过模型请求；即使最终回退到 fallback，也会保留 `true` 用于区分“尝试过 AI 但降级” |
+| `fallback_reason` | 如 `service_unavailable` / `empty_response` / `parse_failed` / `exception` / `deterministic_flow` / `message_build_failed` | 说明为什么没有直接落成最终 LLM 结果 |
+
+- `GET /api/v1/admin/ai/call-logs` 支持按 `scene`、`status`、`result_source` 过滤，并返回 `result_source`、`llm_invoked`、`fallback_reason` 字段，供管理端区分真实模型成功、规则结果和兜底结果。
+- `GET /api/v1/admin/ai/usage-stats` 额外返回 `success_calls`、`fallback_calls`、`rule_based_calls`、`failed_calls`、`llm_invoked_calls` 与 `by_source`，用于分别观察“真实成功率”和“被兜底/规则接管的比例”。
 
 #### 规划中
 
@@ -287,7 +299,8 @@ stateDiagram-v2
 ### 6.2 编排特点
 
 - 每个阶段返回结构化 `booking_assistant` 字段，携带 `stage`、`options`、`action`
-- 支持预算偏好提取、距离排序（POI 附近酒店）、交通参考点距离、酒店标签/地址命中、评分排序
+- 当 AI 可用时，服务端会先用确定性编排产出 `booking_assistant` 阶段和可点击动作，再把该结果作为权威上下文交给 LLM 生成更自然的中文回复；AI 不可用或空回复时，会回退到当前轮规则答复
+- 支持预算偏好提取、距离排序（POI 附近酒店）、交通参考点距离、酒店标签/地址命中、评分排序；当 AI 可用时会先抽取 `selected_city`、`poi_keyword` 等槽位，再由确定性酒店/房型动作卡片承接下单流程，同时识别“附近 / 周边 / 旁边”等近邻表达
 - 当用户表达“近地铁”“交通方便”等偏好时，服务端优先使用酒店坐标计算到城市内配置的交通参考点的直线距离，并结合酒店 `tags`、`address`、`facilities` 中的交通证据生成候选依据；没有足够数据时会明确说明缺失限制，不编造真实路线距离。
 - 前端渲染城市/酒店/房型动作卡片，点击后继续对话或跳转 `/booking`
 - 上下文由前端通过 `booking_context` 字段传递，支持跨轮对话状态保持
@@ -364,6 +377,8 @@ stateDiagram-v2
 - AI 调用记录列表（时间、场景、供应商、模型、令牌数、耗时、状态）
 - 按场景 / 供应商 / 状态筛选
 - 分页浏览
+- 同步与流式链路都会优先记录真实模型 usage；即使业务接口把返回值转换成摘要、推荐列表或对比结果，日志仍会回退读取服务层缓存的 provider / model / token 元数据
+- 如果供应商未返回 usage（或该能力本身走的是规则引擎而非 LLM），`token` 字段可能仍为 `0`；此时应结合 `scene`、`provider`、`model` 与接口实现判断，而不能仅凭 `0 token` 断定“整条链路没有调用 AI”
 
 环境变量已写入：
 
@@ -402,9 +417,11 @@ stateDiagram-v2
 - `AIChatSerializer.question` 新增 `max_length=2000` 校验，防止超长输入攻击
 - Prompt 模板渲染引擎从 `jinja2.Environment` 切换为 `jinja2.sandbox.SandboxedEnvironment`，阻止模板注入执行任意代码
 - `create_chat_completion()` 统一传入 `max_tokens=4096`，限制单次生成长度，防止异常高 token 消耗
+- 流式 completion 优先请求 `stream_options.include_usage`，并在提供方支持时把最终 usage 写入 `AICallLog`；不支持时自动退回普通流式请求，避免影响实时输出
 - AI 连通性测试接口 (`POST /admin/ai/test`) 错误响应不再暴露完整异常堆栈，仅返回脱敏摘要
 - `load_ai_settings()` 增加内存缓存，减少重复数据库查询
 - AI 调用日志 `status` 字段跟踪修正：成功/失败/异常状态准确记录
+- AICallLog 记账优先取接口返回值中的 `raw.usage`，缺失时回退到 `AIChatService` 请求级缓存与累计 token，用于覆盖管理端摘要、用户推荐、酒店对比和流式客服等包装场景
 - 流式输出错误分支修正 `ensure_ascii=False`，保证中文错误信息正确编码
 
 ## 9. 后续扩展规划

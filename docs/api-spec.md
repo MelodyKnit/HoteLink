@@ -198,7 +198,7 @@
 - 用户端订单详情、列表和支付上下文读取前会修复过期订单生命周期；用户取消订单时也会先修复生命周期，入住日已开始的已支付/已确认订单不可自助取消，需要联系酒店处理
 - `/api/v1/user/ai/chat` 与 `/api/v1/user/ai/chat/stream` 支持可选 `session_id`（续聊）；服务端会自动写入会话消息
 - `/api/v1/user/ai/chat` 与 `/api/v1/user/ai/chat/stream` 支持可选 `conversation_summary`（历史对话压缩摘要，最长 4000 字符）
-- `/api/v1/user/ai/chat` 返回 `answer`、`scene`、`session_id` 以及可选 `booking_assistant`
+- `/api/v1/user/ai/chat` 返回 `answer`、`scene`、`session_id` 以及可选 `booking_assistant`；当 `scene=booking_assistant` 且 AI 可用时，`answer` 优先来自 LLM 的自然语言回复，而 `booking_assistant` 仍是服务端确定性编排出的动作卡片
 - `/api/v1/user/ai/chat/stream` 的 SSE 事件顺序为 `meta -> chunk -> done`
 
 ### 6.5 Admin
@@ -229,8 +229,8 @@
 - `GET /api/v1/admin/audit-logs` 仅 `system_admin` 可访问，支持 `keyword`、`action`、`target`、`user_id`、`start_date`、`end_date` 过滤；响应项包含操作人、动作、目标、详情 JSON、风险等级和创建时间。
 - `GET /api/v1/admin/members/overview` 返回 `total_users`、`total_member_points`、`total_consume_points` 与各等级 `member_points_threshold`，供管理端展示会员成长积分与消费积分余额的运营口径。
 - `POST /api/v1/admin/ai/test` 用于管理端连通性测试，可验证当前或指定供应商是否可用。
-- `GET /api/v1/admin/ai/call-logs` 分页查询 AI 调用历史记录；支持 `scene`、`status` 过滤参数；响应字段包含 `id`、`scene`、`provider`、`model`、`input_tokens`、`output_tokens`、`total_tokens`、`latency_ms`、`cost_estimate`、`status`、`error_message`（完整错误文本，最长 5000 字符）、`username`、`created_at`。
-- `GET /api/v1/admin/ai/usage-stats` 按场景/状态汇总 token 用量与费用；支持 `start_date`、`end_date` 过滤；响应包含 `success_count`、`failed_count`、`total_tokens`、`cost_estimate`、`by_scene`、`by_status`。
+- `GET /api/v1/admin/ai/call-logs` 分页查询 AI 调用历史记录；支持 `scene`、`status`、`result_source` 过滤参数；响应字段包含 `id`、`scene`、`provider`、`model`、`input_tokens`、`output_tokens`、`total_tokens`、`latency_ms`、`cost_estimate`、`status`、`result_source`、`llm_invoked`、`fallback_reason`、`error_message`（完整错误文本，最长 5000 字符）、`username`、`created_at`。其中 `status=rule_based` 表示本轮由规则/确定性流程完成，`status=fallback` 表示本轮曾进入兜底路径。
+- `GET /api/v1/admin/ai/usage-stats` 按场景/状态汇总 token 用量与费用；支持 `start_date`、`end_date` 过滤；响应包含 `total_calls`、`success_calls`、`fallback_calls`、`rule_based_calls`、`failed_calls`、`llm_invoked_calls`、`total_tokens`、`total_cost`、`by_scene`、`by_provider`、`by_source`。
 - `GET /api/v1/admin/hotels` 支持 `type` 查询参数过滤酒店类型
 - `POST /api/v1/admin/hotels/batch-update` 批量更新酒店类型，接受 `hotel_ids`（列表）和 `type`
 - `GET /api/v1/common/dicts` 新增字典项：`hotel_type`（酒店/民宿/短租）、`hotel_facility`（16 项设施枚举）

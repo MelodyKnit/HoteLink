@@ -25,6 +25,7 @@ from apps.bookings.tasks import send_upcoming_checkin_reminders, sweep_order_lif
 from apps.crm.models import ChatMessage, ChatSession, CouponTemplate, InvoiceRequest, InvoiceTitle, PointsLog, Review, UserCoupon
 from apps.hotels.models import Hotel, RoomInventory, RoomType
 from apps.operations.models import AICallLog, AuditLog, SystemNotice
+from apps.operations.services.ai_service import AIChatService
 from apps.operations.services.prompt_service import PromptTemplateService
 from apps.payments.models import PaymentRecord
 from apps.users.models import UserProfile
@@ -980,6 +981,201 @@ class UserApiTests(ApiBaseTestCase):
         self.assertTrue(any("推荐依据" in fact and "龙翔桥站" in fact for fact in agent_state["facts"]))
         self.assertTrue(any(metric["label"] == "依据" for metric in agent_state["metrics"]))
 
+    def test_user_ai_chat_booking_nearby_poi_slots_should_infer_city_and_return_nearby_hotel(self):
+        """验证 LLM 槽位可驱动附近酒店推荐，而不是重复城市兜底。"""
+        self.login_user()
+        nearby_hotel = Hotel.objects.create(
+            name="HoteLink 杭州紫金港校区店",
+            city="杭州",
+            address="杭州市西湖区余杭塘路 866 号",
+            star=4,
+            phone="0571-77778888",
+            description="靠近浙大紫金港校区的演示酒店",
+            rating=Decimal("4.7"),
+            min_price=Decimal("468.00"),
+            tags=["高校周边", "交通便利"],
+            latitude=Decimal("30.309000"),
+            longitude=Decimal("120.085100"),
+            is_recommended=True,
+            status=Hotel.STATUS_ONLINE,
+        )
+        Hotel.objects.create(
+            name="HoteLink 杭州远郊度假店",
+            city="杭州",
+            address="杭州市余杭区示例远郊路 66 号",
+            star=4,
+            phone="0571-99990000",
+            description="远郊演示酒店",
+            rating=Decimal("4.9"),
+            min_price=Decimal("399.00"),
+            latitude=Decimal("30.380000"),
+            longitude=Decimal("120.010000"),
+            status=Hotel.STATUS_ONLINE,
+        )
+
+        with patch(
+            "apps.api.views.AIChatService._extract_booking_slots_with_llm",
+            return_value={
+                "selected_city": "杭州",
+                "hotel_keyword": None,
+                "poi_keyword": "浙大紫金港",
+                "reset": False,
+                "switch_hotel": False,
+                "sort_by": None,
+                "budget_max": None,
+                "min_rating": None,
+                "nearby_radius_km": None,
+            },
+        ), patch(
+            "apps.api.views.AIChatService._geocode_poi_free",
+            return_value={
+                "name": "浙江大学紫金港校区",
+                "city": "杭州",
+                "lat": 30.308122,
+                "lng": 120.084196,
+                "aliases": ["浙大紫金港"],
+            },
+        ):
+            response = self.client.post(
+                "/api/v1/user/ai/chat/stream",
+                {
+                    "scene": "booking_assistant",
+                    "question": "浙大紫金港旁边的酒店有没有",
+                },
+                format="json",
+            )
+        self.assertEqual(response.status_code, 200)
+        payload = b"".join(response.streaming_content).decode("utf-8")
+        events = self.parse_sse_payload(payload)
+        meta_event = next(event for event in events if event["type"] == "meta")
+        assistant_payload = meta_event["booking_assistant"]
+        first_option = assistant_payload["options"][0]
+
+        self.assertEqual(assistant_payload["phase"], "select_hotel")
+        self.assertEqual(assistant_payload["context"]["selected_city"], "杭州")
+        self.assertEqual(assistant_payload["context"]["nearby_poi_name"], "浙江大学紫金港校区")
+        self.assertIn("浙江大学紫金港校区", assistant_payload["answer"])
+        self.assertNotIn("先选城市", assistant_payload["answer"])
+        self.assertEqual(first_option["type"], "navigate_hotel")
+        self.assertEqual(first_option["label"], nearby_hotel.name)
+        self.assertEqual(first_option["route"], f"/hotels/{nearby_hotel.id}")
+        self.assertEqual(first_option["query"]["poi"], "浙江大学紫金港校区")
+        self.assertTrue(any("浙江大学紫金港校区" in item for item in first_option["highlights"]))
+
+        agent_state = meta_event["agent_state"]
+        self.assertTrue(any("杭州" in fact for fact in agent_state["facts"]))
+        self.assertTrue(any("浙大紫金港" in fact or "浙江大学紫金港校区" in fact for fact in agent_state["facts"]))
+
+    def test_booking_slot_extraction_should_accept_llm_poi_keyword(self):
+        """验证订房槽位抽取会接收模型返回的地点关键词。"""
+        service = AIChatService()
+        with patch.object(service, "is_available", return_value=True), patch.object(
+            service,
+            "create_chat_completion",
+            return_value={
+                "content": json.dumps(
+                    {
+                        "selected_city": "杭州",
+                        "hotel_keyword": None,
+                        "poi_keyword": "浙大紫金港",
+                        "reset": False,
+                        "switch_hotel": False,
+                        "sort_by": None,
+                        "budget_max": None,
+                        "min_rating": None,
+                        "nearby_radius_km": 5,
+                    },
+                    ensure_ascii=False,
+                )
+            },
+        ):
+            slots = service._extract_booking_slots_with_llm(
+                question="浙大紫金港旁边 5 公里内的酒店",
+                cities=["杭州", "北京"],
+            )
+
+        self.assertEqual(slots["selected_city"], "杭州")
+        self.assertEqual(slots["poi_keyword"], "浙大紫金港")
+        self.assertEqual(slots["nearby_radius_km"], 5)
+
+    def test_reply_customer_service_booking_assistant_should_use_ai_answer_when_available(self):
+        """验证订房助手在 AI 可用时会使用模型生成的自然回复。"""
+        service = AIChatService()
+        llm_answer = "我先把当前可订城市整理好了，您直接点一个城市，我继续帮您筛便宜酒店。"
+        with patch.object(service, "is_available", return_value=True), patch.object(
+            service,
+            "_extract_booking_slots_with_llm",
+            return_value={},
+        ), patch.object(
+            service,
+            "create_chat_completion",
+            return_value={
+                "provider": "deepseek",
+                "model": "deepseek-v4-flash",
+                "content": llm_answer,
+                "raw": {"usage": {"prompt_tokens": 24, "completion_tokens": 18, "total_tokens": 42}},
+            },
+        ):
+            result = service.reply_customer_service(
+                user=self.user,
+                scene="booking_assistant",
+                question="湖大学校旁边有什么便宜的酒店",
+            )
+
+        self.assertEqual(result["scene"], "booking_assistant")
+        self.assertEqual(result["booking_assistant"]["phase"], "select_city")
+        self.assertEqual(result["answer"], llm_answer)
+        self.assertTrue(result["ai_generated"])
+        self.assertEqual(result["result_source"], AIChatService.RESULT_SOURCE_LLM)
+
+    def test_user_ai_chat_stream_booking_assistant_should_fallback_to_deterministic_answer_when_llm_empty(self):
+        """验证订房助手流式空回复时，会回退到本轮规则答复而不是泛用兜底文案。"""
+        self.login_user()
+        deterministic_answer = "我先把可预订城市整理好了，您直接点一个城市，我继续帮您筛便宜酒店。"
+        with patch(
+            "apps.api.views.AIChatService.prepare_user_chat_reply",
+            return_value={
+                "scene": "booking_assistant",
+                "answer": "",
+                "fallback_answer": deterministic_answer,
+                "fallback_result_source": AIChatService.RESULT_SOURCE_RULE_ENGINE,
+                "booking_assistant": {
+                    "phase": "select_city",
+                    "context": {"selected_city": None},
+                    "options": [{"type": "select_city", "label": "北京", "value": "北京"}],
+                    "answer": deterministic_answer,
+                },
+                "agent_state": {
+                    "mode": "booking_assistant",
+                    "display_name": "AI 订房助手",
+                    "summary": "已整理城市候选。",
+                    "thinking": [],
+                    "tool_steps": [],
+                    "guardrails": [],
+                },
+                "call_mode": "llm",
+                "messages": [{"role": "system", "content": "test"}, {"role": "user", "content": "test"}],
+                "temperature": 0.2,
+            },
+        ), patch("apps.operations.services.ai_service.AIChatService.stream_chat_completion", return_value=iter([])):
+            response = self.client.post(
+                "/api/v1/user/ai/chat/stream",
+                {"scene": "booking_assistant", "question": "我想订酒店"},
+                format="json",
+            )
+            payload = b"".join(response.streaming_content).decode("utf-8")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(deterministic_answer, payload)
+        self.assertNotIn("您好，这里是 HoteLink AI 订房助手", payload)
+
+        log = AICallLog.objects.filter(scene="booking_assistant").order_by("-id").first()
+        self.assertIsNotNone(log)
+        self.assertEqual(log.status, AICallLog.STATUS_FALLBACK)
+        self.assertEqual(log.result_source, AICallLog.RESULT_SOURCE_RULE_ENGINE)
+        self.assertTrue(log.llm_invoked)
+        self.assertEqual(log.fallback_reason, "empty_response")
+
     def test_user_ai_chat_customer_service_should_not_trigger_booking_assistant(self):
         """验证客服场景咨询订单操作时，不会误触发订房助手流程。"""
         self.login_user()
@@ -1150,6 +1346,57 @@ class UserApiTests(ApiBaseTestCase):
         self.assertEqual(data["scene"], "booking_assistant")
         self.assertIsNotNone(data.get("booking_assistant"))
 
+    def test_prepare_user_chat_reply_booking_assistant_should_use_llm_reply_architecture_when_available(self):
+        """验证订房助手在 AI 可用时会走 LLM 文案链路，而不是直接吐固定规则文案。"""
+        service = AIChatService()
+        with patch.object(service, "is_available", return_value=True), patch.object(
+            service,
+            "_extract_booking_slots_with_llm",
+            return_value={},
+        ):
+            prepared = service.prepare_user_chat_reply(
+                user=self.user,
+                scene="booking_assistant",
+                question="我想订酒店",
+            )
+
+        self.assertEqual(prepared["scene"], "booking_assistant")
+        self.assertEqual(prepared["call_mode"], "llm")
+        self.assertTrue(prepared["fallback_answer"].startswith("可以，我来帮您直接订酒店"))
+        self.assertEqual(prepared["fallback_result_source"], AIChatService.RESULT_SOURCE_RULE_ENGINE)
+        self.assertEqual(prepared["booking_assistant"]["phase"], "select_city")
+        self.assertEqual(len(prepared["messages"]), 2)
+        self.assertIn("服务端订房编排结果", prepared["messages"][0]["content"])
+        self.assertIn("select_city", prepared["messages"][0]["content"])
+
+    def test_prepare_user_chat_reply_booking_assistant_should_fallback_to_deterministic_when_prompt_build_fails(self):
+        """验证订房助手提示词构建失败时，仍会回退到本轮规则答复。"""
+        service = AIChatService()
+        with patch.object(service, "is_available", return_value=True), patch.object(
+            service,
+            "_extract_booking_slots_with_llm",
+            return_value={},
+        ), patch.object(
+            service,
+            "build_booking_assistant_messages",
+            side_effect=RuntimeError("template exploded"),
+        ):
+            prepared = service.prepare_user_chat_reply(
+                user=self.user,
+                scene="booking_assistant",
+                question="我想订酒店",
+            )
+
+        self.assertEqual(prepared["scene"], "booking_assistant")
+        self.assertEqual(prepared["call_mode"], "deterministic")
+        self.assertTrue(prepared["answer"].startswith("可以，我来帮您直接订酒店"))
+        self.assertEqual(prepared["fallback_answer"], prepared["answer"])
+        self.assertEqual(prepared["messages"], [])
+        self.assertEqual(prepared["booking_assistant"]["phase"], "select_city")
+        self.assertEqual(prepared["metadata"]["result_source"], AIChatService.RESULT_SOURCE_RULE_ENGINE)
+        self.assertEqual(prepared["metadata"]["fallback_reason"], "message_build_failed")
+        self.assertFalse(prepared["metadata"]["llm_invoked"])
+
     def test_user_ai_chat_booking_assistant_should_offer_customer_service_switch_action(self):
         """验证订房场景遇到客服诉求时，会给出切换到客服助手的快捷入口。"""
         self.login_user()
@@ -1251,14 +1498,26 @@ class UserApiTests(ApiBaseTestCase):
         """验证客服流式接口会使用真实模型流式输出并在结束后持久化消息。"""
         self.login_user()
 
-        def build_chunk(content: str, *, finished: bool = False) -> SimpleNamespace:
-            return SimpleNamespace(
-                choices=[
+        def build_chunk(
+            content: str = "",
+            *,
+            finished: bool = False,
+            usage: dict | None = None,
+            model: str = "test-stream-model",
+            empty_choices: bool = False,
+        ) -> SimpleNamespace:
+            choices = []
+            if not empty_choices:
+                choices = [
                     SimpleNamespace(
                         delta=SimpleNamespace(content=content),
                         finish_reason="stop" if finished else None,
                     )
                 ]
+            return SimpleNamespace(
+                choices=choices,
+                usage=usage,
+                model=model,
             )
 
         with patch(
@@ -1283,6 +1542,10 @@ class UserApiTests(ApiBaseTestCase):
             mocked_stream.return_value = iter([
                 build_chunk("流式"),
                 build_chunk("测试回复", finished=True),
+                build_chunk(
+                    usage={"prompt_tokens": 15, "completion_tokens": 21, "total_tokens": 36},
+                    empty_choices=True,
+                ),
             ])
             response = self.client.post(
                 "/api/v1/user/ai/chat/stream",
@@ -1307,6 +1570,10 @@ class UserApiTests(ApiBaseTestCase):
         messages = list(ChatMessage.objects.filter(session=session).order_by("id"))
         self.assertEqual(messages[0].content, "帮我查订单")
         self.assertEqual(messages[1].content, "流式测试回复")
+        log = AICallLog.objects.filter(scene="customer_service").order_by("-id").first()
+        self.assertIsNotNone(log)
+        self.assertEqual(log.total_tokens, 36)
+        self.assertEqual(log.model, "test-stream-model")
 
     def test_user_ai_chat_switch_city_overrides_previous_context(self):
         """验证用户改选城市时，订房助手会覆盖历史上下文并返回新城市酒店。"""
@@ -2172,6 +2439,173 @@ class AdminApiTests(ApiBaseTestCase):
         self.assertEqual(log.status, AICallLog.STATUS_SUCCESS)
         self.assertGreaterEqual(log.total_tokens, 30)
 
+    def test_admin_ai_report_summary_should_log_service_usage_when_result_strips_raw(self):
+        """回归：管理端摘要结果即使不携带 raw，日志仍应落真实 token 用量。"""
+        self.login_admin()
+
+        def fake_generate_report_summary(service, *, hotel_id, start_date, end_date):
+            tracked_result = {
+                "provider": "testprovider",
+                "model": "test-chat-model",
+                "content": "这是测试摘要",
+                "raw": {"usage": {"prompt_tokens": 14, "completion_tokens": 24, "total_tokens": 38}},
+            }
+            service._remember_last_completion_result(tracked_result)
+            service._accumulate_usage(tracked_result["raw"]["usage"])
+            return {
+                "summary": "这是测试摘要",
+                "stats": {"hotel_id": hotel_id, "start_date": str(start_date), "end_date": str(end_date)},
+                "ai_generated": True,
+                "provider": "testprovider",
+                "model_used": "test-chat-model",
+            }
+
+        with patch("apps.api.views.AIChatService.is_available", return_value=True), patch(
+            "apps.api.views.AIChatService.generate_report_summary",
+            autospec=True,
+            side_effect=fake_generate_report_summary,
+        ):
+            response = self.client.post(
+                "/api/v1/admin/ai/report-summary",
+                {
+                    "start_date": str(timezone.localdate() - timedelta(days=7)),
+                    "end_date": str(timezone.localdate()),
+                },
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["code"], 0)
+        log = AICallLog.objects.filter(scene="report_summary").order_by("-id").first()
+        self.assertIsNotNone(log)
+        self.assertEqual(log.status, AICallLog.STATUS_SUCCESS)
+        self.assertEqual(log.provider, "testprovider")
+        self.assertEqual(log.model, "test-chat-model")
+        self.assertEqual(log.total_tokens, 38)
+        self.assertEqual(log.status, AICallLog.STATUS_SUCCESS)
+        self.assertEqual(log.result_source, AICallLog.RESULT_SOURCE_LLM)
+        self.assertTrue(log.llm_invoked)
+
+    def test_admin_ai_anomaly_report_should_log_fallback_when_rule_engine_result_is_used(self):
+        """回归：模型尝试后若最终回落到规则结果，日志应标记为 fallback 而非 success。"""
+        self.login_admin()
+
+        with patch("apps.api.views.AIChatService.is_available", return_value=True), patch(
+            "apps.api.views.AIChatService.generate_anomaly_report",
+            return_value={
+                "date": str(timezone.localdate()),
+                "hotel_id": self.hotel.id,
+                "has_anomaly": True,
+                "anomalies": [{"type": "overdue_checkin", "severity": "warning", "description": "规则生成"}],
+                "overall_status": "warning",
+                "ai_generated": False,
+                "result_source": "rule_engine",
+                "llm_invoked": True,
+                "fallback_reason": "parse_failed",
+            },
+        ):
+            response = self.client.post(
+                "/api/v1/admin/ai/anomaly-report",
+                {"hotel_id": self.hotel.id, "date": str(timezone.localdate())},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        log = AICallLog.objects.filter(scene="anomaly_report").order_by("-id").first()
+        self.assertIsNotNone(log)
+        self.assertEqual(log.status, AICallLog.STATUS_FALLBACK)
+        self.assertEqual(log.result_source, AICallLog.RESULT_SOURCE_RULE_ENGINE)
+        self.assertTrue(log.llm_invoked)
+        self.assertEqual(log.fallback_reason, "parse_failed")
+
+    def test_admin_ai_order_anomaly_summary_should_log_rule_based_status(self):
+        """回归：纯规则能力应标记为 rule_based，而不是误记为 AI success。"""
+        self.login_admin()
+
+        with patch("apps.api.views.AIChatService.is_available", return_value=True), patch(
+            "apps.api.views.AIChatService.generate_order_anomaly_summary",
+            return_value={
+                "date": str(timezone.localdate()),
+                "summary": "今日共检测到 1 类异常",
+                "anomalies": [{"type": "overdue_payment", "count": 1}],
+                "ai_generated": False,
+                "result_source": "rule_engine",
+                "llm_invoked": False,
+                "fallback_reason": "",
+            },
+        ):
+            response = self.client.post(
+                "/api/v1/admin/ai/order-anomaly-summary",
+                {"date": str(timezone.localdate())},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        log = AICallLog.objects.filter(scene="order_anomaly").order_by("-id").first()
+        self.assertIsNotNone(log)
+        self.assertEqual(log.status, AICallLog.STATUS_RULE_BASED)
+        self.assertEqual(log.result_source, AICallLog.RESULT_SOURCE_RULE_ENGINE)
+        self.assertFalse(log.llm_invoked)
+
+    def test_admin_ai_business_report_stream_should_log_usage_after_stream_finishes(self):
+        """回归：管理端流式报告应在流结束后落 usage，而不是提前写 0 token。"""
+        self.login_admin()
+
+        def build_chunk(
+            content: str = "",
+            *,
+            finished: bool = False,
+            usage: dict | None = None,
+            model: str = "test-biz-stream-model",
+            empty_choices: bool = False,
+        ) -> SimpleNamespace:
+            choices = []
+            if not empty_choices:
+                choices = [
+                    SimpleNamespace(
+                        delta=SimpleNamespace(content=content),
+                        finish_reason="stop" if finished else None,
+                    )
+                ]
+            return SimpleNamespace(
+                choices=choices,
+                usage=usage,
+                model=model,
+            )
+
+        with patch("apps.api.views.AIChatService.is_available", return_value=True), patch(
+            "apps.api.views.AIChatService.stream_business_report",
+            return_value=(
+                iter([
+                    build_chunk("经营"),
+                    build_chunk("报告", finished=True),
+                    build_chunk(
+                        usage={"prompt_tokens": 18, "completion_tokens": 22, "total_tokens": 40},
+                        empty_choices=True,
+                    ),
+                ]),
+                None,
+            ),
+        ):
+            response = self.client.post(
+                "/api/v1/admin/ai/business-report/stream",
+                {
+                    "start_date": str(timezone.localdate() - timedelta(days=7)),
+                    "end_date": str(timezone.localdate()),
+                    "dimensions": ["revenue", "orders"],
+                },
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = b"".join(response.streaming_content).decode("utf-8")
+        self.assertIn('"type": "done"', payload)
+        log = AICallLog.objects.filter(scene="business_report").order_by("-id").first()
+        self.assertIsNotNone(log)
+        self.assertEqual(log.status, AICallLog.STATUS_SUCCESS)
+        self.assertEqual(log.total_tokens, 40)
+        self.assertEqual(log.model, "test-biz-stream-model")
+
     def test_admin_ai_provider_switch_then_call_should_work_and_log(self):
         """验证新增并切换 AI 供应商后，AI 接口可调用且会记录日志。"""
         self.login_admin()
@@ -2703,6 +3137,62 @@ class UserApiExtendedTests(ApiBaseTestCase):
         self.assertEqual(payload["data"]["scene"], "recommendations")
         self.assertGreaterEqual(len(payload["data"]["recommendations"]), 1)
         self.assertEqual(payload["data"]["recommendations"][0]["id"], self.hotel.id)
+
+    def test_user_ai_recommendations_should_log_service_usage_without_result_payload(self):
+        """回归：推荐接口即使不向日志函数传 result，也应写入真实 token 用量。"""
+        self.login_user()
+
+        def fake_generate_recommendations(service, *, user, scene="home", hotel_id=None, keyword=None, limit=6):
+            tracked_result = {
+                "provider": "testprovider",
+                "model": "test-chat-model",
+                "content": "推荐结果",
+                "raw": {"usage": {"prompt_tokens": 11, "completion_tokens": 17, "total_tokens": 28}},
+            }
+            service._remember_last_completion_result(tracked_result)
+            service._accumulate_usage(tracked_result["raw"]["usage"])
+            return {
+                "recommendations": [
+                    {
+                        "hotel_id": self.hotel.id,
+                        "hotel_name": self.hotel.name,
+                        "city": self.hotel.city,
+                        "star": self.hotel.star,
+                        "rating": float(self.hotel.rating),
+                        "min_price": float(self.hotel.min_price),
+                        "cover_image": self.hotel.cover_image or "",
+                        "recommendation_reason": "匹配历史偏好",
+                    }
+                ][:limit],
+                "ai_generated": True,
+                "result_source": "llm",
+                "llm_invoked": True,
+                "fallback_reason": "",
+            }
+
+        with patch("apps.api.views.AIChatService.is_available", return_value=True), patch(
+            "apps.api.views.AIChatService.generate_recommendations",
+            autospec=True,
+            side_effect=fake_generate_recommendations,
+        ):
+            response = self.client.post(
+                "/api/v1/user/ai/recommendations",
+                {"scene": "home", "limit": 3},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["code"], 0)
+        self.assertEqual(payload["data"]["recommendations"][0]["id"], self.hotel.id)
+        log = AICallLog.objects.filter(scene="recommendations").order_by("-id").first()
+        self.assertIsNotNone(log)
+        self.assertEqual(log.provider, "testprovider")
+        self.assertEqual(log.model, "test-chat-model")
+        self.assertEqual(log.total_tokens, 28)
+        self.assertEqual(log.status, AICallLog.STATUS_SUCCESS)
+        self.assertEqual(log.result_source, AICallLog.RESULT_SOURCE_LLM)
+        self.assertTrue(log.llm_invoked)
 
 
 class AdminApiExtendedTests(ApiBaseTestCase):

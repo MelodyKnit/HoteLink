@@ -7,6 +7,7 @@ import logging
 import math
 import re
 from collections.abc import Iterator
+from copy import deepcopy
 from typing import Any
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -25,6 +26,10 @@ logger = logging.getLogger(__name__)
 
 class AIChatService:
     """AI 对话服务封装，支持多供应商切换、提示词渲染与上下文绑定。"""
+
+    RESULT_SOURCE_LLM = "llm"
+    RESULT_SOURCE_FALLBACK = "fallback"
+    RESULT_SOURCE_RULE_ENGINE = "rule_engine"
 
     USER_CHAT_SCENE_ALIASES = {
         "customer_service": "customer_service",
@@ -54,7 +59,7 @@ class AIChatService:
     BOOKING_CENTER_KEYWORDS = ("市中心", "中心", "商圈", "地铁", "交通方便", "近地铁")
     BOOKING_FAMILY_KEYWORDS = ("亲子", "家庭", "带娃", "儿童", "一家人")
     BOOKING_BUSINESS_KEYWORDS = ("出差", "商务", "商旅", "开会")
-    BOOKING_NEARBY_KEYWORDS = ("附近", "最近", "离", "周边")
+    BOOKING_NEARBY_KEYWORDS = ("附近", "最近", "离", "周边", "旁边")
     BOOKING_TRANSPORT_KEYWORDS = ("近地铁", "地铁口", "地铁", "交通方便", "交通便利", "高铁", "车站", "机场")
     CUSTOMER_SERVICE_KEYWORDS = (
         "订单",
@@ -130,6 +135,18 @@ class AIChatService:
         else:
             self._provider = self.settings.get_active_provider()
         self.prompt_service = PromptTemplateService()
+        self._last_completion_result: dict[str, Any] | None = None
+        self._usage_totals = {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+        }
+        self._last_observation = {
+            "ai_generated": None,
+            "llm_invoked": False,
+            "result_source": "",
+            "fallback_reason": "",
+        }
 
     @property
     def provider(self) -> AIProviderConfig | None:
@@ -137,6 +154,187 @@ class AIChatService:
 
     def is_available(self) -> bool:
         return self.settings.enabled and self._provider is not None and self._provider.is_configured
+
+    def get_last_completion_result(self) -> dict[str, Any] | None:
+        """Return cached metadata for the most recent LLM completion."""
+
+        if not isinstance(self._last_completion_result, dict):
+            return None
+        return deepcopy(self._last_completion_result)
+
+    def get_accumulated_usage(self) -> dict[str, int]:
+        """Return the aggregated token usage captured by this service instance."""
+
+        return {
+            "input_tokens": int(self._usage_totals.get("input_tokens", 0)),
+            "output_tokens": int(self._usage_totals.get("output_tokens", 0)),
+            "total_tokens": int(self._usage_totals.get("total_tokens", 0)),
+        }
+
+    def get_last_observation(self) -> dict[str, Any]:
+        """Return the latest execution observation used for logging truthfully."""
+
+        return deepcopy(self._last_observation)
+
+    def _mark_llm_invoked(self) -> None:
+        """Record that this request attempted a real model invocation."""
+
+        self._last_observation["llm_invoked"] = True
+
+    def _mark_ai_outcome(
+        self,
+        *,
+        ai_generated: bool,
+        result_source: str,
+        fallback_reason: str = "",
+        llm_invoked: bool | None = None,
+    ) -> dict[str, Any]:
+        """Persist the latest AI outcome so logs can distinguish fallback from real output."""
+
+        if llm_invoked is not None:
+            self._last_observation["llm_invoked"] = bool(llm_invoked)
+        self._last_observation["ai_generated"] = bool(ai_generated)
+        self._last_observation["result_source"] = str(result_source or "")
+        self._last_observation["fallback_reason"] = str(fallback_reason or "")[:100]
+        return self.get_last_observation()
+
+    def _build_result_metadata(
+        self,
+        *,
+        ai_generated: bool,
+        result_source: str,
+        fallback_reason: str = "",
+        llm_invoked: bool | None = None,
+    ) -> dict[str, Any]:
+        """Build standardized result metadata for downstream logging and UI truthfulness."""
+
+        observation = self._mark_ai_outcome(
+            ai_generated=ai_generated,
+            result_source=result_source,
+            fallback_reason=fallback_reason,
+            llm_invoked=llm_invoked,
+        )
+        return {
+            "ai_generated": bool(observation.get("ai_generated")),
+            "llm_invoked": bool(observation.get("llm_invoked")),
+            "result_source": str(observation.get("result_source") or ""),
+            "fallback_reason": str(observation.get("fallback_reason") or ""),
+        }
+
+    def _remember_last_completion_result(self, result: dict[str, Any]) -> None:
+        """Cache the latest completion payload for downstream logging."""
+
+        self._last_completion_result = deepcopy(result)
+
+    def _ensure_last_completion_result(self, *, model: str = "") -> dict[str, Any]:
+        """Return a mutable cached completion shell for streamed metadata updates."""
+
+        if not isinstance(self._last_completion_result, dict):
+            self._last_completion_result = {
+                "provider": self._provider.name if self._provider else "",
+                "model": model or (self._provider.chat_model if self._provider else ""),
+                "raw": {},
+            }
+        if self._provider and not self._last_completion_result.get("provider"):
+            self._last_completion_result["provider"] = self._provider.name
+        if model and not self._last_completion_result.get("model"):
+            self._last_completion_result["model"] = model
+        raw = self._last_completion_result.get("raw")
+        if not isinstance(raw, dict):
+            self._last_completion_result["raw"] = {}
+        return self._last_completion_result
+
+    def _normalize_usage_payload(self, usage: Any) -> dict[str, int]:
+        """Normalize provider usage payloads into prompt/completion/total tokens."""
+
+        if usage is None:
+            return {}
+        if hasattr(usage, "model_dump"):
+            try:
+                usage = usage.model_dump()
+            except Exception:
+                usage = {}
+        elif not isinstance(usage, dict):
+            usage = {
+                "prompt_tokens": getattr(usage, "prompt_tokens", None),
+                "completion_tokens": getattr(usage, "completion_tokens", None),
+                "total_tokens": getattr(usage, "total_tokens", None),
+            }
+
+        normalized: dict[str, int] = {}
+        for source_key, target_key in (
+            ("prompt_tokens", "prompt_tokens"),
+            ("completion_tokens", "completion_tokens"),
+            ("total_tokens", "total_tokens"),
+            ("input_tokens", "prompt_tokens"),
+            ("output_tokens", "completion_tokens"),
+        ):
+            raw_value = usage.get(source_key) if isinstance(usage, dict) else None
+            if raw_value in (None, "") or target_key in normalized:
+                continue
+            try:
+                normalized[target_key] = max(0, int(raw_value))
+            except (TypeError, ValueError):
+                continue
+
+        prompt_tokens = normalized.get("prompt_tokens", 0)
+        completion_tokens = normalized.get("completion_tokens", 0)
+        total_tokens = normalized.get("total_tokens", 0)
+        if total_tokens <= 0:
+            total_tokens = prompt_tokens + completion_tokens
+        if total_tokens > 0:
+            normalized["total_tokens"] = total_tokens
+        return normalized
+
+    def _accumulate_usage(self, usage: Any) -> None:
+        """Accumulate usage so a request-level log can reflect all model calls."""
+
+        normalized = self._normalize_usage_payload(usage)
+        if not normalized:
+            return
+        prompt_tokens = normalized.get("prompt_tokens", 0)
+        completion_tokens = normalized.get("completion_tokens", 0)
+        total_tokens = normalized.get("total_tokens", prompt_tokens + completion_tokens)
+        self._usage_totals["input_tokens"] += prompt_tokens
+        self._usage_totals["output_tokens"] += completion_tokens
+        self._usage_totals["total_tokens"] += total_tokens
+
+    def _capture_stream_chunk_metadata(self, chunk: Any) -> None:
+        """Capture provider/model/usage information emitted by streamed chunks."""
+
+        chunk_payload: dict[str, Any] = {}
+        if hasattr(chunk, "model_dump"):
+            try:
+                chunk_payload = chunk.model_dump()
+            except Exception:
+                chunk_payload = {}
+
+        usage = chunk_payload.get("usage") if isinstance(chunk_payload, dict) else None
+        if usage is None:
+            usage = getattr(chunk, "usage", None)
+        model = ""
+        if isinstance(chunk_payload, dict):
+            model = str(chunk_payload.get("model") or "")
+        if not model:
+            model = str(getattr(chunk, "model", "") or "")
+
+        if usage is None and not model:
+            return
+
+        cached = self._ensure_last_completion_result(model=model)
+        if model:
+            cached["model"] = model
+
+        normalized_usage = self._normalize_usage_payload(usage)
+        if normalized_usage:
+            raw = cached.get("raw")
+            if not isinstance(raw, dict):
+                raw = {}
+                cached["raw"] = raw
+            previous_usage = raw.get("usage")
+            raw["usage"] = normalized_usage
+            if previous_usage != normalized_usage:
+                self._accumulate_usage(normalized_usage)
 
     def normalize_scene(self, scene: str) -> str:
         return self._normalize_requested_scene(scene)
@@ -197,9 +395,12 @@ class AIChatService:
         result = {
             "scene": prepared["scene"],
             "answer": prepared.get("answer", ""),
+            "fallback_answer": prepared.get("fallback_answer", ""),
             "booking_assistant": prepared.get("booking_assistant"),
             "agent_state": prepared.get("agent_state"),
         }
+        if isinstance(prepared.get("metadata"), dict):
+            result.update(prepared["metadata"])
         if prepared.get("call_mode") != "llm":
             return result
 
@@ -209,10 +410,31 @@ class AIChatService:
                 temperature=float(prepared.get("temperature") or 0.2),
             )
             result.update(llm_result)
-            result["answer"] = llm_result.get("content") or ""
+            llm_answer = str(llm_result.get("content") or "")
+            result["answer"] = llm_answer
+            if not llm_answer.strip():
+                result["answer"] = str(prepared.get("fallback_answer") or "")
+            result.update(
+                self._build_result_metadata(
+                    ai_generated=bool(llm_answer.strip()),
+                    result_source=(
+                        self.RESULT_SOURCE_LLM
+                        if llm_answer.strip()
+                        else str(prepared.get("fallback_result_source") or self.RESULT_SOURCE_FALLBACK)
+                    ),
+                    fallback_reason="" if llm_answer.strip() else "empty_response",
+                )
+            )
         except Exception:
             logger.exception("AI chat reply fallback triggered")
-            result["answer"] = ""
+            result["answer"] = str(prepared.get("fallback_answer") or "")
+            result.update(
+                self._build_result_metadata(
+                    ai_generated=False,
+                    result_source=str(prepared.get("fallback_result_source") or self.RESULT_SOURCE_FALLBACK),
+                    fallback_reason="exception",
+                )
+            )
         return result
 
     def prepare_user_chat_reply(
@@ -252,9 +474,28 @@ class AIChatService:
                 booking_context=booking_context,
             )
             if booking_assistant is not None:
+                llm_available = self.is_available()
+                fallback_answer = str(booking_assistant.get("answer") or "")
+                booking_messages: list[dict[str, str]] = []
+                if llm_available:
+                    try:
+                        _, booking_messages = self.build_booking_assistant_messages(
+                            user=user,
+                            scene=chat_mode,
+                            question=question,
+                            hotel_id=hotel_id,
+                            booking_context=booking_assistant.get("context"),
+                            conversation_summary=conversation_summary,
+                            booking_assistant=booking_assistant,
+                        )
+                    except Exception:
+                        logger.exception("Booking assistant prompt build failed; falling back to deterministic answer")
+                        llm_available = False
                 return {
                     "scene": chat_mode,
-                    "answer": booking_assistant["answer"],
+                    "answer": fallback_answer if not llm_available else "",
+                    "fallback_answer": fallback_answer,
+                    "fallback_result_source": self.RESULT_SOURCE_RULE_ENGINE,
                     "booking_assistant": booking_assistant,
                     "agent_state": self._build_user_chat_agent_state(
                         scene=chat_mode,
@@ -262,7 +503,19 @@ class AIChatService:
                         booking_assistant=booking_assistant,
                         order_id=order_id,
                     ),
-                    "call_mode": "deterministic",
+                    "call_mode": "llm" if llm_available else "deterministic",
+                    "messages": booking_messages if llm_available else [],
+                    "temperature": 0.2,
+                    "metadata": self._build_result_metadata(
+                        ai_generated=False,
+                        result_source=self.RESULT_SOURCE_RULE_ENGINE,
+                        fallback_reason=(
+                            "deterministic_flow"
+                            if llm_available
+                            else ("message_build_failed" if self.is_available() else "service_unavailable")
+                        ),
+                        llm_invoked=bool(self.get_last_observation().get("llm_invoked")),
+                    ),
                 }
 
         if chat_mode == "customer_service":
@@ -304,6 +557,16 @@ class AIChatService:
             "call_mode": "llm" if self.is_available() else "fallback",
             "messages": messages,
             "temperature": 0.25 if chat_mode == "customer_service" else 0.2,
+            "metadata": (
+                self._build_result_metadata(
+                    ai_generated=False,
+                    result_source=self.RESULT_SOURCE_FALLBACK,
+                    fallback_reason="service_unavailable",
+                    llm_invoked=False,
+                )
+                if not self.is_available()
+                else None
+            ),
         }
 
     def iter_text_chunks(self, text: str, chunk_size: int = 24) -> Iterator[str]:
@@ -354,6 +617,7 @@ class AIChatService:
         hotel_id: int | None = None,
         booking_context: dict[str, Any] | None = None,
         conversation_summary: str = "",
+        booking_assistant: dict[str, Any] | None = None,
     ) -> tuple[str, list[dict[str, str]]]:
         if scene != "booking_assistant":
             raise PromptSceneError(f"unsupported AI scene: {scene}")
@@ -364,6 +628,7 @@ class AIChatService:
             hotel_id=hotel_id,
             booking_context=booking_context,
             conversation_summary=conversation_summary,
+            booking_assistant=booking_assistant,
         )
         messages = [
             {
@@ -390,6 +655,12 @@ class AIChatService:
 
         client = build_ai_client(self._provider)
         use_model = model or (self._provider.chat_model if self._provider else "")
+        self._mark_llm_invoked()
+        self._remember_last_completion_result({
+            "provider": self._provider.name if self._provider else "",
+            "model": use_model,
+            "raw": {},
+        })
         response = client.chat.completions.create(
             model=use_model,
             messages=messages,
@@ -400,12 +671,15 @@ class AIChatService:
         if response.choices and response.choices[0].message:
             content = response.choices[0].message.content or ""
 
-        return {
+        result = {
             "provider": self._provider.name if self._provider else "",
             "model": response.model,
             "content": content,
             "raw": response.model_dump(),
         }
+        self._remember_last_completion_result(result)
+        self._accumulate_usage(result.get("raw", {}).get("usage") if isinstance(result.get("raw"), dict) else None)
+        return result
 
     def stream_chat_completion(
         self,
@@ -419,16 +693,36 @@ class AIChatService:
 
         client = build_ai_client(self._provider)
         use_model = model or (self._provider.chat_model if self._provider else "")
-        return client.chat.completions.create(
-            model=use_model,
-            messages=messages,
-            temperature=temperature,
-            stream=True,
-        )
+        self._mark_llm_invoked()
+        self._remember_last_completion_result({
+            "provider": self._provider.name if self._provider else "",
+            "model": use_model,
+            "raw": {},
+        })
+        request_kwargs = {
+            "model": use_model,
+            "messages": messages,
+            "temperature": temperature,
+            "stream": True,
+        }
+        try:
+            return client.chat.completions.create(
+                **request_kwargs,
+                stream_options={"include_usage": True},
+            )
+        except Exception as exc:
+            if "stream_options" not in str(exc):
+                raise
+            logger.warning(
+                "AI provider %s does not support stream_options; retrying without usage streaming",
+                self._provider.name if self._provider else "unknown",
+            )
+            return client.chat.completions.create(**request_kwargs)
 
     def extract_stream_text_delta(self, chunk: Any) -> str:
         """Extract assistant text content from a streamed completion chunk."""
 
+        self._capture_stream_chunk_metadata(chunk)
         choices = getattr(chunk, "choices", None) or []
         if not choices:
             return ""
@@ -1297,8 +1591,11 @@ class AIChatService:
         hotel_id: int | None,
         booking_context: dict[str, Any] | None,
         conversation_summary: str,
+        booking_assistant: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         context = self._normalize_booking_context(booking_context)
+        if isinstance(booking_assistant, dict) and isinstance(booking_assistant.get("context"), dict):
+            context = self._normalize_booking_context(booking_assistant.get("context"))
         cities = self._list_available_cities()
 
         selected_hotel = None
@@ -1307,6 +1604,8 @@ class AIChatService:
             selected_hotel = Hotel.objects.filter(id=hotel_id, status=Hotel.STATUS_ONLINE).first()
         elif selected_hotel_id:
             selected_hotel = Hotel.objects.filter(id=selected_hotel_id, status=Hotel.STATUS_ONLINE).first()
+
+        booking_plan = self._build_booking_prompt_plan_payload(booking_assistant)
 
         return {
             "now": timezone.localtime().isoformat(timespec="seconds"),
@@ -1320,7 +1619,75 @@ class AIChatService:
             "booking_context_json": self.prompt_service.dumps(context),
             "available_cities_json": self.prompt_service.dumps(cities),
             "selected_hotel_json": self.prompt_service.dumps(self._serialize_hotel(selected_hotel) if selected_hotel else None),
+            "booking_plan_json": self.prompt_service.dumps(booking_plan),
+            "deterministic_answer": str(booking_plan.get("answer") or ""),
             "conversation_summary": (conversation_summary or "").strip(),
+        }
+
+    def _build_booking_prompt_plan_payload(self, booking_assistant: dict[str, Any] | None) -> dict[str, Any]:
+        """Build a compact booking plan payload for the reply prompt.
+
+        The LLM should rewrite the natural-language explanation, but it must stay
+        aligned with the deterministic city/hotel/room-type actions already
+        prepared by the server.
+        """
+
+        if not isinstance(booking_assistant, dict):
+            return {}
+
+        phase = str(booking_assistant.get("phase") or "")
+        context = booking_assistant.get("context") if isinstance(booking_assistant.get("context"), dict) else {}
+        option_summary = self._collect_agent_option_summary(booking_assistant)
+        options = booking_assistant.get("options", [])
+        compact_options: list[dict[str, Any]] = []
+        if isinstance(options, list):
+            for option in options[:5]:
+                if not isinstance(option, dict):
+                    continue
+                compact_option = {
+                    "type": str(option.get("type") or ""),
+                    "label": str(option.get("label") or ""),
+                    "description": str(option.get("description") or ""),
+                }
+                if isinstance(option.get("highlights"), list):
+                    compact_option["highlights"] = [
+                        str(item) for item in option.get("highlights", [])[:2] if isinstance(item, str) and str(item).strip()
+                    ]
+                if isinstance(option.get("badges"), list):
+                    compact_option["badges"] = [
+                        str(item) for item in option.get("badges", [])[:2] if isinstance(item, str) and str(item).strip()
+                    ]
+                hotel_summary = option.get("hotel_summary")
+                if isinstance(hotel_summary, dict):
+                    compact_option["hotel_summary"] = {
+                        "city": str(hotel_summary.get("city") or ""),
+                        "star": str(hotel_summary.get("star") or ""),
+                        "rating": str(hotel_summary.get("rating") or ""),
+                        "min_price": str(hotel_summary.get("min_price") or ""),
+                    }
+                compact_options.append(compact_option)
+
+        compact_context = {
+            "selected_city": str(context.get("selected_city") or ""),
+            "selected_hotel_id": context.get("selected_hotel_id"),
+            "budget_max": context.get("budget_max"),
+            "min_rating": context.get("min_rating"),
+            "sort_by": str(context.get("sort_by") or ""),
+            "nearby_poi_name": str(context.get("nearby_poi_name") or ""),
+            "nearby_radius_km": context.get("nearby_radius_km"),
+            "prefer_transport": bool(context.get("prefer_transport")),
+            "needs_family": bool(context.get("needs_family")),
+            "needs_business": bool(context.get("needs_business")),
+        }
+
+        return {
+            "phase": phase,
+            "answer": str(booking_assistant.get("answer") or ""),
+            "context": compact_context,
+            "option_count": int(option_summary.get("count") or 0),
+            "option_labels": option_summary.get("labels") or [],
+            "option_evidence": option_summary.get("evidence") or [],
+            "options": compact_options,
         }
 
     def _build_dictionary_payload(self) -> dict[str, list[dict[str, Any]]]:
@@ -1753,13 +2120,19 @@ class AIChatService:
             radius_km = 3
 
         has_nearby_keyword = any(keyword in question for keyword in self.BOOKING_NEARBY_KEYWORDS)
+        slot_poi_keyword = self._sanitize_slot_hotel_keyword(llm_slots.get("poi_keyword"))
         existing_poi_name = context.get("nearby_poi_name")
         existing_poi_lat = context.get("nearby_poi_lat")
         existing_poi_lng = context.get("nearby_poi_lng")
-        if not has_nearby_keyword and not (existing_poi_name and radius_km is not None):
+        if not has_nearby_keyword and not slot_poi_keyword and not (existing_poi_name and radius_km is not None):
             return None
 
         poi = self._match_poi(question, selected_city)
+        # Let the LLM provide a concrete POI phrase before falling back to the previous round.
+        if poi is None and slot_poi_keyword:
+            poi = self._match_poi(slot_poi_keyword, selected_city)
+            if poi is None:
+                poi = self._geocode_poi_free(city=selected_city, poi_keyword=slot_poi_keyword)
         if poi is None and existing_poi_name and isinstance(existing_poi_lat, (int, float)) and isinstance(existing_poi_lng, (int, float)):
             return {
                 "poi_name": str(existing_poi_name),
@@ -1805,8 +2178,8 @@ class AIChatService:
     def _extract_poi_keyword(self, question: str) -> str | None:
         normalized = question.strip()
         patterns = [
-            r"离(.+?)(?:最近|附近)",
-            r"(.+?)附近",
+            r"离(.+?)(?:最近|附近|周边|旁边)",
+            r"(.+?)(?:附近|周边|旁边)",
         ]
         for pattern in patterns:
             match = re.search(pattern, normalized)
@@ -2294,6 +2667,7 @@ class AIChatService:
             return {
                 "selected_city": self._sanitize_slot_city(payload.get("selected_city"), cities),
                 "hotel_keyword": self._sanitize_slot_hotel_keyword(payload.get("hotel_keyword")),
+                "poi_keyword": self._sanitize_slot_hotel_keyword(payload.get("poi_keyword")),
                 "reset": bool(payload.get("reset", False)),
                 "switch_hotel": bool(payload.get("switch_hotel", False)),
                 "sort_by": self._sanitize_slot_sort_by(payload.get("sort_by")),
@@ -2577,12 +2951,17 @@ class AIChatService:
         provider_info = self._provider.name if self._provider else ""
         model_info = self._provider.chat_model if self._provider else ""
         summary = self._admin_chat("report_summary", context, temperature=0.4)
+        is_ai_generated = bool((summary or "").strip())
         return {
             "summary": summary,
             "stats": context,
-            "ai_generated": bool(summary),
-            "model_used": model_info,
             "provider": provider_info,
+            "model_used": model_info,
+            **self._build_result_metadata(
+                ai_generated=is_ai_generated,
+                result_source=self.RESULT_SOURCE_LLM if is_ai_generated else self.RESULT_SOURCE_FALLBACK,
+                fallback_reason="" if is_ai_generated else "empty_response",
+            ),
         }
 
     # ───────── 修复现有 "空壳" 视图：评价摘要 ─────────
@@ -2650,6 +3029,7 @@ class AIChatService:
         provider_info = self._provider.name if self._provider else ""
         model_info = self._provider.chat_model if self._provider else ""
         summary = self._admin_chat("review_summary", context, temperature=0.4)
+        is_ai_generated = bool((summary or "").strip())
         return {
             "summary": summary,
             "stats": {
@@ -2658,9 +3038,13 @@ class AIChatService:
                 "score_distribution": score_dist,
                 "unreplied_count": unreplied,
             },
-            "ai_generated": bool(summary),
             "model_used": model_info,
             "provider": provider_info,
+            **self._build_result_metadata(
+                ai_generated=is_ai_generated,
+                result_source=self.RESULT_SOURCE_LLM if is_ai_generated else self.RESULT_SOURCE_FALLBACK,
+                fallback_reason="" if is_ai_generated else "empty_response",
+            ),
         }
 
     # ───────── 修复现有 "空壳" 视图：回复建议 ─────────
@@ -2692,11 +3076,17 @@ class AIChatService:
                         suggestions.append({"style": style_map.get(style_label, "formal"), "content": content})
                     else:
                         suggestions.append({"style": "formal", "content": block})
+        is_ai_generated = bool(suggestions)
         return {
             "suggestions": suggestions,
             "raw": raw,
-            "ai_generated": bool(raw),
             "model_used": model_info,
+            "provider": provider_info,
+            **self._build_result_metadata(
+                ai_generated=is_ai_generated,
+                result_source=self.RESULT_SOURCE_LLM if is_ai_generated else self.RESULT_SOURCE_FALLBACK,
+                fallback_reason="" if is_ai_generated else ("empty_response" if not raw else "parse_failed"),
+            ),
         }
 
     # ───────── 新功能：AI 智能定价建议 ─────────
@@ -2794,14 +3184,20 @@ class AIChatService:
 
         provider_info = self._provider.name if self._provider else ""
         model_info = (self._provider.reasoning_model if use_reasoning else self._provider.chat_model) if self._provider else ""
+        is_ai_generated = bool(parsed) and bool(suggestions)
         return {
             "room_type_id": room_type.id,
             "room_type_name": room_type.name,
             "hotel_name": hotel.name,
             "suggestions": suggestions,
             "overall_analysis": overall_analysis,
-            "ai_generated": bool(raw),
             "model_used": model_info,
+            "provider": provider_info,
+            **self._build_result_metadata(
+                ai_generated=is_ai_generated,
+                result_source=self.RESULT_SOURCE_LLM if is_ai_generated else self.RESULT_SOURCE_RULE_ENGINE,
+                fallback_reason="" if is_ai_generated else ("empty_response" if not raw else "parse_failed"),
+            ),
         }
 
     # ───────── 新功能：AI 深度经营分析报告 ─────────
@@ -2935,6 +3331,7 @@ class AIChatService:
         raw = self._admin_chat("business_report", context, use_reasoning=use_reasoning, temperature=0.4)
         provider_info = self._provider.name if self._provider else ""
         model_info = (self._provider.reasoning_model if use_reasoning else self._provider.chat_model) if self._provider else ""
+        is_ai_generated = bool((raw or "").strip())
         return {
             "report_markdown": raw or "（AI 服务不可用，无法生成报告）",
             "summary": (raw or "")[:200] if raw else "",
@@ -2942,8 +3339,13 @@ class AIChatService:
                 {"type": "info", "text": f"统计区间总营收 ¥{total_revenue:.2f}"},
                 {"type": "info", "text": f"共 {total_orders} 笔订单，取消率 {cancel_rate}%"},
             ],
-            "ai_generated": bool(raw),
             "model_used": model_info,
+            "provider": provider_info,
+            **self._build_result_metadata(
+                ai_generated=is_ai_generated,
+                result_source=self.RESULT_SOURCE_LLM if is_ai_generated else self.RESULT_SOURCE_FALLBACK,
+                fallback_reason="" if is_ai_generated else "empty_response",
+            ),
         }
 
     def stream_business_report(
@@ -2954,8 +3356,8 @@ class AIChatService:
         end_date,
         dimensions: list | None = None,
         use_reasoning: bool = False,
-    ):
-        """流式生成经营分析报告（返回 OpenAI stream 迭代器或 fallback 文本）。"""
+    ) -> tuple[Any | None, str | None]:
+        """流式生成经营分析报告并返回 ``(stream, fallback_message)``。"""
         import json
         from decimal import Decimal
         from django.db.models import Sum
@@ -3003,6 +3405,12 @@ class AIChatService:
         }
 
         if not self.is_available():
+            self._build_result_metadata(
+                ai_generated=False,
+                result_source=self.RESULT_SOURCE_FALLBACK,
+                fallback_reason="service_unavailable",
+                llm_invoked=False,
+            )
             return None, "（AI 服务不可用，无法生成报告）"
 
         system_prompt = self.prompt_service.render_admin("business_report", "system", **context)
@@ -3061,10 +3469,15 @@ class AIChatService:
             copies = [{"title": "精品体验", "content": raw or "AI 服务暂不可用", "style": style}]
 
         provider_info = self._provider.name if self._provider else ""
+        is_ai_generated = bool((raw or "").strip())
         return {
             "copies": copies,
-            "ai_generated": bool(raw),
             "provider": provider_info,
+            **self._build_result_metadata(
+                ai_generated=is_ai_generated,
+                result_source=self.RESULT_SOURCE_LLM if is_ai_generated else self.RESULT_SOURCE_FALLBACK,
+                fallback_reason="" if is_ai_generated else "empty_response",
+            ),
         }
 
     # ───────── 新功能：AI 内容生成助手 ─────────
@@ -3095,10 +3508,15 @@ class AIChatService:
             candidates = [raw]
 
         provider_info = self._provider.name if self._provider else ""
+        is_ai_generated = bool(candidates) and bool((raw or "").strip())
         return {
             "candidates": candidates[:count],
-            "ai_generated": bool(raw),
             "provider": provider_info,
+            **self._build_result_metadata(
+                ai_generated=is_ai_generated,
+                result_source=self.RESULT_SOURCE_LLM if is_ai_generated else self.RESULT_SOURCE_FALLBACK,
+                fallback_reason="" if is_ai_generated else "empty_response",
+            ),
         }
 
     # ───────── 新功能：AI 评价情感分析 ─────────
@@ -3122,7 +3540,10 @@ class AIChatService:
                 "keywords": parsed.get("keywords", []),
                 "tags": parsed.get("tags", []),
                 "summary": parsed.get("summary", ""),
-                "ai_generated": True,
+                **self._build_result_metadata(
+                    ai_generated=True,
+                    result_source=self.RESULT_SOURCE_LLM,
+                ),
             }
 
         # 兜底：基于评分
@@ -3140,7 +3561,11 @@ class AIChatService:
             "keywords": [],
             "tags": [],
             "summary": "",
-            "ai_generated": False,
+            **self._build_result_metadata(
+                ai_generated=False,
+                result_source=self.RESULT_SOURCE_RULE_ENGINE,
+                fallback_reason="" if not raw else "parse_failed",
+            ),
         }
 
     # ───────── 新功能：AI 异常检测报告 ─────────
@@ -3237,7 +3662,10 @@ class AIChatService:
                 "has_anomaly": parsed.get("has_anomaly", False),
                 "anomalies": parsed.get("anomalies", []),
                 "overall_status": parsed.get("overall_status", "normal"),
-                "ai_generated": True,
+                **self._build_result_metadata(
+                    ai_generated=True,
+                    result_source=self.RESULT_SOURCE_LLM,
+                ),
             }
 
         # 兜底：规则生成异常列表
@@ -3277,7 +3705,11 @@ class AIChatService:
             "overall_status": "critical" if any(a["severity"] == "danger" for a in anomalies) else (
                 "warning" if anomalies else "normal"
             ),
-            "ai_generated": False,
+            **self._build_result_metadata(
+                ai_generated=False,
+                result_source=self.RESULT_SOURCE_RULE_ENGINE,
+                fallback_reason="" if not raw else "parse_failed",
+            ),
         }
 
     # ───────── 新功能：AI 订单异常摘要 ─────────
@@ -3347,7 +3779,11 @@ class AIChatService:
             "date": str(today),
             "summary": summary,
             "anomalies": anomalies,
-            "ai_generated": False,
+            **self._build_result_metadata(
+                ai_generated=False,
+                result_source=self.RESULT_SOURCE_RULE_ENGINE,
+                llm_invoked=False,
+            ),
         }
 
     # ───────── 新功能：AI 智能推荐 ─────────
@@ -3360,7 +3796,7 @@ class AIChatService:
         hotel_id: int | None = None,
         keyword: str | None = None,
         limit: int = 6,
-    ) -> list[dict]:
+    ) -> dict[str, Any]:
         """为用户生成个性化酒店推荐。"""
         import json
         from apps.bookings.models import BookingOrder
@@ -3429,13 +3865,13 @@ class AIChatService:
             recommended_ids = [h["id"] for h in hotels_data[:limit]]
 
         hotel_map = {h.id: h for h in candidates}
-        result = []
+        recommendations = []
         for hid in recommended_ids[:limit]:
             hotel = hotel_map.get(hid)
             if hotel is None:
                 continue
             reason = reasons.get(str(hid), "根据您的偏好推荐")
-            result.append({
+            recommendations.append({
                 "hotel_id": hotel.id,
                 "hotel_name": hotel.name,
                 "city": hotel.city,
@@ -3445,7 +3881,15 @@ class AIChatService:
                 "cover_image": hotel.cover_image or "",
                 "recommendation_reason": reason,
             })
-        return result
+        is_ai_generated = bool(parsed) and bool(recommended_ids)
+        return {
+            "recommendations": recommendations,
+            **self._build_result_metadata(
+                ai_generated=is_ai_generated,
+                result_source=self.RESULT_SOURCE_LLM if is_ai_generated else self.RESULT_SOURCE_RULE_ENGINE,
+                fallback_reason="" if is_ai_generated else ("empty_response" if not raw else "parse_failed"),
+            ),
+        }
 
     # ───────── 新功能：AI 酒店对比分析 ─────────
 
@@ -3460,7 +3904,15 @@ class AIChatService:
         import json
         hotels = list(Hotel.objects.filter(id__in=hotel_ids).prefetch_related("room_types"))
         if not hotels:
-            return {"hotels": [], "ai_summary": "未找到指定酒店", "ai_generated": False}
+            return {
+                "hotels": [],
+                "ai_summary": "未找到指定酒店",
+                **self._build_result_metadata(
+                    ai_generated=False,
+                    result_source=self.RESULT_SOURCE_RULE_ENGINE,
+                    llm_invoked=False,
+                ),
+            }
 
         hotels_data = []
         for hotel in hotels:
@@ -3521,9 +3973,14 @@ class AIChatService:
                 "suitable_for": analysis.get("suitable_for", "通用"),
             })
 
+        is_ai_generated = bool(hotel_analysis) and bool(parsed)
         return {
             "hotels": final_hotels,
             "ai_summary": ai_summary,
             "recommendation": recommendation,
-            "ai_generated": bool(raw),
+            **self._build_result_metadata(
+                ai_generated=is_ai_generated,
+                result_source=self.RESULT_SOURCE_LLM if is_ai_generated else self.RESULT_SOURCE_RULE_ENGINE,
+                fallback_reason="" if is_ai_generated else ("empty_response" if not raw else "parse_failed"),
+            ),
         }

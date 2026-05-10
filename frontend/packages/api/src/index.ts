@@ -238,6 +238,42 @@ export interface UserAiChatStreamEvent {
   agent_state?: Record<string, unknown> | null
 }
 
+export type AiCallLogStatus = 'success' | 'fallback' | 'rule_based' | 'failed' | 'timeout' | 'quota_exceeded'
+export type AiResultSource = 'llm' | 'fallback' | 'rule_engine'
+
+export interface AiCallLogItem {
+  id: number
+  username: string
+  scene: string
+  provider: string
+  model: string
+  input_tokens: number
+  output_tokens: number
+  total_tokens: number
+  cost_estimate: number
+  latency_ms: number
+  status: AiCallLogStatus | string
+  result_source: AiResultSource | string
+  llm_invoked: boolean
+  fallback_reason: string
+  error_message: string
+  created_at: string
+}
+
+export interface AiUsageStatsData {
+  total_calls: number
+  success_calls: number
+  fallback_calls: number
+  rule_based_calls: number
+  failed_calls: number
+  llm_invoked_calls: number
+  total_tokens: number
+  total_cost: number
+  by_scene: Record<string, number>
+  by_provider: Record<string, number>
+  by_source: Record<string, number>
+}
+
 const TOKEN_KEY_PREFIX = 'hotelink_access_token'
 const REFRESH_KEY_PREFIX = 'hotelink_refresh_token'
 
@@ -628,10 +664,10 @@ export const aiApi = {
     post<{ scene: string; date: string; anomalies: { type: string; level: string; description: string; value: unknown; threshold: unknown }[]; summary: string }>('/admin/ai/anomaly-report', data as Record<string, unknown>),
   orderAnomalySummary: (data?: { date?: string }) =>
     post<{ scene: string; date: string; anomalies: { type: string; count: number; details: unknown[] }[]; summary: string }>('/admin/ai/order-anomaly-summary', (data || {}) as Record<string, unknown>),
-  callLogs: (params?: { scene?: string; status?: string; page?: number; page_size?: number }) =>
-    get<PaginatedData>('/admin/ai/call-logs', params as Record<string, unknown>),
+  callLogs: (params?: { scene?: string; status?: string; result_source?: string; page?: number; page_size?: number }) =>
+    get<PaginatedData<AiCallLogItem>>('/admin/ai/call-logs', params as Record<string, unknown>),
   usageStats: (params?: { start_date?: string; end_date?: string }) =>
-    get<{ total_calls: number; success_calls: number; failed_calls: number; total_tokens: number; total_cost: number; by_scene: Record<string, number>; by_provider: Record<string, number> }>('/admin/ai/usage-stats', params as Record<string, unknown>),
+    get<AiUsageStatsData>('/admin/ai/usage-stats', params as Record<string, unknown>),
   settings: () => get<{
     ai_enabled: boolean
     active_provider: string

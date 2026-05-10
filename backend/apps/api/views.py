@@ -625,17 +625,104 @@ def _extract_ai_usage_from_result(result: dict | None) -> tuple[int, int, int]:
     if not isinstance(result, dict):
         return 0, 0, 0
 
+    usage = result.get("usage") if isinstance(result.get("usage"), dict) else {}
     raw = result.get("raw")
-    usage = {}
     if isinstance(raw, dict):
         usage = raw.get("usage") or {}
 
-    input_tokens = int(usage.get("prompt_tokens") or result.get("input_tokens") or 0)
-    output_tokens = int(usage.get("completion_tokens") or result.get("output_tokens") or 0)
+    input_tokens = int(usage.get("prompt_tokens") or usage.get("input_tokens") or result.get("input_tokens") or 0)
+    output_tokens = int(usage.get("completion_tokens") or usage.get("output_tokens") or result.get("output_tokens") or 0)
     total_tokens = int(usage.get("total_tokens") or result.get("total_tokens") or 0)
     if total_tokens <= 0:
         total_tokens = input_tokens + output_tokens
     return input_tokens, output_tokens, total_tokens
+
+
+def _extract_ai_observation(
+    result: dict | None,
+    service: AIChatService | None = None,
+) -> tuple[str, bool, str, bool | None]:
+    """Extract result source metadata for truthful AI observability."""
+
+    service_observation = service.get_last_observation() if service else {}
+    result_source = ""
+    fallback_reason = ""
+    llm_invoked = False
+    ai_generated: bool | None = None
+
+    for candidate in (result, service_observation):
+        if not isinstance(candidate, dict):
+            continue
+        result_source = result_source or str(candidate.get("result_source") or "")
+        fallback_reason = fallback_reason or str(candidate.get("fallback_reason") or "")
+        if candidate.get("llm_invoked") is True:
+            llm_invoked = True
+        if ai_generated is None and isinstance(candidate.get("ai_generated"), bool):
+            ai_generated = bool(candidate.get("ai_generated"))
+
+    # Usage tokens are direct evidence that a real model response was produced.
+    if _extract_ai_usage_from_result(result)[2] > 0:
+        llm_invoked = True
+    if service and service.get_accumulated_usage().get("total_tokens", 0) > 0:
+        llm_invoked = True
+    if service and service.get_last_completion_result():
+        llm_invoked = True
+
+    return result_source, llm_invoked, fallback_reason, ai_generated
+
+
+def _derive_ai_call_status(
+    *,
+    result_source: str,
+    llm_invoked: bool,
+    ai_generated: bool | None,
+    fallback_reason: str = "",
+    error_message: str = "",
+) -> str:
+    """Derive a truthful AI log status from the final result source."""
+
+    normalized_source = result_source or ""
+    if normalized_source == AIChatService.RESULT_SOURCE_LLM or ai_generated is True:
+        return AICallLog.STATUS_SUCCESS
+    if normalized_source == AIChatService.RESULT_SOURCE_RULE_ENGINE:
+        # Deterministic business orchestration may still use the model for slot extraction.
+        if llm_invoked and fallback_reason and fallback_reason != "deterministic_flow":
+            return AICallLog.STATUS_FALLBACK
+        return AICallLog.STATUS_RULE_BASED
+    if normalized_source == AIChatService.RESULT_SOURCE_FALLBACK:
+        return AICallLog.STATUS_FALLBACK
+    if error_message:
+        return AICallLog.STATUS_FAILED
+    return AICallLog.STATUS_SUCCESS if llm_invoked else AICallLog.STATUS_RULE_BASED
+
+
+def build_ai_result_metadata(
+    *,
+    ai_generated: bool,
+    result_source: str,
+    fallback_reason: str = "",
+    llm_invoked: bool = False,
+) -> dict[str, Any]:
+    """Build standardized AI result metadata for view-level fallback branches."""
+
+    return {
+        "ai_generated": bool(ai_generated),
+        "result_source": str(result_source or ""),
+        "fallback_reason": str(fallback_reason or "")[:100],
+        "llm_invoked": bool(llm_invoked),
+    }
+
+
+def _normalize_business_report_stream_payload(stream_payload: Any) -> tuple[Any | None, str]:
+    """Normalize business report stream results into stream/fallback-answer pairs."""
+
+    if isinstance(stream_payload, tuple):
+        stream_candidate = stream_payload[0] if len(stream_payload) > 0 else None
+        fallback_candidate = stream_payload[1] if len(stream_payload) > 1 else None
+        if isinstance(stream_candidate, str):
+            return None, stream_candidate
+        return stream_candidate, str(fallback_candidate or "")
+    return stream_payload, ""
 
 
 def record_ai_call_log(
@@ -644,30 +731,59 @@ def record_ai_call_log(
     scene: str,
     service: AIChatService | None = None,
     result: dict | None = None,
-    status: str = AICallLog.STATUS_SUCCESS,
+    status: str | None = None,
     error_message: str = "",
     latency_ms: int = 0,
 ) -> None:
     """统一写入 AI 调用日志，避免各接口遗漏埋点。"""
+    service_result = service.get_last_completion_result() if service else None
     provider = ""
     model = ""
-    if isinstance(result, dict):
-        provider = str(result.get("provider") or "")
-        model = str(result.get("model") or result.get("model_used") or "")
+    for candidate in (result, service_result):
+        if not isinstance(candidate, dict):
+            continue
+        provider = provider or str(candidate.get("provider") or "")
+        model = model or str(candidate.get("model") or candidate.get("model_used") or "")
 
     if service and service.provider:
         provider = provider or (service.provider.name or "")
         model = model or (service.provider.chat_model or "")
 
     input_tokens, output_tokens, total_tokens = _extract_ai_usage_from_result(result)
+    if service:
+        service_usage = service.get_accumulated_usage()
+        service_total_tokens = int(service_usage.get("total_tokens") or 0)
+        if service_total_tokens > 0 and service_total_tokens >= total_tokens:
+            input_tokens = int(service_usage.get("input_tokens") or 0)
+            output_tokens = int(service_usage.get("output_tokens") or 0)
+            total_tokens = service_total_tokens
+    result_source, llm_invoked, fallback_reason, ai_generated = _extract_ai_observation(result, service)
+    resolved_status = status or _derive_ai_call_status(
+        result_source=result_source,
+        llm_invoked=llm_invoked,
+        ai_generated=ai_generated,
+        fallback_reason=fallback_reason,
+        error_message=error_message,
+    )
+    if not result_source:
+        if resolved_status == AICallLog.STATUS_SUCCESS:
+            result_source = AIChatService.RESULT_SOURCE_LLM
+        elif resolved_status == AICallLog.STATUS_RULE_BASED:
+            result_source = AIChatService.RESULT_SOURCE_RULE_ENGINE
+        else:
+            result_source = AIChatService.RESULT_SOURCE_FALLBACK
     cost_estimate = Decimal("0")
-    if isinstance(result, dict):
-        raw_cost_estimate = result.get("cost_estimate")
-        if raw_cost_estimate not in (None, ""):
-            try:
-                cost_estimate = Decimal(str(raw_cost_estimate))
-            except (InvalidOperation, TypeError, ValueError):
-                cost_estimate = Decimal("0")
+    for candidate in (result, service_result):
+        if not isinstance(candidate, dict):
+            continue
+        raw_cost_estimate = candidate.get("cost_estimate")
+        if raw_cost_estimate in (None, ""):
+            continue
+        try:
+            cost_estimate = Decimal(str(raw_cost_estimate))
+            break
+        except (InvalidOperation, TypeError, ValueError):
+            cost_estimate = Decimal("0")
 
     try:
         AICallLog.objects.create(
@@ -680,11 +796,14 @@ def record_ai_call_log(
             total_tokens=max(0, total_tokens),
             cost_estimate=cost_estimate,
             latency_ms=max(0, int(latency_ms)),
-            status=status,
+            status=resolved_status,
+            result_source=(result_source or AIChatService.RESULT_SOURCE_FALLBACK)[:20],
+            llm_invoked=llm_invoked,
+            fallback_reason=fallback_reason[:100],
             error_message=(error_message or "")[:5000],
         )
     except Exception:
-        logger.exception("Failed to persist AI call log", extra={"scene": scene, "status": status})
+        logger.exception("Failed to persist AI call log", extra={"scene": scene, "status": resolved_status})
 
 
 def ensure_ai_chat_session(
@@ -2718,15 +2837,23 @@ class UserAIChatView(APIView):
         except PromptSceneError as exc:
             return api_response(code=4002, message=str(exc), data=None, status_code=400)
 
-        answer = result["answer"] or fallback_ai_reply(result["scene"])
-        ai_status = AICallLog.STATUS_SUCCESS if result["answer"] else AICallLog.STATUS_FAILED
+        answer = result["answer"] or str(result.get("fallback_answer") or "") or fallback_ai_reply(result["scene"])
+        if not result.get("answer"):
+            result.update(
+                build_ai_result_metadata(
+                    ai_generated=False,
+                    result_source=str(result.get("fallback_result_source") or AIChatService.RESULT_SOURCE_FALLBACK),
+                    fallback_reason=str(result.get("fallback_reason") or "empty_response"),
+                    llm_invoked=bool(result.get("llm_invoked")),
+                )
+            )
+        result["answer"] = answer
         latency_ms = int((time.perf_counter() - started_at) * 1000)
         record_ai_call_log(
             user=request.user,
             scene=result["scene"],
             service=service,
             result=result,
-            status=ai_status,
             latency_ms=latency_ms,
         )
         session = persist_ai_chat_turn(
@@ -2794,8 +2921,13 @@ class UserAIChatStreamView(APIView):
 
         def event_stream():
             answer = ""
-            ai_status = AICallLog.STATUS_SUCCESS
             error_message = ""
+            log_result = {
+                "scene": scene,
+                "booking_assistant": booking_assistant,
+            }
+            if isinstance(prepared.get("metadata"), dict):
+                log_result.update(prepared["metadata"])
 
             def emit(payload: dict) -> str:
                 return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
@@ -2819,17 +2951,47 @@ class UserAIChatStreamView(APIView):
                         if token:
                             answer += token
                             yield emit({"type": "chunk", "content": token, "done": False})
-                        if service.is_stream_finished(chunk):
-                            break
                     if not answer.strip():
-                        ai_status = AICallLog.STATUS_FAILED
-                        answer = fallback_ai_reply(scene)
+                        answer = (
+                            str(prepared.get("fallback_answer") or "")
+                            or fallback_ai_reply(scene)
+                        )
+                        log_result.update(
+                            build_ai_result_metadata(
+                                ai_generated=False,
+                                result_source=str(prepared.get("fallback_result_source") or AIChatService.RESULT_SOURCE_FALLBACK),
+                                fallback_reason="empty_response",
+                                llm_invoked=True,
+                            )
+                        )
                         yield emit({"type": "chunk", "content": answer, "done": False})
+                    else:
+                        log_result.update(
+                            build_ai_result_metadata(
+                                ai_generated=True,
+                                result_source=AIChatService.RESULT_SOURCE_LLM,
+                                llm_invoked=True,
+                            )
+                        )
                 else:
                     planned_answer = str(prepared.get("answer") or "")
                     if not planned_answer:
-                        ai_status = AICallLog.STATUS_FAILED
-                        planned_answer = fallback_ai_reply(scene)
+                        planned_answer = (
+                            str(prepared.get("fallback_answer") or "")
+                            or fallback_ai_reply(scene)
+                        )
+                        log_result.update(
+                            build_ai_result_metadata(
+                                ai_generated=False,
+                                result_source=str(
+                                    prepared.get("fallback_result_source")
+                                    or log_result.get("result_source")
+                                    or AIChatService.RESULT_SOURCE_FALLBACK
+                                ),
+                                fallback_reason=str(log_result.get("fallback_reason") or "service_unavailable"),
+                                llm_invoked=bool(log_result.get("llm_invoked")),
+                            )
+                        )
                     answer = planned_answer
                     for chunk in service.iter_text_chunks(answer):
                         yield emit({"type": "chunk", "content": chunk, "done": False})
@@ -2837,11 +2999,21 @@ class UserAIChatStreamView(APIView):
                 yield emit({"type": "done", "content": "", "done": True, "session_id": session.id})
             except Exception as exc:
                 logger.exception("AI chat stream failed", extra={"scene": scene})
-                ai_status = AICallLog.STATUS_FAILED
                 error_message = str(exc)
                 if not answer.strip():
-                    answer = fallback_ai_reply(scene)
+                    answer = (
+                        str(prepared.get("fallback_answer") or "")
+                        or fallback_ai_reply(scene)
+                    )
                     yield emit({"type": "chunk", "content": answer, "done": False})
+                log_result.update(
+                    build_ai_result_metadata(
+                        ai_generated=False,
+                        result_source=str(prepared.get("fallback_result_source") or AIChatService.RESULT_SOURCE_FALLBACK),
+                        fallback_reason="exception",
+                        llm_invoked=bool(log_result.get("llm_invoked")) or bool(service.get_last_observation().get("llm_invoked")),
+                    )
+                )
                 yield emit({"type": "done", "content": "", "done": True, "session_id": session.id})
             finally:
                 latency_ms = int((time.perf_counter() - started_at) * 1000)
@@ -2850,12 +3022,7 @@ class UserAIChatStreamView(APIView):
                         user=request.user,
                         scene=scene,
                         service=service,
-                        result={
-                            "scene": scene,
-                            "answer": answer,
-                            "booking_assistant": booking_assistant,
-                        },
-                        status=ai_status,
+                        result={**log_result, "answer": answer},
                         error_message=error_message,
                         latency_ms=latency_ms,
                     )
@@ -4816,13 +4983,7 @@ class AdminAIReportSummaryView(APIView):
         data = serializer.validated_data
         service = AIChatService()
         if not service.is_available():
-            record_ai_call_log(
-                user=request.user,
-                scene="report_summary",
-                service=service,
-                status=AICallLog.STATUS_FAILED,
-                error_message="AI service unavailable",
-            )
+            fallback_summary = ""
             orders = BookingOrder.objects.filter(
                 check_in_date__gte=data["start_date"],
                 check_out_date__lte=data["end_date"],
@@ -4833,8 +4994,21 @@ class AdminAIReportSummaryView(APIView):
             total_revenue = orders.filter(payment_status=BookingOrder.PAYMENT_PAID).aggregate(
                 total=Sum("pay_amount")
             )["total"] or Decimal("0.00")
-            summary = f"统计区间内共有 {total_orders} 笔订单，已支付营收 {total_revenue} 元。建议结合取消率与房型均价进一步分析。"
-            return api_response(data={"scene": "report_summary", "summary": summary})
+            fallback_summary = f"统计区间内共有 {total_orders} 笔订单，已支付营收 {total_revenue} 元。建议结合取消率与房型均价进一步分析。"
+            record_ai_call_log(
+                user=request.user,
+                scene="report_summary",
+                service=service,
+                result={
+                    "summary": fallback_summary,
+                    **build_ai_result_metadata(
+                        ai_generated=False,
+                        result_source=AIChatService.RESULT_SOURCE_FALLBACK,
+                        fallback_reason="service_unavailable",
+                    ),
+                },
+            )
+            return api_response(data={"scene": "report_summary", "summary": fallback_summary})
         try:
             started_at = time.perf_counter()
             result = service.generate_report_summary(
@@ -4848,16 +5022,21 @@ class AdminAIReportSummaryView(APIView):
                 scene="report_summary",
                 service=service,
                 result=result,
-                status=AICallLog.STATUS_SUCCESS,
                 latency_ms=latency_ms,
             )
-            return api_response(data={"scene": "report_summary", "summary": result["summary"]})
+            summary = result["summary"] or fallback_ai_reply("report_summary")
+            return api_response(data={"scene": "report_summary", "summary": summary})
         except Exception as exc:
             record_ai_call_log(
                 user=request.user,
                 scene="report_summary",
                 service=service,
-                status=AICallLog.STATUS_FAILED,
+                result=build_ai_result_metadata(
+                    ai_generated=False,
+                    result_source=AIChatService.RESULT_SOURCE_FALLBACK,
+                    fallback_reason="exception",
+                    llm_invoked=bool(service.get_last_observation().get("llm_invoked")),
+                ),
                 error_message=str(exc),
             )
             return api_response(data={"scene": "report_summary", "summary": fallback_ai_reply("report_summary")})
@@ -4876,13 +5055,6 @@ class AdminAIReviewSummaryView(APIView):
         data = serializer.validated_data
         service = AIChatService()
         if not service.is_available():
-            record_ai_call_log(
-                user=request.user,
-                scene="review_summary",
-                service=service,
-                status=AICallLog.STATUS_FAILED,
-                error_message="AI service unavailable",
-            )
             reviews = Review.objects.filter(
                 created_at__date__gte=data["start_date"],
                 created_at__date__lte=data["end_date"],
@@ -4890,8 +5062,21 @@ class AdminAIReviewSummaryView(APIView):
             if data.get("hotel_id"):
                 reviews = reviews.filter(hotel_id=data["hotel_id"])
             avg_score = reviews.aggregate(avg=Avg("score"))["avg"] or 0
-            summary = f"统计区间内共有 {reviews.count()} 条评价，平均评分 {round(avg_score, 2)} 分。建议重点关注低分评价中的重复问题。"
-            return api_response(data={"scene": "review_summary", "summary": summary})
+            fallback_summary = f"统计区间内共有 {reviews.count()} 条评价，平均评分 {round(avg_score, 2)} 分。建议重点关注低分评价中的重复问题。"
+            record_ai_call_log(
+                user=request.user,
+                scene="review_summary",
+                service=service,
+                result={
+                    "summary": fallback_summary,
+                    **build_ai_result_metadata(
+                        ai_generated=False,
+                        result_source=AIChatService.RESULT_SOURCE_FALLBACK,
+                        fallback_reason="service_unavailable",
+                    ),
+                },
+            )
+            return api_response(data={"scene": "review_summary", "summary": fallback_summary})
         try:
             started_at = time.perf_counter()
             result = service.generate_review_summary(
@@ -4905,16 +5090,21 @@ class AdminAIReviewSummaryView(APIView):
                 scene="review_summary",
                 service=service,
                 result=result,
-                status=AICallLog.STATUS_SUCCESS,
                 latency_ms=latency_ms,
             )
-            return api_response(data={"scene": "review_summary", "summary": result["summary"]})
+            summary = result["summary"] or fallback_ai_reply("review_summary")
+            return api_response(data={"scene": "review_summary", "summary": summary})
         except Exception as exc:
             record_ai_call_log(
                 user=request.user,
                 scene="review_summary",
                 service=service,
-                status=AICallLog.STATUS_FAILED,
+                result=build_ai_result_metadata(
+                    ai_generated=False,
+                    result_source=AIChatService.RESULT_SOURCE_FALLBACK,
+                    fallback_reason="exception",
+                    llm_invoked=bool(service.get_last_observation().get("llm_invoked")),
+                ),
                 error_message=str(exc),
             )
             return api_response(data={"scene": "review_summary", "summary": fallback_ai_reply("review_summary")})
@@ -4935,19 +5125,26 @@ class AdminAIReplySuggestionView(APIView):
             return api_response(code=4040, message="评价不存在", data=None, status_code=404)
         service = AIChatService()
         if not service.is_available():
-            record_ai_call_log(
-                user=request.user,
-                scene="reply_suggestion",
-                service=service,
-                status=AICallLog.STATUS_FAILED,
-                error_message="AI service unavailable",
-            )
-            return api_response(data={
+            fallback_result = {
                 "scene": "reply_suggestion",
                 "suggestions": [
                     {"style": "formal", "content": fallback_ai_reply("reply_suggestion")},
                 ],
-            })
+            }
+            record_ai_call_log(
+                user=request.user,
+                scene="reply_suggestion",
+                service=service,
+                result={
+                    **fallback_result,
+                    **build_ai_result_metadata(
+                        ai_generated=False,
+                        result_source=AIChatService.RESULT_SOURCE_FALLBACK,
+                        fallback_reason="service_unavailable",
+                    ),
+                },
+            )
+            return api_response(data=fallback_result)
         try:
             started_at = time.perf_counter()
             result = service.generate_reply_suggestion(review=review)
@@ -4957,9 +5154,10 @@ class AdminAIReplySuggestionView(APIView):
                 scene="reply_suggestion",
                 service=service,
                 result=result,
-                status=AICallLog.STATUS_SUCCESS,
                 latency_ms=latency_ms,
             )
+            if not result.get("suggestions"):
+                result["suggestions"] = [{"style": "formal", "content": fallback_ai_reply("reply_suggestion")}]
             result["scene"] = "reply_suggestion"
             return api_response(data=result)
         except Exception as exc:
@@ -4967,7 +5165,12 @@ class AdminAIReplySuggestionView(APIView):
                 user=request.user,
                 scene="reply_suggestion",
                 service=service,
-                status=AICallLog.STATUS_FAILED,
+                result=build_ai_result_metadata(
+                    ai_generated=False,
+                    result_source=AIChatService.RESULT_SOURCE_FALLBACK,
+                    fallback_reason="exception",
+                    llm_invoked=bool(service.get_last_observation().get("llm_invoked")),
+                ),
                 error_message=str(exc),
             )
             return api_response(data={
@@ -5252,8 +5455,11 @@ class AdminAIPricingSuggestionView(APIView):
                 user=request.user,
                 scene="pricing_suggestion",
                 service=service,
-                status=AICallLog.STATUS_FAILED,
-                error_message="AI service unavailable",
+                result=build_ai_result_metadata(
+                    ai_generated=False,
+                    result_source=AIChatService.RESULT_SOURCE_FALLBACK,
+                    fallback_reason="service_unavailable",
+                ),
             )
             return api_response(data={"scene": "pricing_suggestion", "suggestions": [], "message": fallback_ai_reply("pricing_suggestion")})
         try:
@@ -5269,7 +5475,6 @@ class AdminAIPricingSuggestionView(APIView):
                 scene="pricing_suggestion",
                 service=service,
                 result=result,
-                status=AICallLog.STATUS_SUCCESS,
                 latency_ms=latency_ms,
             )
             return api_response(data={"scene": "pricing_suggestion", "suggestions": result["suggestions"], "overall_analysis": result.get("overall_analysis", "")})
@@ -5278,7 +5483,12 @@ class AdminAIPricingSuggestionView(APIView):
                 user=request.user,
                 scene="pricing_suggestion",
                 service=service,
-                status=AICallLog.STATUS_FAILED,
+                result=build_ai_result_metadata(
+                    ai_generated=False,
+                    result_source=AIChatService.RESULT_SOURCE_FALLBACK,
+                    fallback_reason="exception",
+                    llm_invoked=bool(service.get_last_observation().get("llm_invoked")),
+                ),
                 error_message=str(exc),
             )
             return api_response(data={"scene": "pricing_suggestion", "suggestions": [], "message": fallback_ai_reply("pricing_suggestion")})
@@ -5301,8 +5511,11 @@ class AdminAIBusinessReportView(APIView):
                 user=request.user,
                 scene="business_report",
                 service=service,
-                status=AICallLog.STATUS_FAILED,
-                error_message="AI service unavailable",
+                result=build_ai_result_metadata(
+                    ai_generated=False,
+                    result_source=AIChatService.RESULT_SOURCE_FALLBACK,
+                    fallback_reason="service_unavailable",
+                ),
             )
             return api_response(data={"scene": "business_report", "report": fallback_ai_reply("business_report")})
         try:
@@ -5320,7 +5533,6 @@ class AdminAIBusinessReportView(APIView):
                 scene="business_report",
                 service=service,
                 result=result,
-                status=AICallLog.STATUS_SUCCESS,
                 latency_ms=latency_ms,
             )
             return api_response(data={"scene": "business_report", "report": result.get("report_markdown", "")})
@@ -5329,7 +5541,12 @@ class AdminAIBusinessReportView(APIView):
                 user=request.user,
                 scene="business_report",
                 service=service,
-                status=AICallLog.STATUS_FAILED,
+                result=build_ai_result_metadata(
+                    ai_generated=False,
+                    result_source=AIChatService.RESULT_SOURCE_FALLBACK,
+                    fallback_reason="exception",
+                    llm_invoked=bool(service.get_last_observation().get("llm_invoked")),
+                ),
                 error_message=str(exc),
             )
             return api_response(data={"scene": "business_report", "report": fallback_ai_reply("business_report")})
@@ -5351,67 +5568,125 @@ class AdminAIBusinessReportStreamView(APIView):
         data = serializer.validated_data
         service = AIChatService()
         started_at = time.perf_counter()
+        stream_result = None
+        fallback_answer = ""
+        preflight_error = ""
+        fallback_reason = ""
+
+        try:
+            stream_payload = service.stream_business_report(
+                hotel_id=data.get("hotel_id"),
+                start_date=data["start_date"],
+                end_date=data["end_date"],
+                dimensions=data.get("dimensions"),
+                use_reasoning=data.get("use_reasoning", False),
+            )
+            stream_result, fallback_answer = _normalize_business_report_stream_payload(stream_payload)
+            if stream_result is None:
+                fallback_reason = str(service.get_last_observation().get("fallback_reason") or "service_unavailable")
+                if not fallback_answer:
+                    fallback_answer = fallback_ai_reply("business_report")
+        except Exception as exc:
+            preflight_error = str(exc)
+            fallback_answer = fallback_ai_reply("business_report")
 
         def event_stream():
-            if not service.is_available():
+            answer = ""
+            log_result: dict[str, Any] = {}
+            if preflight_error:
                 record_ai_call_log(
                     user=request.user,
                     scene="business_report",
                     service=service,
-                    status=AICallLog.STATUS_FAILED,
-                    error_message="AI service unavailable",
+                    result={
+                        "report_markdown": fallback_answer,
+                        **build_ai_result_metadata(
+                            ai_generated=False,
+                            result_source=AIChatService.RESULT_SOURCE_FALLBACK,
+                            fallback_reason="exception",
+                            llm_invoked=bool(service.get_last_observation().get("llm_invoked")),
+                        ),
+                    },
+                    error_message=preflight_error,
+                    latency_ms=int((time.perf_counter() - started_at) * 1000),
                 )
-                fallback = fallback_ai_reply("business_report")
-                yield f"data: {json.dumps({'type': 'chunk', 'content': fallback, 'done': False}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'chunk', 'content': fallback_answer, 'done': False}, ensure_ascii=False)}\n\n"
                 yield f"data: {json.dumps({'type': 'done', 'content': '', 'done': True})}\n\n"
                 return
-            try:
-                stream_result = service.stream_business_report(
-                    hotel_id=data.get("hotel_id"),
-                    start_date=data["start_date"],
-                    end_date=data["end_date"],
-                    dimensions=data.get("dimensions"),
-                    use_reasoning=data.get("use_reasoning", False),
+            if stream_result is None:
+                record_ai_call_log(
+                    user=request.user,
+                    scene="business_report",
+                    service=service,
+                    result={
+                        "report_markdown": fallback_answer,
+                        **build_ai_result_metadata(
+                            ai_generated=False,
+                            result_source=AIChatService.RESULT_SOURCE_FALLBACK,
+                            fallback_reason=fallback_reason or "service_unavailable",
+                            llm_invoked=bool(service.get_last_observation().get("llm_invoked")),
+                        ),
+                    },
+                    latency_ms=int((time.perf_counter() - started_at) * 1000),
                 )
-                # stream_business_report returns (text, None) tuple on fallback or an OpenAI stream
-                if isinstance(stream_result, tuple):
-                    text, _ = stream_result
-                    record_ai_call_log(
-                        user=request.user,
-                        scene="business_report",
-                        service=service,
-                        status=AICallLog.STATUS_FAILED,
-                        error_message="AI stream fallback response",
-                        latency_ms=int((time.perf_counter() - started_at) * 1000),
-                    )
-                    yield f"data: {json.dumps({'type': 'chunk', 'content': text, 'done': False}, ensure_ascii=False)}\n\n"
-                    yield f"data: {json.dumps({'type': 'done', 'content': '', 'done': True})}\n\n"
-                    return
+                yield f"data: {json.dumps({'type': 'chunk', 'content': fallback_answer, 'done': False}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'done', 'content': '', 'done': True})}\n\n"
+                return
 
-                record_ai_call_log(
-                    user=request.user,
-                    scene="business_report",
-                    service=service,
-                    status=AICallLog.STATUS_SUCCESS,
-                    latency_ms=int((time.perf_counter() - started_at) * 1000),
-                )
+            try:
                 for chunk in stream_result:
-                    delta = chunk.choices[0].delta if chunk.choices else None
-                    token = (delta.content or "") if delta else ""
-                    done = (chunk.choices[0].finish_reason is not None) if chunk.choices else False
-                    event_type = "done" if done else "chunk"
-                    yield f"data: {json.dumps({'type': event_type, 'content': token, 'done': done}, ensure_ascii=False)}\n\n"
-            except Exception as exc:
+                    token = service.extract_stream_text_delta(chunk)
+                    if token:
+                        answer += token
+                        yield f"data: {json.dumps({'type': 'chunk', 'content': token, 'done': False}, ensure_ascii=False)}\n\n"
+                if answer.strip():
+                    log_result = {
+                        "report_markdown": answer,
+                        **build_ai_result_metadata(
+                            ai_generated=True,
+                            result_source=AIChatService.RESULT_SOURCE_LLM,
+                            llm_invoked=True,
+                        ),
+                    }
+                else:
+                    answer = fallback_ai_reply("business_report")
+                    log_result = {
+                        "report_markdown": answer,
+                        **build_ai_result_metadata(
+                            ai_generated=False,
+                            result_source=AIChatService.RESULT_SOURCE_FALLBACK,
+                            fallback_reason="empty_response",
+                            llm_invoked=True,
+                        ),
+                    }
                 record_ai_call_log(
                     user=request.user,
                     scene="business_report",
                     service=service,
-                    status=AICallLog.STATUS_FAILED,
-                    error_message=str(exc),
+                    result=log_result,
                     latency_ms=int((time.perf_counter() - started_at) * 1000),
                 )
-                fallback = fallback_ai_reply("business_report")
-                yield f"data: {json.dumps({'type': 'chunk', 'content': fallback, 'done': False}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'done', 'content': '', 'done': True}, ensure_ascii=False)}\n\n"
+            except Exception as exc:
+                error_message = str(exc)
+                answer = fallback_ai_reply("business_report")
+                record_ai_call_log(
+                    user=request.user,
+                    scene="business_report",
+                    service=service,
+                    result={
+                        "report_markdown": answer,
+                        **build_ai_result_metadata(
+                            ai_generated=False,
+                            result_source=AIChatService.RESULT_SOURCE_FALLBACK,
+                            fallback_reason="exception",
+                            llm_invoked=bool(service.get_last_observation().get("llm_invoked")),
+                        ),
+                    },
+                    error_message=error_message,
+                    latency_ms=int((time.perf_counter() - started_at) * 1000),
+                )
+                yield f"data: {json.dumps({'type': 'chunk', 'content': answer, 'done': False}, ensure_ascii=False)}\n\n"
                 yield f"data: {json.dumps({'type': 'done', 'content': '', 'done': True})}\n\n"
 
         response = StreamingHttpResponse(event_stream(), content_type="text/event-stream; charset=utf-8")
@@ -5436,15 +5711,6 @@ class AdminAIReviewSentimentView(APIView):
         if not review:
             return api_response(code=4040, message="评价不存在", data=None, status_code=404)
         service = AIChatService()
-        if not service.is_available():
-            record_ai_call_log(
-                user=request.user,
-                scene="review_sentiment",
-                service=service,
-                status=AICallLog.STATUS_FAILED,
-                error_message="AI service unavailable",
-            )
-            return api_response(data={"scene": "review_sentiment", "result": None, "message": fallback_ai_reply("review_sentiment")})
         try:
             started_at = time.perf_counter()
             result = service.analyze_review_sentiment(review=review)
@@ -5462,7 +5728,6 @@ class AdminAIReviewSentimentView(APIView):
                 scene="review_sentiment",
                 service=service,
                 result=result,
-                status=AICallLog.STATUS_SUCCESS,
                 latency_ms=latency_ms,
             )
             # 转换字段名以匹配前端期望的格式
@@ -5478,7 +5743,12 @@ class AdminAIReviewSentimentView(APIView):
                 user=request.user,
                 scene="review_sentiment",
                 service=service,
-                status=AICallLog.STATUS_FAILED,
+                result=build_ai_result_metadata(
+                    ai_generated=False,
+                    result_source=AIChatService.RESULT_SOURCE_FALLBACK,
+                    fallback_reason="exception",
+                    llm_invoked=bool(service.get_last_observation().get("llm_invoked")),
+                ),
                 error_message=str(exc),
             )
             return api_response(data={"scene": "review_sentiment", "result": None, "message": fallback_ai_reply("review_sentiment")})
@@ -5501,8 +5771,11 @@ class AdminAIMarketingCopyView(APIView):
                 user=request.user,
                 scene="marketing_copy",
                 service=service,
-                status=AICallLog.STATUS_FAILED,
-                error_message="AI service unavailable",
+                result=build_ai_result_metadata(
+                    ai_generated=False,
+                    result_source=AIChatService.RESULT_SOURCE_FALLBACK,
+                    fallback_reason="service_unavailable",
+                ),
             )
             return api_response(data={"scene": "marketing_copy", "copies": [], "message": fallback_ai_reply("marketing_copy")})
         try:
@@ -5521,7 +5794,6 @@ class AdminAIMarketingCopyView(APIView):
                 scene="marketing_copy",
                 service=service,
                 result=result,
-                status=AICallLog.STATUS_SUCCESS,
                 latency_ms=latency_ms,
             )
             return api_response(data={"scene": "marketing_copy", "copies": result.get("copies", [])})
@@ -5530,7 +5802,12 @@ class AdminAIMarketingCopyView(APIView):
                 user=request.user,
                 scene="marketing_copy",
                 service=service,
-                status=AICallLog.STATUS_FAILED,
+                result=build_ai_result_metadata(
+                    ai_generated=False,
+                    result_source=AIChatService.RESULT_SOURCE_FALLBACK,
+                    fallback_reason="exception",
+                    llm_invoked=bool(service.get_last_observation().get("llm_invoked")),
+                ),
                 error_message=str(exc),
             )
             return api_response(data={"scene": "marketing_copy", "copies": [], "message": fallback_ai_reply("marketing_copy")})
@@ -5553,8 +5830,11 @@ class AdminAIContentGenerateView(APIView):
                 user=request.user,
                 scene="content_generate",
                 service=service,
-                status=AICallLog.STATUS_FAILED,
-                error_message="AI service unavailable",
+                result=build_ai_result_metadata(
+                    ai_generated=False,
+                    result_source=AIChatService.RESULT_SOURCE_FALLBACK,
+                    fallback_reason="service_unavailable",
+                ),
             )
             return api_response(data={"scene": "content_generate", "results": [], "message": fallback_ai_reply("content_generate")})
         try:
@@ -5578,7 +5858,6 @@ class AdminAIContentGenerateView(APIView):
                 scene="content_generate",
                 service=service,
                 result=result,
-                status=AICallLog.STATUS_SUCCESS,
                 latency_ms=latency_ms,
             )
             return api_response(data={"scene": "content_generate", "results": results})
@@ -5587,7 +5866,12 @@ class AdminAIContentGenerateView(APIView):
                 user=request.user,
                 scene="content_generate",
                 service=service,
-                status=AICallLog.STATUS_FAILED,
+                result=build_ai_result_metadata(
+                    ai_generated=False,
+                    result_source=AIChatService.RESULT_SOURCE_FALLBACK,
+                    fallback_reason="exception",
+                    llm_invoked=bool(service.get_last_observation().get("llm_invoked")),
+                ),
                 error_message=str(exc),
             )
             return api_response(data={"scene": "content_generate", "results": [], "message": fallback_ai_reply("content_generate")})
@@ -5610,8 +5894,11 @@ class AdminAIAnomalyReportView(APIView):
                 user=request.user,
                 scene="anomaly_report",
                 service=service,
-                status=AICallLog.STATUS_FAILED,
-                error_message="AI service unavailable",
+                result=build_ai_result_metadata(
+                    ai_generated=False,
+                    result_source=AIChatService.RESULT_SOURCE_FALLBACK,
+                    fallback_reason="service_unavailable",
+                ),
             )
             return api_response(data={"scene": "anomaly_report", "anomalies": [], "message": fallback_ai_reply("anomaly_report")})
         try:
@@ -5635,7 +5922,6 @@ class AdminAIAnomalyReportView(APIView):
                 scene="anomaly_report",
                 service=service,
                 result=result,
-                status=AICallLog.STATUS_SUCCESS,
                 latency_ms=latency_ms,
             )
             return api_response(data={
@@ -5648,7 +5934,12 @@ class AdminAIAnomalyReportView(APIView):
                 user=request.user,
                 scene="anomaly_report",
                 service=service,
-                status=AICallLog.STATUS_FAILED,
+                result=build_ai_result_metadata(
+                    ai_generated=False,
+                    result_source=AIChatService.RESULT_SOURCE_FALLBACK,
+                    fallback_reason="exception",
+                    llm_invoked=bool(service.get_last_observation().get("llm_invoked")),
+                ),
                 error_message=str(exc),
             )
             return api_response(data={"scene": "anomaly_report", "anomalies": [], "summary": "", "message": fallback_ai_reply("anomaly_report")})
@@ -5671,8 +5962,11 @@ class AdminAIOrderAnomalySummaryView(APIView):
                 user=request.user,
                 scene="order_anomaly",
                 service=service,
-                status=AICallLog.STATUS_FAILED,
-                error_message="AI service unavailable",
+                result=build_ai_result_metadata(
+                    ai_generated=False,
+                    result_source=AIChatService.RESULT_SOURCE_RULE_ENGINE,
+                    fallback_reason="service_unavailable",
+                ),
             )
             return api_response(data={"scene": "order_anomaly", "anomalies": [], "summary": fallback_ai_reply("anomaly_report")})
         try:
@@ -5684,7 +5978,6 @@ class AdminAIOrderAnomalySummaryView(APIView):
                 scene="order_anomaly",
                 service=service,
                 result=result,
-                status=AICallLog.STATUS_SUCCESS,
                 latency_ms=latency_ms,
             )
             return api_response(data={
@@ -5697,7 +5990,12 @@ class AdminAIOrderAnomalySummaryView(APIView):
                 user=request.user,
                 scene="order_anomaly",
                 service=service,
-                status=AICallLog.STATUS_FAILED,
+                result=build_ai_result_metadata(
+                    ai_generated=False,
+                    result_source=AIChatService.RESULT_SOURCE_FALLBACK,
+                    fallback_reason="exception",
+                    llm_invoked=bool(service.get_last_observation().get("llm_invoked")),
+                ),
                 error_message=str(exc),
             )
             return api_response(data={"scene": "order_anomaly", "anomalies": [], "summary": fallback_ai_reply("anomaly_report")})
@@ -5711,10 +6009,13 @@ class AdminAICallLogsView(APIView):
         queryset = AICallLog.objects.select_related("user").order_by("-created_at")
         scene = request.query_params.get("scene")
         status = request.query_params.get("status")
+        result_source = request.query_params.get("result_source")
         if scene:
             queryset = queryset.filter(scene=scene)
         if status:
             queryset = queryset.filter(status=status)
+        if result_source:
+            queryset = queryset.filter(result_source=result_source)
         page, page_size = get_page_params(request)
         page_qs, total = paginate_queryset(queryset, page, page_size)
         items = AICallLogSerializer(page_qs, many=True).data
@@ -5736,14 +6037,22 @@ class AdminAIUsageStatsView(APIView):
         if end_date:
             queryset = queryset.filter(created_at__date__lte=end_date)
 
-        success_count = queryset.filter(status="success").count()
-        failed_count = queryset.filter(status__in=["failed", "timeout", "quota_exceeded"]).count()
+        success_count = queryset.filter(status=AICallLog.STATUS_SUCCESS).count()
+        fallback_count = queryset.filter(status=AICallLog.STATUS_FALLBACK).count()
+        rule_based_count = queryset.filter(status=AICallLog.STATUS_RULE_BASED).count()
+        failed_count = queryset.filter(
+            status__in=[AICallLog.STATUS_FAILED, AICallLog.STATUS_TIMEOUT, AICallLog.STATUS_QUOTA_EXCEEDED]
+        ).count()
+        llm_invoked_count = queryset.filter(llm_invoked=True).count()
 
         by_scene_qs = queryset.values("scene").annotate(calls=Count("id"))
         by_scene = {item["scene"]: item["calls"] for item in by_scene_qs}
 
         by_provider_qs = queryset.values("provider").annotate(calls=Count("id"))
         by_provider = {item["provider"]: item["calls"] for item in by_provider_qs}
+
+        by_source_qs = queryset.values("result_source").annotate(calls=Count("id"))
+        by_source = {item["result_source"]: item["calls"] for item in by_source_qs}
 
         totals = queryset.aggregate(
             total_calls=Count("id"),
@@ -5753,11 +6062,15 @@ class AdminAIUsageStatsView(APIView):
         return api_response(data={
             "total_calls": totals["total_calls"] or 0,
             "success_calls": success_count,
+            "fallback_calls": fallback_count,
+            "rule_based_calls": rule_based_count,
             "failed_calls": failed_count,
+            "llm_invoked_calls": llm_invoked_count,
             "total_tokens": totals["total_tokens"] or 0,
             "total_cost": float(totals["total_cost"] or 0),
             "by_scene": by_scene,
             "by_provider": by_provider,
+            "by_source": by_source,
         })
 
 
@@ -5795,13 +6108,16 @@ class UserAIRecommendationsView(APIView):
                 user=request.user,
                 scene="recommendations",
                 service=service,
-                status=AICallLog.STATUS_FAILED,
-                error_message="AI service unavailable",
+                result=build_ai_result_metadata(
+                    ai_generated=False,
+                    result_source=AIChatService.RESULT_SOURCE_FALLBACK,
+                    fallback_reason="service_unavailable",
+                ),
             )
             return api_response(data={"scene": "recommendations", "recommendations": _fallback()})
         try:
             started_at = time.perf_counter()
-            raw_recs = service.generate_recommendations(
+            result = service.generate_recommendations(
                 user=request.user,
                 scene=data.get("scene", "home"),
                 hotel_id=data.get("hotel_id"),
@@ -5820,14 +6136,14 @@ class UserAIRecommendationsView(APIView):
                     "rating": rec.get("rating"),
                     "reason": rec.get("recommendation_reason", ""),
                 }
-                for rec in raw_recs
+                for rec in result.get("recommendations", [])
             ]
             latency_ms = int((time.perf_counter() - started_at) * 1000)
             record_ai_call_log(
                 user=request.user,
                 scene="recommendations",
                 service=service,
-                status=AICallLog.STATUS_SUCCESS,
+                result=result,
                 latency_ms=latency_ms,
             )
             return api_response(data={"scene": "recommendations", "recommendations": recommendations})
@@ -5836,7 +6152,12 @@ class UserAIRecommendationsView(APIView):
                 user=request.user,
                 scene="recommendations",
                 service=service,
-                status=AICallLog.STATUS_FAILED,
+                result=build_ai_result_metadata(
+                    ai_generated=False,
+                    result_source=AIChatService.RESULT_SOURCE_FALLBACK,
+                    fallback_reason="exception",
+                    llm_invoked=bool(service.get_last_observation().get("llm_invoked")),
+                ),
                 error_message=str(exc),
             )
             return api_response(data={"scene": "recommendations", "recommendations": _fallback()})
@@ -5917,8 +6238,11 @@ class UserAIHotelCompareView(APIView):
                 user=request.user,
                 scene="hotel_compare",
                 service=service,
-                status=AICallLog.STATUS_FAILED,
-                error_message="AI service unavailable",
+                result=build_ai_result_metadata(
+                    ai_generated=False,
+                    result_source=AIChatService.RESULT_SOURCE_FALLBACK,
+                    fallback_reason="service_unavailable",
+                ),
             )
             return api_response(data=self._build_fallback_result(hotels, fallback_ai_reply("hotel_compare")))
 
@@ -5939,7 +6263,6 @@ class UserAIHotelCompareView(APIView):
                 scene="hotel_compare",
                 service=service,
                 result=result,
-                status=AICallLog.STATUS_SUCCESS,
                 latency_ms=latency_ms,
             )
 
@@ -5959,7 +6282,12 @@ class UserAIHotelCompareView(APIView):
                 user=request.user,
                 scene="hotel_compare",
                 service=service,
-                status=AICallLog.STATUS_FAILED,
+                result=build_ai_result_metadata(
+                    ai_generated=False,
+                    result_source=AIChatService.RESULT_SOURCE_FALLBACK,
+                    fallback_reason="exception",
+                    llm_invoked=bool(service.get_last_observation().get("llm_invoked")),
+                ),
                 error_message=str(exc),
             )
             logger.exception("AI 酒店对比失败，hotel_ids=%s", hotel_ids)

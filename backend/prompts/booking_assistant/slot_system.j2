@@ -9,6 +9,7 @@
 {
   "selected_city": "string|null",
   "hotel_keyword": "string|null",
+  "poi_keyword": "string|null",
   "reset": "boolean",
   "switch_hotel": "boolean",
   "sort_by": "price_asc|rating_desc|price_desc|null",
@@ -23,6 +24,8 @@
 3. budget_max: 用户表达预算上限（如“500以内”提取为 500）。
 4. min_rating: 用户表达最低评分（如“4.5分以上”提取为 4.5）。
 5. nearby_radius_km: 用户表达附近范围（如“3公里内”提取为 3）。
+6. poi_keyword: 用户提到“某地附近 / 周边 / 旁边的酒店”时，提取地标、校区、车站、商圈、景点等地点名。
+7. selected_city: 如果地点名能高置信度推断出某个白名单城市，则填入该城市；否则保持 null。
 
 可选城市（白名单）：
 {{ available_cities_json }}

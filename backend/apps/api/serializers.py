@@ -1277,7 +1277,8 @@ class AICallLogSerializer(serializers.ModelSerializer):
         fields = [
             "id", "username", "scene", "provider", "model",
             "input_tokens", "output_tokens", "total_tokens",
-            "cost_estimate", "latency_ms", "status", "error_message", "created_at",
+            "cost_estimate", "latency_ms", "status", "result_source", "llm_invoked",
+            "fallback_reason", "error_message", "created_at",
         ]
 
     def get_username(self, obj):

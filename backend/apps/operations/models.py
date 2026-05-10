@@ -98,14 +98,26 @@ class SystemNotice(models.Model):
 class AICallLog(models.Model):
     """AI 调用日志模型，记录每次 LLM 调用的元数据和费用估算。"""
     STATUS_SUCCESS = "success"
+    STATUS_FALLBACK = "fallback"
+    STATUS_RULE_BASED = "rule_based"
     STATUS_FAILED = "failed"
     STATUS_TIMEOUT = "timeout"
     STATUS_QUOTA_EXCEEDED = "quota_exceeded"
+    RESULT_SOURCE_LLM = "llm"
+    RESULT_SOURCE_FALLBACK = "fallback"
+    RESULT_SOURCE_RULE_ENGINE = "rule_engine"
     STATUS_CHOICES = [
         (STATUS_SUCCESS, "成功"),
+        (STATUS_FALLBACK, "兜底"),
+        (STATUS_RULE_BASED, "规则"),
         (STATUS_FAILED, "失败"),
         (STATUS_TIMEOUT, "超时"),
         (STATUS_QUOTA_EXCEEDED, "超额"),
+    ]
+    RESULT_SOURCE_CHOICES = [
+        (RESULT_SOURCE_LLM, "模型生成"),
+        (RESULT_SOURCE_FALLBACK, "兜底结果"),
+        (RESULT_SOURCE_RULE_ENGINE, "规则引擎"),
     ]
 
     user = models.ForeignKey(
@@ -123,6 +135,9 @@ class AICallLog(models.Model):
     cost_estimate = models.DecimalField(max_digits=10, decimal_places=6, default=0, help_text="估算费用（元）")
     latency_ms = models.PositiveIntegerField(default=0, help_text="响应延迟（毫秒）")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_SUCCESS)
+    result_source = models.CharField(max_length=20, choices=RESULT_SOURCE_CHOICES, default=RESULT_SOURCE_LLM)
+    llm_invoked = models.BooleanField(default=False, help_text="本次请求是否真实尝试调用了模型")
+    fallback_reason = models.CharField(max_length=100, blank=True, help_text="走兜底或规则路径的原因")
     error_message = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -133,6 +148,7 @@ class AICallLog(models.Model):
         indexes = [
             models.Index(fields=["scene", "-created_at"], name="idx_aicalllog_scene_created"),
             models.Index(fields=["status", "-created_at"], name="idx_aicalllog_status_created"),
+            models.Index(fields=["result_source", "-created_at"], name="idx_aicalllog_source_created"),
         ]
 
     def __str__(self) -> str:
